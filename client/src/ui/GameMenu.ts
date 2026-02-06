@@ -1,16 +1,21 @@
+import type { CityListItem } from '@cityzen/shared';
+
 export interface GameMenuCallbacks {
   onSave: () => void;
-  onLoad: () => void;
+  onLoadCity: (cityId: string) => void;
   onRestart: () => void;
   onEndGame: () => void;
   onOptions: () => void;
   onResume: () => void;
+  fetchCities: () => Promise<CityListItem[]>;
 }
 
 export class GameMenu {
   private overlay: HTMLDivElement;
   private callbacks: GameMenuCallbacks;
   private statusEl: HTMLDivElement;
+  private menuPanel: HTMLDivElement;
+  private loadPanel: HTMLDivElement;
 
   constructor(parent: HTMLElement, callbacks: GameMenuCallbacks) {
     this.callbacks = callbacks;
@@ -19,7 +24,7 @@ export class GameMenu {
     this.overlay.className = 'menu-overlay';
     this.overlay.style.display = 'none';
     this.overlay.innerHTML = `
-      <div class="menu-panel">
+      <div class="menu-panel" id="menu-main-panel">
         <h2>Menu</h2>
         <div class="menu-status" id="menu-status"></div>
         <div class="menu-buttons">
@@ -32,10 +37,26 @@ export class GameMenu {
         </div>
         <div class="menu-hint">Press ESC to close</div>
       </div>
+      <div class="menu-panel load-panel" id="menu-load-panel" style="display:none">
+        <h2>Load City</h2>
+        <div class="load-city-list" id="load-city-list">
+          <div class="load-loading">Loading...</div>
+        </div>
+        <div style="margin-top:16px">
+          <button class="menu-btn" id="load-back-btn">Back</button>
+        </div>
+      </div>
     `;
     parent.appendChild(this.overlay);
 
     this.statusEl = this.overlay.querySelector('#menu-status')!;
+    this.menuPanel = this.overlay.querySelector('#menu-main-panel')!;
+    this.loadPanel = this.overlay.querySelector('#menu-load-panel')!;
+
+    this.overlay.querySelector('#load-back-btn')!.addEventListener('click', () => {
+      this.loadPanel.style.display = 'none';
+      this.menuPanel.style.display = '';
+    });
 
     // Click outside panel to close
     this.overlay.addEventListener('click', (e) => {
@@ -49,7 +70,7 @@ export class GameMenu {
         switch (action) {
           case 'resume': this.hide(); this.callbacks.onResume(); break;
           case 'save': this.callbacks.onSave(); break;
-          case 'load': this.hide(); this.callbacks.onLoad(); break;
+          case 'load': this.showLoadPanel(); break;
           case 'options': this.hide(); this.callbacks.onOptions(); break;
           case 'restart': this.handleRestart(); break;
           case 'end': this.handleEndGame(); break;
@@ -60,6 +81,8 @@ export class GameMenu {
 
   show(): void {
     this.overlay.style.display = 'flex';
+    this.menuPanel.style.display = '';
+    this.loadPanel.style.display = 'none';
     this.statusEl.textContent = '';
   }
 
@@ -69,6 +92,40 @@ export class GameMenu {
 
   isVisible(): boolean {
     return this.overlay.style.display !== 'none';
+  }
+
+  private async showLoadPanel(): Promise<void> {
+    this.menuPanel.style.display = 'none';
+    this.loadPanel.style.display = '';
+
+    const listEl = this.overlay.querySelector('#load-city-list')!;
+    listEl.innerHTML = '<div class="load-loading">Loading...</div>';
+
+    try {
+      const cities = await this.callbacks.fetchCities();
+      listEl.innerHTML = '';
+
+      if (cities.length === 0) {
+        listEl.innerHTML = '<div class="load-empty">No saved cities found</div>';
+        return;
+      }
+
+      for (const city of cities) {
+        const item = document.createElement('div');
+        item.className = 'load-city-item';
+        item.innerHTML = `
+          <span class="load-city-name">${city.name}</span>
+          <span class="load-city-stats">${city.buildingCount} buildings, ${city.playerCount} online</span>
+        `;
+        item.addEventListener('click', () => {
+          this.hide();
+          this.callbacks.onLoadCity(city.id);
+        });
+        listEl.appendChild(item);
+      }
+    } catch {
+      listEl.innerHTML = '<div class="load-empty">Failed to load city list</div>';
+    }
   }
 
   showStatus(message: string): void {

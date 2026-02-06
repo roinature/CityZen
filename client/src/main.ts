@@ -181,15 +181,17 @@ const gameMenu = new GameMenu(uiRoot, {
     socketClient.save();
     gameMenu.showStatus('Saving...');
   },
-  onLoad: () => {
-    // Go back to lobby to pick a city to load
+  onLoadCity: (cityId: string) => {
     socketClient.leave();
     cityState = null;
     cityRenderer.clear();
     carManager.clear();
     clearSession();
-    lobby.show();
-    fetchCityList();
+    socketClient.joinCity(cityId, currentPlayerName);
+  },
+  fetchCities: async () => {
+    const res = await fetch(`${SERVER_URL}/api/cities`);
+    return res.json();
   },
   onRestart: () => {
     cityRenderer.clear();

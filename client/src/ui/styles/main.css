@@ -331,6 +331,53 @@ body {
   opacity: 0.4;
 }
 
+/* Load game panel */
+.load-panel {
+  min-width: 380px;
+  max-width: 440px;
+}
+
+.load-city-list {
+  max-height: 300px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.load-city-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.load-city-item:hover {
+  background: rgba(76, 175, 80, 0.2);
+}
+
+.load-city-name {
+  font-weight: bold;
+  font-size: 14px;
+}
+
+.load-city-stats {
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.load-loading,
+.load-empty {
+  padding: 20px;
+  text-align: center;
+  opacity: 0.5;
+  font-size: 13px;
+}
+
 /* Options panel */
 .options-panel {
   background: #1a1a2e;

@@ -213,32 +213,191 @@ export class CarManager {
     const group = new THREE.Group();
     const color = CAR_COLORS[Math.floor(Math.random() * CAR_COLORS.length)];
 
-    // Car body
-    const body = new THREE.Mesh(
-      new THREE.BoxGeometry(0.5, 0.18, 0.28),
-      new THREE.MeshLambertMaterial({ color }),
-    );
-    body.position.y = 0.09;
-    body.castShadow = true;
-    group.add(body);
+    // Materials
+    const bodyMaterial = new THREE.MeshStandardMaterial({
+      color,
+      metalness: 0.6,
+      roughness: 0.4
+    });
+    const glassMaterial = new THREE.MeshStandardMaterial({
+      color: 0x88ccff,
+      metalness: 0.9,
+      roughness: 0.1,
+      transparent: true,
+      opacity: 0.7
+    });
+    const wheelMaterial = new THREE.MeshStandardMaterial({
+      color: 0x1a1a1a,
+      metalness: 0.3,
+      roughness: 0.8
+    });
+    const hubcapMaterial = new THREE.MeshStandardMaterial({
+      color: 0xcccccc,
+      metalness: 0.8,
+      roughness: 0.2
+    });
+    const headlightMaterial = new THREE.MeshStandardMaterial({
+      color: 0xffffee,
+      emissive: 0xffffaa,
+      emissiveIntensity: 0.3
+    });
+    const taillightMaterial = new THREE.MeshStandardMaterial({
+      color: 0xff2222,
+      emissive: 0xff0000,
+      emissiveIntensity: 0.4
+    });
+    const grilleMaterial = new THREE.MeshStandardMaterial({
+      color: 0x222222,
+      metalness: 0.5,
+      roughness: 0.5
+    });
 
-    // Car roof / cabin
-    const cabin = new THREE.Mesh(
-      new THREE.BoxGeometry(0.25, 0.14, 0.24),
-      new THREE.MeshLambertMaterial({ color }),
+    // Main car body - lower section (longer, sleeker)
+    const bodyLower = new THREE.Mesh(
+      new THREE.BoxGeometry(0.55, 0.12, 0.26),
+      bodyMaterial,
     );
-    cabin.position.set(-0.02, 0.22, 0);
+    bodyLower.position.y = 0.08;
+    bodyLower.castShadow = true;
+    bodyLower.receiveShadow = true;
+    group.add(bodyLower);
+
+    // Hood (front sloped section)
+    const hood = new THREE.Mesh(
+      new THREE.BoxGeometry(0.18, 0.04, 0.24),
+      bodyMaterial,
+    );
+    hood.position.set(0.16, 0.14, 0);
+    hood.rotation.z = -0.15;
+    hood.castShadow = true;
+    group.add(hood);
+
+    // Trunk (rear section)
+    const trunk = new THREE.Mesh(
+      new THREE.BoxGeometry(0.12, 0.04, 0.24),
+      bodyMaterial,
+    );
+    trunk.position.set(-0.20, 0.14, 0);
+    trunk.rotation.z = 0.1;
+    trunk.castShadow = true;
+    group.add(trunk);
+
+    // Cabin (passenger compartment)
+    const cabin = new THREE.Mesh(
+      new THREE.BoxGeometry(0.22, 0.11, 0.22),
+      bodyMaterial,
+    );
+    cabin.position.set(-0.02, 0.19, 0);
     cabin.castShadow = true;
     group.add(cabin);
 
-    // Windshield
-    const windshield = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.22, 0.12),
-      new THREE.MeshLambertMaterial({ color: 0x90caf9, side: THREE.DoubleSide }),
+    // Front windshield (angled)
+    const frontWindshield = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.20, 0.10),
+      glassMaterial,
     );
-    windshield.position.set(0.12, 0.22, 0);
-    windshield.rotation.y = Math.PI / 2;
-    group.add(windshield);
+    frontWindshield.position.set(0.08, 0.20, 0);
+    frontWindshield.rotation.y = Math.PI / 2;
+    frontWindshield.rotation.x = 0;
+    frontWindshield.rotation.z = -0.4;
+    group.add(frontWindshield);
+
+    // Rear windshield (angled)
+    const rearWindshield = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.18, 0.09),
+      glassMaterial,
+    );
+    rearWindshield.position.set(-0.12, 0.20, 0);
+    rearWindshield.rotation.y = Math.PI / 2;
+    rearWindshield.rotation.z = 0.35;
+    group.add(rearWindshield);
+
+    // Side windows
+    const sideWindowGeom = new THREE.PlaneGeometry(0.18, 0.08);
+    const leftWindow = new THREE.Mesh(sideWindowGeom, glassMaterial);
+    leftWindow.position.set(-0.02, 0.21, 0.112);
+    leftWindow.rotation.y = 0;
+    group.add(leftWindow);
+
+    const rightWindow = new THREE.Mesh(sideWindowGeom, glassMaterial);
+    rightWindow.position.set(-0.02, 0.21, -0.112);
+    rightWindow.rotation.y = Math.PI;
+    group.add(rightWindow);
+
+    // Wheels (4 cylinders with hubcaps)
+    const wheelGeom = new THREE.CylinderGeometry(0.05, 0.05, 0.04, 12);
+    const hubcapGeom = new THREE.CylinderGeometry(0.03, 0.03, 0.01, 8);
+    const wheelPositions = [
+      { x: 0.16, z: 0.13 },   // front-left
+      { x: 0.16, z: -0.13 },  // front-right
+      { x: -0.16, z: 0.13 },  // rear-left
+      { x: -0.16, z: -0.13 }, // rear-right
+    ];
+
+    for (const pos of wheelPositions) {
+      const wheel = new THREE.Mesh(wheelGeom, wheelMaterial);
+      wheel.position.set(pos.x, 0.05, pos.z);
+      wheel.rotation.x = Math.PI / 2;
+      wheel.castShadow = true;
+      group.add(wheel);
+
+      // Hubcap
+      const hubcap = new THREE.Mesh(hubcapGeom, hubcapMaterial);
+      hubcap.position.set(pos.x, 0.05, pos.z > 0 ? pos.z + 0.02 : pos.z - 0.02);
+      hubcap.rotation.x = Math.PI / 2;
+      group.add(hubcap);
+    }
+
+    // Headlights (front)
+    const headlightGeom = new THREE.BoxGeometry(0.02, 0.03, 0.06);
+    const leftHeadlight = new THREE.Mesh(headlightGeom, headlightMaterial);
+    leftHeadlight.position.set(0.27, 0.10, 0.08);
+    group.add(leftHeadlight);
+
+    const rightHeadlight = new THREE.Mesh(headlightGeom, headlightMaterial);
+    rightHeadlight.position.set(0.27, 0.10, -0.08);
+    group.add(rightHeadlight);
+
+    // Taillights (rear)
+    const taillightGeom = new THREE.BoxGeometry(0.02, 0.03, 0.05);
+    const leftTaillight = new THREE.Mesh(taillightGeom, taillightMaterial);
+    leftTaillight.position.set(-0.27, 0.10, 0.09);
+    group.add(leftTaillight);
+
+    const rightTaillight = new THREE.Mesh(taillightGeom, taillightMaterial);
+    rightTaillight.position.set(-0.27, 0.10, -0.09);
+    group.add(rightTaillight);
+
+    // Front grille
+    const grille = new THREE.Mesh(
+      new THREE.BoxGeometry(0.01, 0.05, 0.14),
+      grilleMaterial,
+    );
+    grille.position.set(0.275, 0.09, 0);
+    group.add(grille);
+
+    // Bumpers
+    const bumperMaterial = new THREE.MeshStandardMaterial({
+      color: 0x333333,
+      metalness: 0.4,
+      roughness: 0.6
+    });
+    const frontBumper = new THREE.Mesh(
+      new THREE.BoxGeometry(0.03, 0.04, 0.26),
+      bumperMaterial,
+    );
+    frontBumper.position.set(0.28, 0.04, 0);
+    group.add(frontBumper);
+
+    const rearBumper = new THREE.Mesh(
+      new THREE.BoxGeometry(0.03, 0.04, 0.26),
+      bumperMaterial,
+    );
+    rearBumper.position.set(-0.28, 0.04, 0);
+    group.add(rearBumper);
+
+    // Scale the whole car slightly for better visibility
+    group.scale.set(0.9, 0.9, 0.9);
 
     return group;
   }
