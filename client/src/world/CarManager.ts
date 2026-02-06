@@ -11,6 +11,8 @@ const CAR_COLORS = [0xe53935, 0x1e88e5, 0xfdd835, 0x43a047, 0xff8f00, 0x8e24aa];
 const CAR_SPEED = 2.5; // cells per second
 const MAX_CARS = 20;
 const CARS_PER_ROAD = 0.15; // spawn ratio: 1 car per ~7 road tiles
+const COLLISION_DISTANCE = 0.4; // minimum distance before stopping (in cells)
+const SLOW_DOWN_DISTANCE = 0.8; // distance at which cars start slowing down
 
 interface Direction {
   dx: number;
@@ -34,6 +36,8 @@ interface Car {
   progress: number;
   /** Current movement direction */
   direction: Direction;
+  /** Current speed multiplier (0 = stopped, 1 = full speed) */
+  speedMultiplier: number;
 }
 
 export class CarManager {
@@ -63,7 +67,25 @@ export class CarManager {
     this.adjustCarCount();
 
     for (const car of this.cars) {
-      car.progress += CAR_SPEED * deltaTime;
+      // Check for cars ahead and adjust speed
+      const carAhead = this.getCarAhead(car);
+      if (carAhead) {
+        const distance = this.getDistanceToCar(car, carAhead);
+        if (distance < COLLISION_DISTANCE) {
+          // Too close - stop completely
+          car.speedMultiplier = 0;
+        } else if (distance < SLOW_DOWN_DISTANCE) {
+          // Gradually slow down as we approach
+          car.speedMultiplier = Math.max(0.1, (distance - COLLISION_DISTANCE) / (SLOW_DOWN_DISTANCE - COLLISION_DISTANCE));
+        } else {
+          car.speedMultiplier = 1;
+        }
+      } else {
+        // No car ahead - full speed
+        car.speedMultiplier = Math.min(1, car.speedMultiplier + deltaTime * 2); // Gradually accelerate
+      }
+
+      car.progress += CAR_SPEED * deltaTime * car.speedMultiplier;
 
       if (car.progress >= 1) {
         // Arrived at destination cell — pick next cell
@@ -77,8 +99,102 @@ export class CarManager {
       const worldTo = this.gridToWorld(car.to);
       const x = worldFrom.x + (worldTo.x - worldFrom.x) * car.progress;
       const z = worldFrom.z + (worldTo.z - worldFrom.z) * car.progress;
-      car.mesh.position.set(x, 0.15, z);
+
+      // Calculate lane offset - cars drive on the right side of the road
+      // Offset perpendicular to direction of travel
+      const laneOffset = this.getLaneOffset(car.direction);
+      car.mesh.position.set(x + laneOffset.x, 0.15, z + laneOffset.z);
     }
+  }
+
+  /** Calculate the lane offset for right-hand traffic */
+  private getLaneOffset(direction: Direction): { x: number; z: number } {
+    // Offset is perpendicular to direction, to the right
+    // For direction (dx, dz), right perpendicular is (dz, -dx)
+    const laneWidth = CELL_SIZE * 0.22; // Offset from center
+    return {
+      x: direction.dz * laneWidth,
+      z: -direction.dx * laneWidth,
+    };
+  }
+
+  /** Find a car that is ahead of this car in its direction of travel */
+  private getCarAhead(car: Car): Car | null {
+    let closestCar: Car | null = null;
+    let closestDistance = Infinity;
+
+    for (const other of this.cars) {
+      if (other === car) continue;
+
+      // Check if the other car is ahead of this car
+      if (this.isCarAhead(car, other)) {
+        const distance = this.getDistanceToCar(car, other);
+        if (distance < closestDistance) {
+          closestDistance = distance;
+          closestCar = other;
+        }
+      }
+    }
+
+    return closestCar;
+  }
+
+  /** Check if 'other' car is ahead of 'car' in its direction of travel */
+  private isCarAhead(car: Car, other: Car): boolean {
+    // Cars traveling in opposite directions are in different lanes - ignore them
+    const dirDot = car.direction.dx * other.direction.dx + car.direction.dz * other.direction.dz;
+    if (dirDot < 0) {
+      // Opposite directions - different lanes, no collision possible
+      return false;
+    }
+
+    // Get actual world positions (including lane offsets)
+    const carPos = this.getCarWorldPosition(car);
+    const otherPos = this.getCarWorldPosition(other);
+
+    // Vector from car to other
+    const toOther = {
+      x: otherPos.x - carPos.x,
+      z: otherPos.z - carPos.z,
+    };
+
+    // Normalize car's direction
+    const dirLength = Math.sqrt(car.direction.dx * car.direction.dx + car.direction.dz * car.direction.dz);
+    const normDir = {
+      dx: car.direction.dx / dirLength,
+      dz: car.direction.dz / dirLength,
+    };
+
+    // Dot product to check if other is in front
+    const dot = toOther.x * normDir.dx + toOther.z * normDir.dz;
+
+    // Cross product magnitude for lateral distance (should be small for same lane)
+    const cross = Math.abs(toOther.x * normDir.dz - toOther.z * normDir.dx);
+
+    // Other car is ahead if:
+    // 1. Dot product is positive (in front)
+    // 2. Lateral distance is small (same lane - tighter check now that we have lanes)
+    return dot > 0 && cross < CELL_SIZE * 0.35;
+  }
+
+  /** Get the world position of a car (including lane offset) */
+  private getCarWorldPosition(car: Car): { x: number; z: number } {
+    const worldFrom = this.gridToWorld(car.from);
+    const worldTo = this.gridToWorld(car.to);
+    const laneOffset = this.getLaneOffset(car.direction);
+    return {
+      x: worldFrom.x + (worldTo.x - worldFrom.x) * car.progress + laneOffset.x,
+      z: worldFrom.z + (worldTo.z - worldFrom.z) * car.progress + laneOffset.z,
+    };
+  }
+
+  /** Calculate distance between two cars in world units */
+  private getDistanceToCar(car: Car, other: Car): number {
+    const carPos = this.getCarWorldPosition(car);
+    const otherPos = this.getCarWorldPosition(other);
+    const dx = otherPos.x - carPos.x;
+    const dz = otherPos.z - carPos.z;
+    return Math.sqrt(dx * dx + dz * dz) / CELL_SIZE; // Return distance in cells
   }
 
   clear(): void {
@@ -149,6 +265,7 @@ export class CarManager {
       to: { ...from },
       progress: 0,
       direction: DIRECTIONS[Math.floor(Math.random() * DIRECTIONS.length)],
+      speedMultiplier: 1,
     };
 
     this.pickNextCell(car);
@@ -403,7 +520,9 @@ export class CarManager {
   }
 
   private rotateCarMesh(car: Car): void {
-    const angle = Math.atan2(car.direction.dx, car.direction.dz);
+    // Car model is built with front facing +X direction
+    // atan2(dz, dx) gives angle from +X axis, which matches our car orientation
+    const angle = Math.atan2(-car.direction.dz, car.direction.dx);
     car.mesh.rotation.y = angle;
   }
 
