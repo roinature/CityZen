@@ -1,0 +1,396 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  overflow: hidden;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+#game-canvas {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+}
+
+#ui-root {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+#ui-root > * {
+  pointer-events: auto;
+}
+
+/* Resource Bar */
+.resource-bar {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 20px;
+  background: rgba(0, 0, 0, 0.7);
+  padding: 8px 20px;
+  border-radius: 8px;
+  color: white;
+  font-size: 14px;
+  backdrop-filter: blur(4px);
+}
+
+.resource-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.resource-icon {
+  font-size: 16px;
+}
+
+.resource-value {
+  font-weight: bold;
+  font-variant-numeric: tabular-nums;
+  min-width: 40px;
+}
+
+/* Toolbar */
+.toolbar {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.7);
+  padding: 10px 16px;
+  border-radius: 10px;
+  backdrop-filter: blur(4px);
+}
+
+.toolbar-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 14px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 2px solid transparent;
+  border-radius: 8px;
+  color: white;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.15s ease;
+  min-width: 70px;
+}
+
+.toolbar-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.toolbar-btn.active {
+  border-color: #4CAF50;
+  background: rgba(76, 175, 80, 0.3);
+}
+
+.toolbar-btn .building-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+}
+
+.toolbar-btn .cost {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+/* Lobby */
+.lobby-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(8px);
+}
+
+.lobby-panel {
+  background: #1a1a2e;
+  border-radius: 12px;
+  padding: 32px;
+  color: white;
+  min-width: 400px;
+  max-width: 500px;
+}
+
+.lobby-panel h1 {
+  font-size: 28px;
+  margin-bottom: 24px;
+  text-align: center;
+}
+
+.lobby-panel input {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 6px;
+  border: 1px solid #333;
+  background: #16213e;
+  color: white;
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+
+.lobby-panel input:focus {
+  outline: none;
+  border-color: #4CAF50;
+}
+
+.lobby-panel button {
+  width: 100%;
+  padding: 10px;
+  border-radius: 6px;
+  border: none;
+  background: #4CAF50;
+  color: white;
+  font-size: 14px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: background 0.15s;
+}
+
+.lobby-panel button:hover {
+  background: #43a047;
+}
+
+.city-list {
+  margin-top: 20px;
+}
+
+.city-list h3 {
+  margin-bottom: 8px;
+  font-size: 14px;
+  opacity: 0.7;
+}
+
+.city-list-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+  margin-bottom: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.city-list-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.city-list-item .city-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.city-list-item .city-name {
+  font-weight: bold;
+}
+
+.city-list-item .city-stats {
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+/* Info panel */
+.info-panel {
+  position: absolute;
+  top: 60px;
+  right: 16px;
+  background: rgba(0, 0, 0, 0.7);
+  padding: 12px 16px;
+  border-radius: 8px;
+  color: white;
+  font-size: 13px;
+  backdrop-filter: blur(4px);
+  min-width: 160px;
+}
+
+.info-panel .label {
+  opacity: 0.6;
+  font-size: 11px;
+  text-transform: uppercase;
+  margin-bottom: 2px;
+}
+
+/* Menu button (top-left) */
+.menu-toggle {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  background: rgba(0, 0, 0, 0.7);
+  border: none;
+  color: white;
+  padding: 8px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: bold;
+  backdrop-filter: blur(4px);
+  transition: background 0.15s;
+}
+
+.menu-toggle:hover {
+  background: rgba(0, 0, 0, 0.85);
+}
+
+/* Game Menu overlay */
+.menu-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(6px);
+  z-index: 100;
+}
+
+.menu-panel {
+  background: #1a1a2e;
+  border-radius: 12px;
+  padding: 28px 36px;
+  color: white;
+  min-width: 320px;
+  text-align: center;
+}
+
+.menu-panel h2 {
+  font-size: 24px;
+  margin-bottom: 8px;
+}
+
+.menu-status {
+  min-height: 20px;
+  font-size: 13px;
+  color: #4CAF50;
+  margin-bottom: 8px;
+}
+
+.menu-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.menu-btn {
+  padding: 10px 20px;
+  border-radius: 8px;
+  border: none;
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.15s;
+  font-weight: 500;
+}
+
+.menu-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.menu-btn-danger {
+  color: #ef5350;
+}
+
+.menu-btn-danger:hover {
+  background: rgba(239, 83, 80, 0.2);
+}
+
+.menu-btn-confirm {
+  background: rgba(255, 152, 0, 0.3) !important;
+  color: #ffb74d !important;
+}
+
+.menu-hint {
+  margin-top: 16px;
+  font-size: 11px;
+  opacity: 0.4;
+}
+
+/* Options panel */
+.options-panel {
+  background: #1a1a2e;
+  border-radius: 12px;
+  padding: 28px 36px;
+  color: white;
+  min-width: 380px;
+}
+
+.options-panel h2 {
+  font-size: 24px;
+  margin-bottom: 20px;
+  text-align: center;
+}
+
+.options-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.option-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.option-row label {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.option-row input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: #4CAF50;
+}
+
+.option-row input[type="range"] {
+  flex: 1;
+  accent-color: #4CAF50;
+  cursor: pointer;
+}
+
+.option-value {
+  font-size: 13px;
+  min-width: 28px;
+  text-align: right;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+
+.options-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.options-buttons .menu-btn {
+  flex: 1;
+}
