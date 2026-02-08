@@ -22,6 +22,7 @@ import { SocketClient } from './network/SocketClient.js';
 
 const SERVER_URL = 'http://localhost:3030';
 const SESSION_KEY = 'cityzen_session';
+const PLAYER_ID_KEY = 'cityzen_player_id';
 
 interface SavedSession {
   cityId: string;
@@ -48,8 +49,18 @@ function clearSession(): void {
   localStorage.removeItem(SESSION_KEY);
 }
 
+function getOrCreatePlayerId(): string {
+  let id = localStorage.getItem(PLAYER_ID_KEY);
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem(PLAYER_ID_KEY, id);
+  }
+  return id;
+}
+
 // --- State ---
 let cityState: CityState | null = null;
+const playerId = getOrCreatePlayerId();
 
 // --- Scene setup ---
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
@@ -125,11 +136,13 @@ const socketClient = new SocketClient(SERVER_URL, {
     resourceBar.update(cityState.resources, cityState);
   },
 
-  onResourcesUpdate: (resources, tick) => {
+  onResourcesUpdate: (resources, tick, clock) => {
     if (!cityState) return;
     cityState.resources = resources;
     cityState.tick = tick;
+    cityState.clock = clock;
     resourceBar.update(resources, cityState);
+    resourceBar.updateClock(clock);
   },
 
   onZoneGrowth: (payload) => {
@@ -172,6 +185,11 @@ resourceBar.onTaxRateChange = (rate) => {
   socketClient.setTaxRate(rate);
 };
 
+// --- Game speed wiring ---
+resourceBar.onGameSpeedChange = (speed) => {
+  socketClient.setGameSpeed(speed);
+};
+
 buildMode.onPlace = (pos, type) => {
   socketClient.placeBuilding(pos, type);
 };
@@ -184,11 +202,11 @@ buildMode.onDemolish = (pos) => {
 const lobby = new Lobby(uiRoot, {
   onCreate: (cityName, playerName) => {
     currentPlayerName = playerName;
-    socketClient.createCity(cityName, playerName);
+    socketClient.createCity(cityName, playerName, playerId);
   },
   onJoin: (cityId, playerName) => {
     currentPlayerName = playerName;
-    socketClient.joinCity(cityId, playerName);
+    socketClient.joinCity(cityId, playerName, playerId);
   },
 });
 
@@ -204,7 +222,7 @@ const gameMenu = new GameMenu(uiRoot, {
     cityRenderer.clear();
     carManager.clear();
     clearSession();
-    socketClient.joinCity(cityId, currentPlayerName);
+    socketClient.joinCity(cityId, currentPlayerName, playerId);
   },
   fetchCities: async () => {
     const res = await fetch(`${SERVER_URL}/api/cities`);
@@ -309,7 +327,7 @@ async function fetchCityList(): Promise<void> {
 const savedSession = loadSession();
 if (savedSession) {
   currentPlayerName = savedSession.playerName;
-  socketClient.joinCity(savedSession.cityId, savedSession.playerName);
+  socketClient.joinCity(savedSession.cityId, savedSession.playerName, playerId);
 } else {
   fetchCityList();
 }

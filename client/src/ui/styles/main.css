@@ -549,3 +549,39 @@ body {
 .options-buttons .menu-btn {
   flex: 1;
 }
+
+/* Clock & Speed Controls */
+.clock-item {
+  flex-direction: column;
+  gap: 3px !important;
+  align-items: center;
+}
+
+.speed-controls {
+  display: flex;
+  gap: 2px;
+}
+
+.speed-btn {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.6);
+  padding: 1px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: bold;
+  transition: all 0.15s ease;
+  font-family: monospace;
+}
+
+.speed-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+}
+
+.speed-btn.active {
+  background: rgba(76, 175, 80, 0.4);
+  border-color: #4CAF50;
+  color: white;
+}

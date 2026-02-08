@@ -5,11 +5,13 @@ import {
   type CityStatePayload,
   type BuildingPlacedPayload,
   type BuildingDemolishedPayload,
+  type ResourcesUpdatePayload,
   type ZoneGrowthPayload,
   type ErrorPayload,
   type Position,
   type BuildingType,
   type ResourceState,
+  type GameClock,
   type Player,
 } from '@cityzen/shared';
 
@@ -17,7 +19,7 @@ export interface GameCallbacks {
   onCityState: (city: import('@cityzen/shared').CityState, players: Player[]) => void;
   onBuildingPlaced: (payload: BuildingPlacedPayload) => void;
   onBuildingDemolished: (payload: BuildingDemolishedPayload) => void;
-  onResourcesUpdate: (resources: ResourceState, tick: number) => void;
+  onResourcesUpdate: (resources: ResourceState, tick: number, clock: GameClock) => void;
   onZoneGrowth: (payload: ZoneGrowthPayload) => void;
   onPlayerJoined: (player: Player) => void;
   onPlayerLeft: (playerId: string) => void;
@@ -48,8 +50,8 @@ export class SocketClient {
       this.callbacks.onBuildingDemolished(payload);
     });
 
-    this.socket.on(S2C.RESOURCES_UPDATE, (payload: { resources: ResourceState; tick: number }) => {
-      this.callbacks.onResourcesUpdate(payload.resources, payload.tick);
+    this.socket.on(S2C.RESOURCES_UPDATE, (payload: ResourcesUpdatePayload) => {
+      this.callbacks.onResourcesUpdate(payload.resources, payload.tick, payload.clock);
     });
 
     this.socket.on(S2C.ZONE_GROWTH, (payload: ZoneGrowthPayload) => {
@@ -73,12 +75,12 @@ export class SocketClient {
     });
   }
 
-  createCity(cityName: string, playerName: string): void {
-    this.socket.emit(C2S.CREATE_CITY, { cityName, playerName });
+  createCity(cityName: string, playerName: string, playerId?: string): void {
+    this.socket.emit(C2S.CREATE_CITY, { cityName, playerName, playerId });
   }
 
-  joinCity(cityId: string, playerName: string): void {
-    this.socket.emit(C2S.JOIN_CITY, { cityId, playerName });
+  joinCity(cityId: string, playerName: string, playerId?: string): void {
+    this.socket.emit(C2S.JOIN_CITY, { cityId, playerName, playerId });
   }
 
   placeBuilding(position: Position, type: BuildingType): void {
@@ -103,6 +105,10 @@ export class SocketClient {
 
   setUnlimitedMoney(enabled: boolean): void {
     this.socket.emit(C2S.SET_UNLIMITED_MONEY, { enabled });
+  }
+
+  setGameSpeed(speed: number): void {
+    this.socket.emit(C2S.SET_GAME_SPEED, { speed });
   }
 
   leave(): void {

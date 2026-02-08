@@ -1,12 +1,16 @@
 import {
   type ResourceState,
   type CityState,
+  type GameClock,
   calculateTaxRevenue,
   calculateMaintenance,
   MIN_TAX_RATE,
   MAX_TAX_RATE,
   TAX_RATE_STEP,
+  MAX_GAME_SPEED,
 } from '@cityzen/shared';
+
+const SPEED_LABELS = ['||', '>', '>>', '>>>'];
 
 export class ResourceBar {
   private container: HTMLDivElement;
@@ -21,14 +25,22 @@ export class ResourceBar {
   private demandResEl: HTMLDivElement;
   private demandComEl: HTMLDivElement;
   private demandIndEl: HTMLDivElement;
+  private clockEl: HTMLSpanElement;
+  private speedBtns: HTMLButtonElement[] = [];
 
   onTaxRateChange: ((rate: number) => void) | null = null;
+  onGameSpeedChange: ((speed: number) => void) | null = null;
   private unlimited = false;
 
   constructor(parent: HTMLElement) {
     this.container = document.createElement('div');
     this.container.className = 'resource-bar';
     this.container.innerHTML = `
+      <div class="resource-item clock-item">
+        <span class="resource-value" id="res-clock">Day 0, Year 1</span>
+        <div class="speed-controls" id="speed-controls"></div>
+      </div>
+      <div class="resource-separator"></div>
       <div class="resource-item">
         <span class="resource-icon">$</span>
         <span class="resource-value" id="res-money">5000</span>
@@ -78,6 +90,7 @@ export class ResourceBar {
     `;
     parent.appendChild(this.container);
 
+    this.clockEl = this.container.querySelector('#res-clock')!;
     this.moneyEl = this.container.querySelector('#res-money')!;
     this.popEl = this.container.querySelector('#res-pop')!;
     this.happyEl = this.container.querySelector('#res-happy')!;
@@ -90,6 +103,21 @@ export class ResourceBar {
     this.demandComEl = this.container.querySelector('#demand-com')!;
     this.demandIndEl = this.container.querySelector('#demand-ind')!;
 
+    // Build speed control buttons
+    const speedContainer = this.container.querySelector('#speed-controls')!;
+    for (let i = 0; i <= MAX_GAME_SPEED; i++) {
+      const btn = document.createElement('button');
+      btn.className = 'speed-btn';
+      btn.textContent = SPEED_LABELS[i];
+      btn.title = i === 0 ? 'Pause' : `${i}x speed`;
+      const speed = i;
+      btn.addEventListener('click', () => {
+        this.onGameSpeedChange?.(speed);
+      });
+      speedContainer.appendChild(btn);
+      this.speedBtns.push(btn);
+    }
+
     this.taxSlider.addEventListener('input', () => {
       const rate = parseInt(this.taxSlider.value, 10);
       this.taxLabel.textContent = `Tax: ${rate}%`;
@@ -99,6 +127,13 @@ export class ResourceBar {
 
   setUnlimitedMoney(enabled: boolean): void {
     this.unlimited = enabled;
+  }
+
+  updateClock(clock: GameClock): void {
+    this.clockEl.textContent = `Day ${clock.gameDay + 1}, Year ${clock.gameYear}`;
+    for (let i = 0; i < this.speedBtns.length; i++) {
+      this.speedBtns[i].classList.toggle('active', i === clock.speed);
+    }
   }
 
   update(resources: ResourceState, state?: CityState): void {
@@ -121,6 +156,11 @@ export class ResourceBar {
       this.maintenanceEl.textContent = `-$${maintenance}`;
       this.netIncomeEl.textContent = net >= 0 ? `+$${net}` : `-$${Math.abs(net)}`;
       this.netIncomeEl.className = `resource-value ${net >= 0 ? 'budget-positive' : 'budget-negative'}`;
+
+      // Update clock from state
+      if (state.clock) {
+        this.updateClock(state.clock);
+      }
     }
 
     // Update demand bars

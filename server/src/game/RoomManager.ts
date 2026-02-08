@@ -3,6 +3,7 @@ import { v4 as uuid } from 'uuid';
 import type { CityListItem } from '@cityzen/shared';
 import { GameRoom } from './GameRoom.js';
 import { loadCityState, listSavedCities } from '../persistence/jsonStore.js';
+import { loadPlayerProfile } from '../persistence/playerStore.js';
 
 export class RoomManager {
   private rooms: Map<string, GameRoom> = new Map();
@@ -12,9 +13,9 @@ export class RoomManager {
     this.io = io;
   }
 
-  async createRoom(cityName: string): Promise<GameRoom> {
+  async createRoom(cityName: string, ownerId: string, ownerName: string): Promise<GameRoom> {
     const id = uuid();
-    const room = new GameRoom(this.io, id, cityName);
+    const room = new GameRoom(this.io, id, cityName, ownerId, ownerName);
     room.start();
     this.rooms.set(id, room);
     return room;
@@ -31,7 +32,14 @@ export class RoomManager {
     const state = await loadCityState(cityId);
     if (!state) return null;
 
-    const room = new GameRoom(this.io, cityId, state.name, state);
+    // Try to resolve owner name
+    let ownerName = 'Unknown';
+    if (state.ownerId) {
+      const profile = await loadPlayerProfile(state.ownerId);
+      if (profile) ownerName = profile.name;
+    }
+
+    const room = new GameRoom(this.io, cityId, state.name, state.ownerId || '', ownerName, state);
     room.start();
     this.rooms.set(cityId, room);
     return room;
@@ -49,6 +57,7 @@ export class RoomManager {
     return Array.from(this.rooms.values()).map(room => ({
       id: room.id,
       name: room.state.name,
+      ownerName: room.ownerName,
       playerCount: room.players.size,
       buildingCount: room.state.buildings.length,
     }));
@@ -65,9 +74,15 @@ export class RoomManager {
       if (!activeIds.has(id)) {
         const state = await loadCityState(id);
         if (state) {
+          let ownerName = 'Unknown';
+          if (state.ownerId) {
+            const profile = await loadPlayerProfile(state.ownerId);
+            if (profile) ownerName = profile.name;
+          }
           savedCities.push({
             id: state.id,
             name: state.name,
+            ownerName,
             playerCount: 0,
             buildingCount: state.buildings.length,
           });

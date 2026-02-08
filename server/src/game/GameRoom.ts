@@ -5,6 +5,7 @@ import {
   type Player,
   type PlacedBuilding,
   type Position,
+  type GameClock,
   BuildingType,
   isZone,
   S2C,
@@ -13,12 +14,23 @@ import {
   INITIAL_RESOURCES,
   MIN_TAX_RATE,
   MAX_TAX_RATE,
+  DEFAULT_GAME_SPEED,
+  MAX_GAME_SPEED,
   BUILDING_DEFS,
   createEmptyGrid,
   canPlaceBuilding,
   simulateTick,
 } from '@cityzen/shared';
 import { saveCityState } from '../persistence/jsonStore.js';
+
+function createInitialClock(): GameClock {
+  return {
+    gameTimeMs: 0,
+    speed: DEFAULT_GAME_SPEED,
+    gameDay: 0,
+    gameYear: 1,
+  };
+}
 
 export class GameRoom {
   id: string;
@@ -29,20 +41,31 @@ export class GameRoom {
   private io: SocketIOServer;
   private debouncedSaveTimer: ReturnType<typeof setTimeout> | null = null;
   unlimitedMoney = false;
+  ownerName = 'Unknown';
 
-  constructor(io: SocketIOServer, id: string, name: string, existingState?: CityState) {
+  constructor(io: SocketIOServer, id: string, name: string, ownerId: string, ownerName: string, existingState?: CityState) {
     this.io = io;
     this.id = id;
+    this.ownerName = ownerName;
     this.state = existingState ?? {
       id,
       name,
+      ownerId,
       grid: createEmptyGrid(),
       buildings: [],
       resources: { ...INITIAL_RESOURCES },
+      clock: createInitialClock(),
       tick: 0,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
+    // Ensure existing states have clock and ownerId
+    if (!this.state.clock) {
+      this.state.clock = createInitialClock();
+    }
+    if (!this.state.ownerId) {
+      this.state.ownerId = ownerId;
+    }
   }
 
   start(): void {
@@ -57,8 +80,12 @@ export class GameRoom {
 
       this.state = simulateTick(this.state);
 
-      // Broadcast resources (includes demand)
-      this.broadcast(S2C.RESOURCES_UPDATE, { resources: this.state.resources, tick: this.state.tick });
+      // Broadcast resources with clock
+      this.broadcast(S2C.RESOURCES_UPDATE, {
+        resources: this.state.resources,
+        tick: this.state.tick,
+        clock: this.state.clock,
+      });
 
       // Detect zone growth and broadcast
       const grownBuildings: Array<{ id: string; developmentLevel: number; developedAt: number }> = [];
@@ -138,7 +165,7 @@ export class GameRoom {
       type,
       position,
       placedBy: playerId,
-      placedAt: Date.now(),
+      placedAt: this.state.tick,
       ...(isZone(type) ? { developmentLevel: 0 } : {}),
     };
 
@@ -215,6 +242,7 @@ export class GameRoom {
     this.broadcast(S2C.RESOURCES_UPDATE, {
       resources: this.state.resources,
       tick: this.state.tick,
+      clock: this.state.clock,
     });
 
     this.saveAfterMutation();
@@ -223,11 +251,28 @@ export class GameRoom {
 
   setUnlimitedMoney(enabled: boolean): void {
     this.unlimitedMoney = enabled;
-    // Broadcast updated resources so UI reflects state
     this.broadcast(S2C.RESOURCES_UPDATE, {
       resources: this.state.resources,
       tick: this.state.tick,
+      clock: this.state.clock,
     });
+  }
+
+  setGameSpeed(speed: number): { success: boolean; error?: string } {
+    if (speed < 0 || speed > MAX_GAME_SPEED || !Number.isInteger(speed)) {
+      return { success: false, error: 'Invalid game speed' };
+    }
+
+    this.state.clock.speed = speed;
+    this.state.updatedAt = Date.now();
+
+    this.broadcast(S2C.RESOURCES_UPDATE, {
+      resources: this.state.resources,
+      tick: this.state.tick,
+      clock: this.state.clock,
+    });
+
+    return { success: true };
   }
 
   restart(): void {
@@ -236,6 +281,7 @@ export class GameRoom {
       grid: createEmptyGrid(),
       buildings: [],
       resources: { ...INITIAL_RESOURCES },
+      clock: createInitialClock(),
       tick: 0,
       updatedAt: Date.now(),
     };

@@ -62,6 +62,22 @@ export class BuildingFactory {
     group.add(canopy);
   }
 
+  private textureLoader = new THREE.TextureLoader();
+  private textures: Record<string, THREE.Texture> = {};
+
+  private getTexture(path: string, wrapS = 1, wrapT = 1): THREE.Texture {
+    if (!this.textures[path]) {
+      const texture = this.textureLoader.load(path);
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapT = THREE.RepeatWrapping;
+      texture.colorSpace = THREE.SRGBColorSpace;
+      this.textures[path] = texture;
+    }
+    const tex = this.textures[path].clone();
+    tex.repeat.set(wrapS, wrapT);
+    return tex;
+  }
+
   private createZone(group: THREE.Group, building: PlacedBuilding): void {
     const def = BUILDING_DEFS[building.type];
     const w = def.size.w * CELL_SIZE;
@@ -122,15 +138,53 @@ export class BuildingFactory {
       indicator.position.y = 0.025;
       group.add(indicator);
     } else {
-      // Developed: building geometry
+      // Developed: building geometry with textures
       const levelDef = ZONE_LEVELS[building.type as ZoneType][level - 1];
-      const bw = w * (0.5 + level * 0.1);
-      const bd = d * (0.5 + level * 0.1);
+      // Slightly different logic for width/depth to match original visuals
+      const bw = w * (0.8 + level * 0.05); // Make them fill more of the lot
+      const bd = d * (0.8 + level * 0.05);
       const h = levelDef.height;
 
       const geometry = new THREE.BoxGeometry(bw, h, bd);
-      const material = new THREE.MeshLambertMaterial({ color: levelDef.color });
-      const mesh = new THREE.Mesh(geometry, material);
+
+      // Map textures based on zone type
+      let facadeTexPath = '/textures/buildings/residential_facade.png';
+      let roofTexPath = '/textures/buildings/residential_roof.png';
+
+      if (building.type === BuildingType.ZONE_COMMERCIAL) {
+        facadeTexPath = '/textures/buildings/commercial_facade.png';
+        roofTexPath = '/textures/buildings/commercial_roof.png';
+      } else if (building.type === BuildingType.ZONE_INDUSTRIAL) {
+        facadeTexPath = '/textures/buildings/industrial_facade.png';
+        roofTexPath = '/textures/buildings/industrial_roof.png';
+      }
+
+      // Scale textures
+      // Facade: repeat horizontally based on width, vertically based on height
+      const roofRepeatW = Math.max(1, bw / 2);
+      const roofRepeatD = Math.max(1, bd / 2);
+
+      const matRoof = new THREE.MeshLambertMaterial({
+        map: this.getTexture(roofTexPath, roofRepeatW, roofRepeatD)
+      });
+
+      // We use specialized materials for sides to handle specific aspect ratios
+      // SideX (Right/Left) uses depth as width
+      const matSideX = new THREE.MeshLambertMaterial({ map: this.getTexture(facadeTexPath, bd / 2, h / 2) });
+      // SideZ (Front/Back) uses width as width
+      const matSideZ = new THREE.MeshLambertMaterial({ map: this.getTexture(facadeTexPath, bw / 2, h / 2) });
+      const matBottom = new THREE.MeshLambertMaterial({ color: 0x333333 });
+
+      const materials = [
+        matSideX, // Right
+        matSideX, // Left
+        matRoof,  // Top
+        matBottom,// Bottom
+        matSideZ, // Front
+        matSideZ  // Back
+      ];
+
+      const mesh = new THREE.Mesh(geometry, materials);
       mesh.position.y = h / 2;
       mesh.castShadow = true;
       mesh.receiveShadow = true;

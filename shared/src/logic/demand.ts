@@ -50,6 +50,7 @@ export interface ZoneGrowthResult {
 export function processZoneGrowth(state: CityState): ZoneGrowthResult {
   const demand = state.resources.demand;
   const result: ZoneGrowthResult = { upgradedBuildings: [] };
+  const currentTick = state.tick;
 
   for (const building of state.buildings) {
     if (!isZone(building.type)) continue;
@@ -65,19 +66,19 @@ export function processZoneGrowth(state: CityState): ZoneGrowthResult {
 
     if (zoneDemand < MIN_DEMAND_TO_GROW) continue;
 
-    // Check time requirement
+    // Check time requirement (now using game ticks instead of Date.now())
     const levelDefs = ZONE_LEVELS[building.type as ZoneType];
     const nextLevelIndex = level; // level 0 -> index 0 = level 1 def
     const ticksRequired = levelDefs[nextLevelIndex].ticksRequired;
     const referenceTime = building.developedAt ?? building.placedAt;
-    const ticksSinceLast = Math.floor((Date.now() - referenceTime) / 2000);
+    const ticksSinceLast = currentTick - referenceTime;
 
     if (ticksSinceLast < ticksRequired) continue;
 
     // Random chance scaled by demand
     if (Math.random() < ZONE_GROWTH_CHANCE * zoneDemand) {
       building.developmentLevel = level + 1;
-      building.developedAt = Date.now();
+      building.developedAt = currentTick;
       result.upgradedBuildings.push(building.id);
     }
   }

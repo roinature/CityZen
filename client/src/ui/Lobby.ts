@@ -50,7 +50,7 @@ export class Lobby {
       item.innerHTML = `
         <div class="city-info">
           <span class="city-name">${city.name}</span>
-          <span class="city-stats">${city.buildingCount} buildings, ${city.playerCount} online</span>
+          <span class="city-stats">Owner: ${city.ownerName} | ${city.buildingCount} buildings, ${city.playerCount} online</span>
         </div>
       `;
       item.addEventListener('click', () => {

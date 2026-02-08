@@ -4,6 +4,7 @@ import type { CityState } from './city.js';
 import type { ResourceState } from './resources.js';
 import type { PlacedBuilding } from './building.js';
 import type { Player } from './player.js';
+import type { GameClock } from './time.js';
 
 // Client -> Server event names
 export const C2S = {
@@ -16,6 +17,7 @@ export const C2S = {
   RESTART: 'city:restart',
   SET_TAX_RATE: 'city:taxRate',
   SET_UNLIMITED_MONEY: 'city:unlimitedMoney',
+  SET_GAME_SPEED: 'city:gameSpeed',
 } as const;
 
 // Server -> Client event names
@@ -36,11 +38,13 @@ export const S2C = {
 export interface JoinCityPayload {
   cityId: string;
   playerName: string;
+  playerId?: string;
 }
 
 export interface CreateCityPayload {
   cityName: string;
   playerName: string;
+  playerId?: string;
 }
 
 export interface PlaceBuildingPayload {
@@ -60,6 +64,10 @@ export interface SetUnlimitedMoneyPayload {
   enabled: boolean;
 }
 
+export interface SetGameSpeedPayload {
+  speed: number;
+}
+
 // Server -> Client payloads
 export interface CityStatePayload {
   city: CityState;
@@ -75,6 +83,12 @@ export interface BuildingDemolishedPayload {
   position: Position;
   buildingId: string;
   resources: ResourceState;
+}
+
+export interface ResourcesUpdatePayload {
+  resources: ResourceState;
+  tick: number;
+  clock: GameClock;
 }
 
 export interface ZoneGrowthPayload {
@@ -93,6 +107,7 @@ export interface ErrorPayload {
 export interface CityListItem {
   id: string;
   name: string;
+  ownerName: string;
   playerCount: number;
   buildingCount: number;
 }

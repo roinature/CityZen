@@ -1,4 +1,5 @@
 import { Server as SocketIOServer, Socket } from 'socket.io';
+import { v4 as uuid } from 'uuid';
 import {
   C2S,
   S2C,
@@ -8,8 +9,10 @@ import {
   type DemolishPayload,
   type SetTaxRatePayload,
   type SetUnlimitedMoneyPayload,
+  type SetGameSpeedPayload,
 } from '@cityzen/shared';
 import { RoomManager } from '../game/RoomManager.js';
+import { savePlayerProfile, loadPlayerProfile } from '../persistence/playerStore.js';
 
 export function setupSocketHandlers(io: SocketIOServer, roomManager: RoomManager): void {
   io.on('connection', (socket: Socket) => {
@@ -24,8 +27,29 @@ export function setupSocketHandlers(io: SocketIOServer, roomManager: RoomManager
           leaveCurrentRoom(socket, roomManager, currentRoomId);
         }
 
-        const room = await roomManager.createRoom(payload.cityName);
+        // Resolve or create persistent player ID
+        const playerId = payload.playerId || uuid();
+        const profile = await loadPlayerProfile(playerId);
+        if (!profile) {
+          await savePlayerProfile({
+            id: playerId,
+            name: payload.playerName,
+            ownedCityId: null,
+            createdAt: Date.now(),
+          });
+        }
+
+        const room = await roomManager.createRoom(payload.cityName, playerId, payload.playerName);
         currentRoomId = room.id;
+
+        // Update player profile with owned city
+        await savePlayerProfile({
+          id: playerId,
+          name: payload.playerName,
+          ownedCityId: room.id,
+          createdAt: profile?.createdAt ?? Date.now(),
+        });
+
         room.addPlayer(socket, payload.playerName);
 
         console.log(`City created: "${payload.cityName}" (${room.id}) by ${payload.playerName}`);
@@ -38,6 +62,19 @@ export function setupSocketHandlers(io: SocketIOServer, roomManager: RoomManager
       try {
         if (currentRoomId) {
           leaveCurrentRoom(socket, roomManager, currentRoomId);
+        }
+
+        // Ensure player profile exists
+        if (payload.playerId) {
+          const profile = await loadPlayerProfile(payload.playerId);
+          if (!profile) {
+            await savePlayerProfile({
+              id: payload.playerId,
+              name: payload.playerName,
+              ownedCityId: null,
+              createdAt: Date.now(),
+            });
+          }
         }
 
         const room = await roomManager.getOrLoadRoom(payload.cityId);
@@ -107,6 +144,16 @@ export function setupSocketHandlers(io: SocketIOServer, roomManager: RoomManager
       room.setUnlimitedMoney(payload.enabled);
     });
 
+    socket.on(C2S.SET_GAME_SPEED, (payload: SetGameSpeedPayload) => {
+      if (!currentRoomId) return;
+      const room = roomManager.getRoom(currentRoomId);
+      if (!room) return;
+      const result = room.setGameSpeed(payload.speed);
+      if (!result.success) {
+        socket.emit(S2C.ERROR, { message: result.error!, code: 'SPEED_FAILED' });
+      }
+    });
+
     socket.on(C2S.SAVE, async () => {
       if (!currentRoomId) return;
       const room = roomManager.getRoom(currentRoomId);
@@ -152,7 +199,7 @@ function leaveCurrentRoom(socket: Socket, roomManager: RoomManager, roomId: stri
           roomManager.removeRoom(roomId);
           console.log(`Room ${roomId} removed (empty)`);
         }
-      }, 60000); // Keep room alive for 1 minute after last player leaves
+      }, 60000);
     }
   }
 }
