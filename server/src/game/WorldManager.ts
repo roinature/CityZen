@@ -36,7 +36,7 @@ export class WorldManager {
       return false;
     }
     return !this.world.cities.some(
-      c => c.position.wx === position.wx && c.position.wz === position.wz
+      (c: WorldCityEntry) => c.position.wx === position.wx && c.position.wz === position.wz
     );
   }
 
@@ -74,7 +74,7 @@ export class WorldManager {
   }
 
   updateCityPopulation(cityId: string, population: number): void {
-    const entry = this.world.cities.find(c => c.cityId === cityId);
+    const entry = this.world.cities.find((c: WorldCityEntry) => c.cityId === cityId);
     if (entry) {
       entry.population = population;
     }
@@ -85,7 +85,7 @@ export class WorldManager {
    * Called when roads are placed or demolished near grid edges.
    */
   updateCityEdgeConnections(cityId: string, connections: EdgeConnection[]): void {
-    const entry = this.world.cities.find(c => c.cityId === cityId);
+    const entry = this.world.cities.find((c: WorldCityEntry) => c.cityId === cityId);
     if (entry) {
       entry.edgeConnections = connections;
       this.world.updatedAt = Date.now();
@@ -102,7 +102,7 @@ export class WorldManager {
    * Get the city entry for a given cityId
    */
   getCityEntry(cityId: string): WorldCityEntry | undefined {
-    return this.world.cities.find(c => c.cityId === cityId);
+    return this.world.cities.find((c: WorldCityEntry) => c.cityId === cityId);
   }
 
   async save(): Promise<void> {
