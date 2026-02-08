@@ -1,43 +1,45 @@
-import { promises as fs } from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import prisma from './prismaClient.js';
 import type { CityState } from '@cityzen/shared';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = path.join(__dirname, '../../data');
+import type { Prisma } from '../generated/prisma/index.js';
 
 export async function saveCityState(cityId: string, state: CityState): Promise<void> {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  const filePath = path.join(DATA_DIR, `${cityId}.json`);
-  await fs.writeFile(filePath, JSON.stringify(state, null, 2));
+  await prisma.city.upsert({
+    where: { id: cityId },
+    update: {
+      name: state.name,
+      ownerId: state.ownerId || '',
+      state: state as unknown as Prisma.InputJsonValue,
+      updatedAt: new Date(),
+    },
+    create: {
+      id: cityId,
+      name: state.name,
+      ownerId: state.ownerId || '',
+      state: state as unknown as Prisma.InputJsonValue,
+    },
+  });
 }
 
 export async function loadCityState(cityId: string): Promise<CityState | null> {
-  const filePath = path.join(DATA_DIR, `${cityId}.json`);
-  try {
-    const data = await fs.readFile(filePath, 'utf-8');
-    return JSON.parse(data) as CityState;
-  } catch {
-    return null;
-  }
+  const city = await prisma.city.findUnique({
+    where: { id: cityId },
+  });
+
+  if (!city) return null;
+  return city.state as unknown as CityState;
 }
 
 export async function listSavedCities(): Promise<string[]> {
-  try {
-    const files = await fs.readdir(DATA_DIR);
-    return files
-      .filter(f => f.endsWith('.json'))
-      .map(f => f.replace('.json', ''));
-  } catch {
-    return [];
-  }
+  const cities = await prisma.city.findMany({
+    select: { id: true },
+  });
+  return cities.map(c => c.id);
 }
 
 export async function deleteCityState(cityId: string): Promise<void> {
-  const filePath = path.join(DATA_DIR, `${cityId}.json`);
-  try {
-    await fs.unlink(filePath);
-  } catch {
-    // File may not exist
-  }
+  await prisma.city.delete({
+    where: { id: cityId },
+  }).catch(() => {
+    // City may not exist
+  });
 }

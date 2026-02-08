@@ -1,23 +1,33 @@
-import { promises as fs } from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import prisma from './prismaClient.js';
 import type { PlayerProfile } from '@cityzen/shared';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PLAYERS_DIR = path.join(__dirname, '../../data/players');
-
 export async function savePlayerProfile(profile: PlayerProfile): Promise<void> {
-  await fs.mkdir(PLAYERS_DIR, { recursive: true });
-  const filePath = path.join(PLAYERS_DIR, `${profile.id}.json`);
-  await fs.writeFile(filePath, JSON.stringify(profile, null, 2));
+  await prisma.player.upsert({
+    where: { id: profile.id },
+    update: {
+      name: profile.name,
+      ownedCityId: profile.ownedCityId,
+      updatedAt: new Date(),
+    },
+    create: {
+      id: profile.id,
+      name: profile.name,
+      ownedCityId: profile.ownedCityId,
+    },
+  });
 }
 
 export async function loadPlayerProfile(playerId: string): Promise<PlayerProfile | null> {
-  const filePath = path.join(PLAYERS_DIR, `${playerId}.json`);
-  try {
-    const data = await fs.readFile(filePath, 'utf-8');
-    return JSON.parse(data) as PlayerProfile;
-  } catch {
-    return null;
-  }
+  const player = await prisma.player.findUnique({
+    where: { id: playerId },
+  });
+
+  if (!player) return null;
+
+  return {
+    id: player.id,
+    name: player.name,
+    ownedCityId: player.ownedCityId,
+    createdAt: player.createdAt.getTime(),
+  };
 }

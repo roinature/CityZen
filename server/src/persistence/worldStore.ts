@@ -1,25 +1,43 @@
-import { promises as fs } from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import prisma from './prismaClient.js';
 import type { WorldState } from '@cityzen/shared';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = path.join(__dirname, '../../data');
+import type { Prisma } from '../generated/prisma/index.js';
 
 export async function saveWorldState(state: WorldState): Promise<void> {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  const filePath = path.join(DATA_DIR, `world_${state.id}.json`);
-  await fs.writeFile(filePath, JSON.stringify(state, null, 2));
+  await prisma.world.upsert({
+    where: { id: state.id },
+    update: {
+      name: state.name,
+      gridSize: state.gridSize,
+      cities: state.cities as unknown as Prisma.InputJsonValue,
+      clock: state.clock as unknown as Prisma.InputJsonValue,
+      updatedAt: new Date(),
+    },
+    create: {
+      id: state.id,
+      name: state.name,
+      gridSize: state.gridSize,
+      cities: state.cities as unknown as Prisma.InputJsonValue,
+      clock: state.clock as unknown as Prisma.InputJsonValue,
+    },
+  });
 }
 
 export async function loadWorldState(worldId: string): Promise<WorldState | null> {
-  const filePath = path.join(DATA_DIR, `world_${worldId}.json`);
-  try {
-    const data = await fs.readFile(filePath, 'utf-8');
-    return JSON.parse(data) as WorldState;
-  } catch {
-    return null;
-  }
+  const world = await prisma.world.findUnique({
+    where: { id: worldId },
+  });
+
+  if (!world) return null;
+
+  return {
+    id: world.id,
+    name: world.name,
+    gridSize: world.gridSize,
+    cities: world.cities as unknown as WorldState['cities'],
+    clock: world.clock as unknown as WorldState['clock'],
+    createdAt: world.createdAt.getTime(),
+    updatedAt: world.updatedAt.getTime(),
+  };
 }
 
 export async function loadOrCreateDefaultWorld(): Promise<{ state: WorldState; isNew: boolean }> {

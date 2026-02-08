@@ -1,0 +1,41 @@
+// Prisma schema for CityZen game
+// Stores game state in Supabase PostgreSQL
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// Player profile - persistent user data
+model Player {
+  id          String   @id
+  name        String
+  ownedCityId String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+/// World - the shared game world containing all cities
+model World {
+  id        String   @id @default("default")
+  name      String   @default("World")
+  gridSize  Int      @default(8)
+  cities    Json     @default("[]")  // Array of WorldCityEntry
+  clock     Json     @default("{}")  // GameClock state
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// City - individual city state with all buildings and resources
+model City {
+  id        String   @id
+  name      String
+  ownerId   String
+  state     Json     // Full CityState as JSON
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
