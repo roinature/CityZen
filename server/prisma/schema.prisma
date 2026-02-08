@@ -30,12 +30,52 @@ model World {
   updatedAt DateTime @updatedAt
 }
 
-/// City - individual city state with all buildings and resources
+/// City - metadata, resources, and clock (no grid blob)
 model City {
   id        String   @id
   name      String
   ownerId   String
-  state     Json     // Full CityState as JSON
+
+  // Resources (flattened from ResourceState)
+  money      Float    @default(5000)
+  population Float    @default(0)
+  happiness  Float    @default(50)
+  taxRate    Int      @default(10)
+
+  // Demand (flattened from DemandState)
+  demandResidential Float @default(0.5)
+  demandCommercial  Float @default(0)
+  demandIndustrial  Float @default(0.3)
+
+  // Clock (flattened from GameClock)
+  clockGameTimeMs Float @default(0)
+  clockSpeed      Int   @default(1)
+  clockGameDay    Int   @default(0)
+  clockGameYear   Int   @default(1)
+
+  // Simulation
+  tick Int @default(0)
+
+  // Relations
+  buildings Building[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+/// Building - one record per placed building
+model Building {
+  id               String  @id
+  cityId           String
+  type             String  // BuildingType enum value
+  positionX        Int
+  positionZ        Int
+  placedBy         String
+  placedAt         Int     // Game tick
+  developmentLevel Int?    // 0-3 for zones, null for non-zones
+  developedAt      Int?    // Game tick of last development
+
+  city City @relation(fields: [cityId], references: [id], onDelete: Cascade)
+
+  @@index([cityId])
 }
