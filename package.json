@@ -15,5 +15,8 @@
   "devDependencies": {
     "concurrently": "^9.1.0",
     "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "@xdevplatform/xdk": "^0.4.0"
   }
 }

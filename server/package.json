@@ -10,12 +10,17 @@
   },
   "dependencies": {
     "@cityzen/shared": "*",
+    "twitter-api-v2": "^1.15.0",
+    "dotenv": "^17.2.4",
     "express": "^4.21.0",
+    "express-session": "^1.19.0",
     "socket.io": "^4.8.0",
+    "twitter-api-v2": "^1.29.0",
     "uuid": "^11.0.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
+    "@types/express-session": "^1.18.2",
     "@types/node": "^22.0.0",
     "@types/uuid": "^10.0.0",
     "tsx": "^4.19.0"

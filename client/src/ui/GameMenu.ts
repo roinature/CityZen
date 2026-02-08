@@ -32,6 +32,7 @@ export class GameMenu {
           <button class="menu-btn" data-action="save">Save Game</button>
           <button class="menu-btn" data-action="load">Load Game</button>
           <button class="menu-btn" data-action="options">Options</button>
+          <button class="menu-btn" data-action="connect-x" style="background-color: #000; color: #fff;">Connect X</button>
           <button class="menu-btn" data-action="restart">Restart City</button>
           <button class="menu-btn menu-btn-danger" data-action="end">End Game</button>
         </div>
@@ -72,6 +73,7 @@ export class GameMenu {
           case 'save': this.callbacks.onSave(); break;
           case 'load': this.showLoadPanel(); break;
           case 'options': this.hide(); this.callbacks.onOptions(); break;
+          case 'connect-x': window.location.href = '/api/auth/twitter'; break;
           case 'restart': this.handleRestart(); break;
           case 'end': this.handleEndGame(); break;
         }
