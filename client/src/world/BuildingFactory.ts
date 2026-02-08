@@ -715,4 +715,25 @@ export class BuildingFactory {
 
     return group;
   }
+
+  createGhostPreview(type: BuildingType): THREE.Group {
+    const def = BUILDING_DEFS[type];
+    const group = new THREE.Group();
+
+    const w = def.size.w * CELL_SIZE;
+    const d = def.size.d * CELL_SIZE;
+    const h = def.height || 0.1;
+
+    const geometry = new THREE.BoxGeometry(w * 0.85, h, d * 0.85);
+    const material = new THREE.MeshLambertMaterial({
+      color: 0x888888,
+      transparent: true,
+      opacity: 0.35,
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.y = h / 2;
+    group.add(mesh);
+
+    return group;
+  }
 }

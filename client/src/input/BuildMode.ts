@@ -16,7 +16,7 @@ import { BuildingFactory } from '../world/BuildingFactory.js';
 import { GridRaycaster } from './Raycaster.js';
 import type { ToolMode } from '../ui/ToolSidebar.js';
 
-function isContinuousType(type: BuildingType): boolean {
+function isLineDragType(type: BuildingType): boolean {
   return isRoad(type);
 }
 
@@ -24,9 +24,28 @@ function isRectDragType(type: BuildingType): boolean {
   return isZone(type);
 }
 
-function samePos(a: Position | null, b: Position | null): boolean {
-  if (!a || !b) return false;
-  return a.x === b.x && a.z === b.z;
+function computeStraightLine(start: Position, end: Position, stepW: number, stepD: number): Position[] {
+  const dx = end.x - start.x;
+  const dz = end.z - start.z;
+  const positions: Position[] = [];
+
+  if (Math.abs(dx) >= Math.abs(dz)) {
+    // Horizontal dominant
+    const dir = dx >= 0 ? 1 : -1;
+    const steps = Math.floor(Math.abs(dx) / stepW);
+    for (let i = 0; i <= steps; i++) {
+      positions.push({ x: start.x + i * stepW * dir, z: start.z });
+    }
+  } else {
+    // Vertical dominant
+    const dir = dz >= 0 ? 1 : -1;
+    const steps = Math.floor(Math.abs(dz) / stepD);
+    for (let i = 0; i <= steps; i++) {
+      positions.push({ x: start.x, z: start.z + i * stepD * dir });
+    }
+  }
+
+  return positions;
 }
 
 export class BuildMode {
@@ -43,10 +62,13 @@ export class BuildMode {
   private toolMode: ToolMode = 'pointer';
   private brushSize = 1;
 
-  // Continuous drawing state (for roads)
+  // Drag state (shared by line and rect drag)
   private isDragging = false;
-  private lastPlacedPos: Position | null = null;
   private unlimitedMoney = false;
+
+  // Line drag state (for roads)
+  private lineDragStart: Position | null = null;
+  private lineDragPreviewGroup: THREE.Group | null = null;
 
   // Rectangle drag state (for zones)
   private rectDragStart: Position | null = null;
@@ -55,6 +77,7 @@ export class BuildMode {
   onPlace: ((pos: Position, type: BuildingType) => void) | null = null;
   onDemolish: ((pos: Position) => void) | null = null;
   onEdgeRoadClick: ((direction: EdgeDirection, position: number) => void) | null = null;
+  onDragCostUpdate: ((cost: number | null) => void) | null = null;
 
   constructor(scene: THREE.Scene, camera: THREE.Camera) {
     this.scene = scene;
@@ -81,10 +104,12 @@ export class BuildMode {
   deselect(): void {
     this.selectedType = null;
     this.isDragging = false;
-    this.lastPlacedPos = null;
+    this.lineDragStart = null;
     this.rectDragStart = null;
     this.clearPreview();
+    this.clearLineDragPreview();
     this.clearRectPreview();
+    this.onDragCostUpdate?.(null);
   }
 
   getSelectedType(): BuildingType | null {
@@ -113,7 +138,15 @@ export class BuildMode {
   updatePreview(state: CityState | null): void {
     if (!this.selectedType || !this.currentHoverPos || !state) {
       this.clearPreview();
+      this.clearLineDragPreview();
       this.clearRectPreview();
+      return;
+    }
+
+    // Line drag preview for roads
+    if (this.isDragging && this.lineDragStart && isLineDragType(this.selectedType)) {
+      this.clearPreview();
+      this.updateLineDragPreview();
       return;
     }
 
@@ -126,6 +159,7 @@ export class BuildMode {
 
     // Normal single-cell preview
     this.clearRectPreview();
+    this.clearLineDragPreview();
 
     const result = canPlaceBuilding(
       state.grid, this.currentHoverPos, this.selectedType,
@@ -181,14 +215,6 @@ export class BuildMode {
   private onMouseMove(e: MouseEvent): void {
     const pos = this.raycaster.getGridPosition(e.clientX, e.clientY, this.camera);
     this.currentHoverPos = pos;
-
-    // Continuous drawing: place on every new cell while dragging (roads only)
-    if (this.isDragging && this.selectedType && isContinuousType(this.selectedType) && this.onPlace && pos) {
-      if (!samePos(pos, this.lastPlacedPos)) {
-        this.onPlace(pos, this.selectedType);
-        this.lastPlacedPos = { ...pos };
-      }
-    }
   }
 
   private onMouseDown(e: MouseEvent): void {
@@ -208,19 +234,26 @@ export class BuildMode {
       return;
     }
 
-    // Continuous drag for roads
-    if (isContinuousType(this.selectedType)) {
+    // Line drag for roads
+    if (isLineDragType(this.selectedType)) {
       this.isDragging = true;
-      this.lastPlacedPos = null;
-
       if (pos) {
-        this.onPlace(pos, this.selectedType);
-        this.lastPlacedPos = { ...pos };
+        this.lineDragStart = { ...pos };
       }
+      return;
     }
   }
 
   private onMouseUp(): void {
+    // Line drag release — place all roads along the straight line
+    if (this.isDragging && this.lineDragStart && this.selectedType && isLineDragType(this.selectedType) && this.onPlace && this.currentHoverPos) {
+      const def = BUILDING_DEFS[this.selectedType];
+      const positions = computeStraightLine(this.lineDragStart, this.currentHoverPos, def.size.w, def.size.d);
+      for (const pos of positions) {
+        this.onPlace(pos, this.selectedType);
+      }
+    }
+
     // Rectangle drag release — place all zones in the rectangle
     if (this.isDragging && this.rectDragStart && this.selectedType && isRectDragType(this.selectedType) && this.onPlace && this.currentHoverPos) {
       const minX = Math.min(this.rectDragStart.x, this.currentHoverPos.x);
@@ -236,9 +269,11 @@ export class BuildMode {
     }
 
     this.isDragging = false;
-    this.lastPlacedPos = null;
+    this.lineDragStart = null;
     this.rectDragStart = null;
+    this.clearLineDragPreview();
     this.clearRectPreview();
+    this.onDragCostUpdate?.(null);
   }
 
   private onClick(e: MouseEvent): void {
@@ -264,8 +299,8 @@ export class BuildMode {
 
     if (!this.selectedType || !this.onPlace) return;
 
-    // Skip click handler for continuous and rect-drag types — handled by mousedown/move/up
-    if (isContinuousType(this.selectedType) || isRectDragType(this.selectedType)) return;
+    // Skip click handler for line-drag and rect-drag types — handled by mousedown/move/up
+    if (isLineDragType(this.selectedType) || isRectDragType(this.selectedType)) return;
 
     const pos = this.raycaster.getGridPosition(e.clientX, e.clientY, this.camera);
     if (pos) {
@@ -333,6 +368,49 @@ export class BuildMode {
 
   setCityState(state: CityState | null): void {
     this.currentCityState = state;
+  }
+
+  private updateLineDragPreview(): void {
+    this.clearLineDragPreview();
+    if (!this.lineDragStart || !this.currentHoverPos || !this.selectedType) return;
+
+    const def = BUILDING_DEFS[this.selectedType];
+    const positions = computeStraightLine(this.lineDragStart, this.currentHoverPos, def.size.w, def.size.d);
+
+    this.lineDragPreviewGroup = new THREE.Group();
+    const w = def.size.w * CELL_SIZE;
+    const d = def.size.d * CELL_SIZE;
+
+    for (const pos of positions) {
+      const ghost = this.factory.createGhostPreview(this.selectedType);
+      ghost.position.set(
+        pos.x * CELL_SIZE + w / 2,
+        0,
+        pos.z * CELL_SIZE + d / 2,
+      );
+      this.lineDragPreviewGroup.add(ghost);
+    }
+
+    this.scene.add(this.lineDragPreviewGroup);
+
+    // Update cost indicator
+    const totalCost = positions.length * def.cost;
+    this.onDragCostUpdate?.(totalCost);
+  }
+
+  private clearLineDragPreview(): void {
+    if (this.lineDragPreviewGroup) {
+      this.scene.remove(this.lineDragPreviewGroup);
+      this.lineDragPreviewGroup.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          child.geometry.dispose();
+          if (child.material instanceof THREE.Material) {
+            child.material.dispose();
+          }
+        }
+      });
+      this.lineDragPreviewGroup = null;
+    }
   }
 
   private clearPreview(): void {

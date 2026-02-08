@@ -145,18 +145,21 @@ body {
     background-color 0.3s ease;
 }
 
-/* Toolbar */
+/* Toolbar (right side) */
 .toolbar {
   position: absolute;
-  bottom: 16px;
-  left: 50%;
-  transform: translateX(-50%);
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
+  flex-direction: column;
   gap: 4px;
   background: rgba(0, 0, 0, 0.7);
-  padding: 10px 16px;
+  padding: 10px 12px;
   border-radius: 10px;
   backdrop-filter: blur(4px);
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
 }
 
 .toolbar-section {
@@ -175,21 +178,25 @@ body {
 
 .toolbar-btn-group {
   display: flex;
+  flex-direction: column;
   gap: 4px;
 }
 
 .toolbar-section + .toolbar-section {
-  margin-left: 8px;
-  padding-left: 8px;
-  border-left: 1px solid rgba(255, 255, 255, 0.15);
+  margin-top: 8px;
+  padding-top: 8px;
+  margin-left: 0;
+  padding-left: 0;
+  border-left: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
 }
 
 .toolbar-btn {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  gap: 4px;
-  padding: 8px 14px;
+  gap: 8px;
+  padding: 6px 10px;
   background: rgba(255, 255, 255, 0.1);
   border: 2px solid transparent;
   border-radius: 8px;
@@ -197,7 +204,7 @@ body {
   cursor: pointer;
   font-size: 12px;
   transition: all 0.15s ease;
-  min-width: 70px;
+  white-space: nowrap;
 }
 
 .toolbar-btn:hover {
@@ -218,6 +225,27 @@ body {
 .toolbar-btn .cost {
   font-size: 10px;
   opacity: 0.7;
+}
+
+.toolbar-btn .building-icon {
+  flex-shrink: 0;
+}
+
+/* Footer Indicator */
+.footer-indicator {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.7);
+  padding: 8px 20px;
+  border-radius: 8px;
+  backdrop-filter: blur(4px);
+  color: white;
+  font-size: 14px;
+  font-weight: 500;
+  pointer-events: none;
+  white-space: nowrap;
 }
 
 /* Lobby */

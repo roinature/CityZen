@@ -39,13 +39,6 @@ export function canPlaceBuilding(
     }
   }
 
-  // Zones must be adjacent to a road or another zone
-  if (isZone(type) && buildings) {
-    if (!hasAdjacentRoadOrZone(pos, def.size, buildings)) {
-      return { valid: false, reason: 'Zone must be adjacent to a road or zone' };
-    }
-  }
-
   return { valid: true };
 }
 

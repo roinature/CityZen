@@ -3,65 +3,63 @@ import type { CityState, PlacedBuilding } from '@cityzen/shared';
 import { createEmptyGrid, BUILDING_DEFS } from '@cityzen/shared';
 
 export async function saveCityState(cityId: string, state: CityState): Promise<void> {
-  await prisma.$transaction(async (tx) => {
-    // Upsert city metadata (resources, clock, tick)
-    await tx.city.upsert({
-      where: { id: cityId },
-      update: {
-        name: state.name,
-        ownerId: state.ownerId || '',
-        money: state.resources.money,
-        population: state.resources.population,
-        happiness: state.resources.happiness,
-        taxRate: state.resources.taxRate,
-        demandResidential: state.resources.demand.residential,
-        demandCommercial: state.resources.demand.commercial,
-        demandIndustrial: state.resources.demand.industrial,
-        clockGameTimeMs: state.clock.gameTimeMs,
-        clockSpeed: state.clock.speed,
-        clockGameDay: state.clock.gameDay,
-        clockGameYear: state.clock.gameYear,
-        tick: state.tick,
-        updatedAt: new Date(),
-      },
-      create: {
-        id: cityId,
-        name: state.name,
-        ownerId: state.ownerId || '',
-        money: state.resources.money,
-        population: state.resources.population,
-        happiness: state.resources.happiness,
-        taxRate: state.resources.taxRate,
-        demandResidential: state.resources.demand.residential,
-        demandCommercial: state.resources.demand.commercial,
-        demandIndustrial: state.resources.demand.industrial,
-        clockGameTimeMs: state.clock.gameTimeMs,
-        clockSpeed: state.clock.speed,
-        clockGameDay: state.clock.gameDay,
-        clockGameYear: state.clock.gameYear,
-        tick: state.tick,
-      },
-    });
-
-    // Replace all buildings: delete existing, insert current
-    await tx.building.deleteMany({ where: { cityId } });
-
-    if (state.buildings.length > 0) {
-      await tx.building.createMany({
-        data: state.buildings.map((b) => ({
-          id: b.id,
-          cityId,
-          type: b.type,
-          positionX: b.position.x,
-          positionZ: b.position.z,
-          placedBy: b.placedBy,
-          placedAt: b.placedAt,
-          developmentLevel: b.developmentLevel ?? null,
-          developedAt: b.developedAt ?? null,
-        })),
-      });
-    }
+  // Upsert city metadata (resources, clock, tick)
+  await prisma.city.upsert({
+    where: { id: cityId },
+    update: {
+      name: state.name,
+      ownerId: state.ownerId || '',
+      money: state.resources.money,
+      population: state.resources.population,
+      happiness: state.resources.happiness,
+      taxRate: state.resources.taxRate,
+      demandResidential: state.resources.demand.residential,
+      demandCommercial: state.resources.demand.commercial,
+      demandIndustrial: state.resources.demand.industrial,
+      clockGameTimeMs: state.clock.gameTimeMs,
+      clockSpeed: state.clock.speed,
+      clockGameDay: state.clock.gameDay,
+      clockGameYear: state.clock.gameYear,
+      tick: state.tick,
+      updatedAt: new Date(),
+    },
+    create: {
+      id: cityId,
+      name: state.name,
+      ownerId: state.ownerId || '',
+      money: state.resources.money,
+      population: state.resources.population,
+      happiness: state.resources.happiness,
+      taxRate: state.resources.taxRate,
+      demandResidential: state.resources.demand.residential,
+      demandCommercial: state.resources.demand.commercial,
+      demandIndustrial: state.resources.demand.industrial,
+      clockGameTimeMs: state.clock.gameTimeMs,
+      clockSpeed: state.clock.speed,
+      clockGameDay: state.clock.gameDay,
+      clockGameYear: state.clock.gameYear,
+      tick: state.tick,
+    },
   });
+
+  // Replace all buildings: delete existing, then bulk insert
+  await prisma.building.deleteMany({ where: { cityId } });
+
+  if (state.buildings.length > 0) {
+    await prisma.building.createMany({
+      data: state.buildings.map((b) => ({
+        id: b.id,
+        cityId,
+        type: b.type,
+        positionX: b.position.x,
+        positionZ: b.position.z,
+        placedBy: b.placedBy,
+        placedAt: b.placedAt,
+        developmentLevel: b.developmentLevel ?? null,
+        developedAt: b.developedAt ?? null,
+      })),
+    });
+  }
 }
 
 export async function loadCityState(cityId: string): Promise<CityState | null> {
