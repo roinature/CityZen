@@ -10,10 +10,12 @@
   },
   "dependencies": {
     "@cityzen/shared": "*",
+    "@prisma/adapter-pg": "^7.3.0",
     "@prisma/client": "^7.3.0",
     "dotenv": "^17.2.4",
     "express": "^4.21.0",
     "express-session": "^1.19.0",
+    "pg": "^8.18.0",
     "prisma": "^7.3.0",
     "socket.io": "^4.8.0",
     "twitter-api-v2": "^1.29.0",
@@ -23,6 +25,7 @@
     "@types/express": "^5.0.0",
     "@types/express-session": "^1.18.2",
     "@types/node": "^22.0.0",
+    "@types/pg": "^8.16.0",
     "@types/uuid": "^10.0.0",
     "tsx": "^4.19.0"
   }
