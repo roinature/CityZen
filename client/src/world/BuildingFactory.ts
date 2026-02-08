@@ -8,7 +8,54 @@ export interface RoadNeighbors {
   hasWest: boolean;
 }
 
+interface TextureConfig {
+  categories: {
+    id: string;
+    minScore: number;
+    textures: {
+      residential: { facades: string[], roofs: string[] };
+      commercial: { facades: string[], roofs: string[] };
+      industrial: { facades: string[], roofs: string[] };
+    };
+  }[];
+}
+
 export class BuildingFactory {
+  private textureLoader = new THREE.TextureLoader();
+  private textures: Record<string, THREE.Texture> = {};
+  private config: TextureConfig | null = null;
+  private currentScore = 0;
+
+  constructor() {
+    this.loadConfig();
+  }
+
+  private async loadConfig() {
+    try {
+      const response = await fetch('/config/texture_mapping.json');
+      this.config = await response.json();
+    } catch (e) {
+      console.error('Failed to load texture mapping config', e);
+    }
+  }
+
+  setCityScore(score: number) {
+    this.currentScore = score;
+  }
+
+  private getTexture(path: string, wrapS = 1, wrapT = 1): THREE.Texture {
+    if (!this.textures[path]) {
+      const texture = this.textureLoader.load(path);
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapT = THREE.RepeatWrapping;
+      texture.colorSpace = THREE.SRGBColorSpace;
+      this.textures[path] = texture;
+    }
+    const tex = this.textures[path].clone();
+    tex.repeat.set(wrapS, wrapT);
+    return tex;
+  }
+
   createBuilding(building: PlacedBuilding, neighbors?: RoadNeighbors): THREE.Group {
     const def = BUILDING_DEFS[building.type];
     const group = new THREE.Group();
@@ -62,21 +109,6 @@ export class BuildingFactory {
     group.add(canopy);
   }
 
-  private textureLoader = new THREE.TextureLoader();
-  private textures: Record<string, THREE.Texture> = {};
-
-  private getTexture(path: string, wrapS = 1, wrapT = 1): THREE.Texture {
-    if (!this.textures[path]) {
-      const texture = this.textureLoader.load(path);
-      texture.wrapS = THREE.RepeatWrapping;
-      texture.wrapT = THREE.RepeatWrapping;
-      texture.colorSpace = THREE.SRGBColorSpace;
-      this.textures[path] = texture;
-    }
-    const tex = this.textures[path].clone();
-    tex.repeat.set(wrapS, wrapT);
-    return tex;
-  }
 
   private createZone(group: THREE.Group, building: PlacedBuilding): void {
     const def = BUILDING_DEFS[building.type];
@@ -147,16 +179,49 @@ export class BuildingFactory {
 
       const geometry = new THREE.BoxGeometry(bw, h, bd);
 
-      // Map textures based on zone type
+      // Map textures based on zone type and city score
       let facadeTexPath = '/textures/buildings/residential_facade.png';
       let roofTexPath = '/textures/buildings/residential_roof.png';
 
-      if (building.type === BuildingType.ZONE_COMMERCIAL) {
-        facadeTexPath = '/textures/buildings/commercial_facade.png';
-        roofTexPath = '/textures/buildings/commercial_roof.png';
-      } else if (building.type === BuildingType.ZONE_INDUSTRIAL) {
-        facadeTexPath = '/textures/buildings/industrial_facade.png';
-        roofTexPath = '/textures/buildings/industrial_roof.png';
+      if (this.config) {
+        // Find the highest scoring category that is <= currentScore
+        // We assume categories are sorted or we filter and sort
+        const validCategories = this.config.categories.filter(c => c.minScore <= this.currentScore);
+        // Sort by minScore descending to get the 'best' category
+        validCategories.sort((a, b) => b.minScore - a.minScore);
+        const category = validCategories[0];
+
+        if (category) {
+          let typeKey: 'residential' | 'commercial' | 'industrial' = 'residential';
+          if (building.type === BuildingType.ZONE_COMMERCIAL) typeKey = 'commercial';
+          if (building.type === BuildingType.ZONE_INDUSTRIAL) typeKey = 'industrial';
+
+          const textures = category.textures[typeKey];
+          // Deterministic random based on building ID so it doesn't change on every re-render
+          // Simple hash of string ID
+          let hash = 0;
+          for (let i = 0; i < building.id.length; i++) {
+            hash = ((hash << 5) - hash) + building.id.charCodeAt(i);
+            hash |= 0;
+          }
+          const rand = Math.abs(hash);
+
+          if (textures.facades.length > 0) {
+            facadeTexPath = `/textures/buildings/${textures.facades[rand % textures.facades.length]}`;
+          }
+          if (textures.roofs.length > 0) {
+            roofTexPath = `/textures/buildings/${textures.roofs[rand % textures.roofs.length]}`;
+          }
+        }
+      } else {
+        // Fallback if config not loaded
+        if (building.type === BuildingType.ZONE_COMMERCIAL) {
+          facadeTexPath = '/textures/buildings/commercial_facade.png';
+          roofTexPath = '/textures/buildings/commercial_roof.png';
+        } else if (building.type === BuildingType.ZONE_INDUSTRIAL) {
+          facadeTexPath = '/textures/buildings/industrial_facade.png';
+          roofTexPath = '/textures/buildings/industrial_roof.png';
+        }
       }
 
       // Scale textures

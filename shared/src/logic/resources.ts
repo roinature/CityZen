@@ -80,3 +80,13 @@ export function calculateHappiness(state: CityState): number {
 export function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
+
+export function calculateCityScore(state: CityState): number {
+  // Simple score formula: Population + (Money/100) + (Happiness * 10)
+  // This provides a growth metric based on overall city health and size
+  const popScore = state.resources.population;
+  const moneyScore = Math.floor(state.resources.money / 100);
+  const happinessScore = state.resources.happiness * 10;
+
+  return popScore + moneyScore + happinessScore;
+}

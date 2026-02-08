@@ -3,6 +3,7 @@ import {
   C2S,
   S2C,
   type CityStatePayload,
+  type WorldStatePayload,
   type BuildingPlacedPayload,
   type BuildingDemolishedPayload,
   type ResourcesUpdatePayload,
@@ -13,9 +14,12 @@ import {
   type ResourceState,
   type GameClock,
   type Player,
+  type WorldState,
+  type WorldPosition,
 } from '@cityzen/shared';
 
 export interface GameCallbacks {
+  onWorldState: (world: WorldState) => void;
   onCityState: (city: import('@cityzen/shared').CityState, players: Player[]) => void;
   onBuildingPlaced: (payload: BuildingPlacedPayload) => void;
   onBuildingDemolished: (payload: BuildingDemolishedPayload) => void;
@@ -38,6 +42,10 @@ export class SocketClient {
   }
 
   private setupListeners(): void {
+    this.socket.on(S2C.WORLD_STATE, (payload: WorldStatePayload) => {
+      this.callbacks.onWorldState(payload.world);
+    });
+
     this.socket.on(S2C.CITY_STATE, (payload: CityStatePayload) => {
       this.callbacks.onCityState(payload.city, payload.players);
     });
@@ -73,6 +81,10 @@ export class SocketClient {
     this.socket.on(S2C.SAVE_OK, () => {
       this.callbacks.onSaved?.();
     });
+  }
+
+  claimPlot(position: WorldPosition, cityName: string, playerName: string, playerId?: string): void {
+    this.socket.emit(C2S.CLAIM_PLOT, { position, cityName, playerName, playerId });
   }
 
   createCity(cityName: string, playerName: string, playerId?: string): void {

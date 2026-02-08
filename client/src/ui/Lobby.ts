@@ -1,13 +1,9 @@
-import type { CityListItem } from '@cityzen/shared';
-
 export interface LobbyCallbacks {
-  onCreate: (cityName: string, playerName: string) => void;
-  onJoin: (cityId: string, playerName: string) => void;
+  onEnterWorld: (playerName: string) => void;
 }
 
 export class Lobby {
   private overlay: HTMLDivElement;
-  private cityListEl: HTMLDivElement;
   private callbacks: LobbyCallbacks;
 
   constructor(parent: HTMLElement, callbacks: LobbyCallbacks) {
@@ -17,48 +13,27 @@ export class Lobby {
     this.overlay.innerHTML = `
       <div class="lobby-panel">
         <h1>CityZen</h1>
+        <p style="text-align:center;opacity:0.6;margin-bottom:20px;font-size:13px;">Build your city in a shared world</p>
         <input type="text" id="player-name" placeholder="Your name" value="Player" />
-        <input type="text" id="city-name" placeholder="City name" value="New City" />
-        <button id="create-btn">Create New City</button>
-        <div class="city-list">
-          <h3>Or join an existing city:</h3>
-          <div id="city-list-items"></div>
-        </div>
+        <button id="enter-world-btn">Enter World</button>
       </div>
     `;
     parent.appendChild(this.overlay);
 
-    this.cityListEl = this.overlay.querySelector('#city-list-items')!;
+    const enterBtn = this.overlay.querySelector('#enter-world-btn')!;
+    const nameInput = this.overlay.querySelector('#player-name') as HTMLInputElement;
 
-    this.overlay.querySelector('#create-btn')!.addEventListener('click', () => {
-      const playerName = (this.overlay.querySelector('#player-name') as HTMLInputElement).value || 'Player';
-      const cityName = (this.overlay.querySelector('#city-name') as HTMLInputElement).value || 'New City';
-      this.callbacks.onCreate(cityName, playerName);
+    enterBtn.addEventListener('click', () => {
+      const playerName = nameInput.value.trim() || 'Player';
+      this.callbacks.onEnterWorld(playerName);
     });
-  }
 
-  updateCityList(cities: CityListItem[]): void {
-    this.cityListEl.innerHTML = '';
-    if (cities.length === 0) {
-      this.cityListEl.innerHTML = '<div style="opacity:0.5;font-size:12px;padding:8px">No cities yet</div>';
-      return;
-    }
-
-    for (const city of cities) {
-      const item = document.createElement('div');
-      item.className = 'city-list-item';
-      item.innerHTML = `
-        <div class="city-info">
-          <span class="city-name">${city.name}</span>
-          <span class="city-stats">Owner: ${city.ownerName} | ${city.buildingCount} buildings, ${city.playerCount} online</span>
-        </div>
-      `;
-      item.addEventListener('click', () => {
-        const playerName = (this.overlay.querySelector('#player-name') as HTMLInputElement).value || 'Player';
-        this.callbacks.onJoin(city.id, playerName);
-      });
-      this.cityListEl.appendChild(item);
-    }
+    nameInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        const playerName = nameInput.value.trim() || 'Player';
+        this.callbacks.onEnterWorld(playerName);
+      }
+    });
   }
 
   show(): void {
@@ -67,5 +42,9 @@ export class Lobby {
 
   hide(): void {
     this.overlay.style.display = 'none';
+  }
+
+  isVisible(): boolean {
+    return this.overlay.style.display !== 'none';
   }
 }

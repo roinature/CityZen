@@ -5,6 +5,7 @@ import {
   S2C,
   type CreateCityPayload,
   type JoinCityPayload,
+  type ClaimPlotPayload,
   type PlaceBuildingPayload,
   type DemolishPayload,
   type SetTaxRatePayload,
@@ -12,13 +13,68 @@ import {
   type SetGameSpeedPayload,
 } from '@cityzen/shared';
 import { RoomManager } from '../game/RoomManager.js';
+import { WorldManager } from '../game/WorldManager.js';
 import { savePlayerProfile, loadPlayerProfile } from '../persistence/playerStore.js';
 
-export function setupSocketHandlers(io: SocketIOServer, roomManager: RoomManager): void {
+export function setupSocketHandlers(io: SocketIOServer, roomManager: RoomManager, worldManager: WorldManager): void {
   io.on('connection', (socket: Socket) => {
     console.log(`Player connected: ${socket.id}`);
 
     let currentRoomId: string | null = null;
+
+    // Send current world state on connect
+    socket.emit(S2C.WORLD_STATE, { world: worldManager.getWorldState() });
+
+    socket.on(C2S.CLAIM_PLOT, async (payload: ClaimPlotPayload) => {
+      try {
+        // Leave current room if any
+        if (currentRoomId) {
+          leaveCurrentRoom(socket, roomManager, currentRoomId);
+          currentRoomId = null;
+        }
+
+        const playerId = payload.playerId || uuid();
+        const profile = await loadPlayerProfile(playerId);
+        if (!profile) {
+          await savePlayerProfile({
+            id: playerId,
+            name: payload.playerName,
+            ownedCityId: null,
+            createdAt: Date.now(),
+          });
+        }
+
+        const result = await worldManager.claimPlot(
+          payload.position,
+          payload.cityName,
+          playerId,
+          payload.playerName
+        );
+
+        if (!result.success) {
+          socket.emit(S2C.ERROR, { message: result.error!, code: 'CLAIM_FAILED' });
+          return;
+        }
+
+        // Update player profile with owned city
+        await savePlayerProfile({
+          id: playerId,
+          name: payload.playerName,
+          ownedCityId: result.cityId!,
+          createdAt: profile?.createdAt ?? Date.now(),
+        });
+
+        // Auto-join the newly created city
+        const room = roomManager.getRoom(result.cityId!);
+        if (room) {
+          currentRoomId = room.id;
+          room.addPlayer(socket, payload.playerName);
+          console.log(`Plot claimed at (${payload.position.wx}, ${payload.position.wz}) - City "${payload.cityName}" by ${payload.playerName}`);
+        }
+      } catch (err) {
+        socket.emit(S2C.ERROR, { message: 'Failed to claim plot', code: 'CLAIM_FAILED' });
+      }
+    });
 
     socket.on(C2S.CREATE_CITY, async (payload: CreateCityPayload) => {
       try {

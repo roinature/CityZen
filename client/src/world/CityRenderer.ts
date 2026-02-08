@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { CityState, PlacedBuilding } from '@cityzen/shared';
 import { isRoad, isZone, BUILDING_DEFS } from '@cityzen/shared';
+import { calculateCityScore } from '@cityzen/shared';
 import { BuildingFactory, type RoadNeighbors } from './BuildingFactory.js';
 
 export class CityRenderer {
@@ -17,6 +18,11 @@ export class CityRenderer {
   syncState(state: CityState): void {
     const currentIds = new Set(this.meshes.keys());
     const newIds = new Set(state.buildings.map((b) => b.id));
+
+    // Update factory with current city score
+    const score = calculateCityScore(state);
+    console.log('[CityRenderer] Current City Score:', score);
+    this.factory.setCityScore(score);
 
     // Build a set of road positions for neighbor detection (all cells of multi-cell roads)
     const roadPositions = new Set<string>();

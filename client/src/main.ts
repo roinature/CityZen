@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import {
   type CityState,
   type BuildingType,
-  type CityListItem,
   BUILDING_DEFS,
 } from '@cityzen/shared';
 import { SceneManager } from './scene/SceneManager.js';
@@ -15,6 +14,7 @@ import { BuildMode } from './input/BuildMode.js';
 import { ResourceBar } from './ui/ResourceBar.js';
 import { Toolbar } from './ui/Toolbar.js';
 import { Lobby } from './ui/Lobby.js';
+import { WorldMap } from './ui/WorldMap.js';
 import { GameMenu } from './ui/GameMenu.js';
 import { OptionsPanel, type GameOptions } from './ui/OptionsPanel.js';
 import { CarManager } from './world/CarManager.js';
@@ -93,12 +93,17 @@ let currentPlayerName = 'Player';
 
 // --- Network ---
 const socketClient = new SocketClient(SERVER_URL, {
+  onWorldState: (world) => {
+    worldMap.updateWorld(world);
+  },
+
   onCityState: (city, players) => {
     cityState = city;
     cityRenderer.syncState(city);
     carManager.clear();
     resourceBar.update(city.resources, cityState);
     lobby.hide();
+    worldMap.hide();
     saveSession(city.id, currentPlayerName);
     console.log(`Joined city: ${city.name} with ${players.length} players`);
   },
@@ -169,8 +174,7 @@ const socketClient = new SocketClient(SERVER_URL, {
     console.error(`Server error: ${error.message} (${error.code})`);
     if (error.code === 'NOT_FOUND') {
       clearSession();
-      lobby.show();
-      fetchCityList();
+      showWorldMap();
     }
   },
 
@@ -198,15 +202,22 @@ buildMode.onDemolish = (pos) => {
   socketClient.demolish(pos);
 };
 
-// --- Lobby ---
+// --- Lobby (name entry) ---
 const lobby = new Lobby(uiRoot, {
-  onCreate: (cityName, playerName) => {
+  onEnterWorld: (playerName) => {
     currentPlayerName = playerName;
-    socketClient.createCity(cityName, playerName, playerId);
+    lobby.hide();
+    worldMap.show();
   },
-  onJoin: (cityId, playerName) => {
-    currentPlayerName = playerName;
-    socketClient.joinCity(cityId, playerName, playerId);
+});
+
+// --- World Map ---
+const worldMap = new WorldMap(uiRoot, {
+  onClaimPlot: (position, cityName) => {
+    socketClient.claimPlot(position, cityName, currentPlayerName, playerId);
+  },
+  onEnterCity: (cityId) => {
+    socketClient.joinCity(cityId, currentPlayerName, playerId);
   },
 });
 
@@ -240,8 +251,7 @@ const gameMenu = new GameMenu(uiRoot, {
     cityRenderer.clear();
     carManager.clear();
     clearSession();
-    lobby.show();
-    fetchCityList();
+    showWorldMap();
   },
   onOptions: () => {
     optionsPanel.show();
@@ -312,15 +322,9 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
-// --- Fetch city list ---
-async function fetchCityList(): Promise<void> {
-  try {
-    const res = await fetch(`${SERVER_URL}/api/cities`);
-    const cities: CityListItem[] = await res.json();
-    lobby.updateCityList(cities);
-  } catch {
-    // Server not available yet
-  }
+// --- Show world map helper ---
+function showWorldMap(): void {
+  worldMap.show();
 }
 
 // Auto-rejoin saved session or show lobby
@@ -328,9 +332,8 @@ const savedSession = loadSession();
 if (savedSession) {
   currentPlayerName = savedSession.playerName;
   socketClient.joinCity(savedSession.cityId, savedSession.playerName, playerId);
-} else {
-  fetchCityList();
 }
+// Otherwise lobby is already visible (default), world state arrives via socket
 
 // --- Game loop ---
 let lastTime = performance.now();

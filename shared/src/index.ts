@@ -42,6 +42,6 @@ export type { ZoneLevelDef } from './constants/buildings.js';
 
 // Logic
 export { canPlaceBuilding, createEmptyGrid } from './logic/placement.js';
-export { calculateTaxRevenue, calculateMaintenance, calculateNetIncome, calculatePopulationGrowth, calculateHappiness, clamp } from './logic/resources.js';
+export { calculateTaxRevenue, calculateMaintenance, calculateNetIncome, calculatePopulationGrowth, calculateHappiness, clamp, calculateCityScore } from './logic/resources.js';
 export { simulateTick, advanceClock } from './logic/simulation.js';
 export { calculateDemand, processZoneGrowth } from './logic/demand.js';
