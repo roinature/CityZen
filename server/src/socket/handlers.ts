@@ -11,6 +11,8 @@ import {
   type SetTaxRatePayload,
   type SetUnlimitedMoneyPayload,
   type SetGameSpeedPayload,
+  isRoad,
+  calculateEdgeConnections,
 } from '@cityzen/shared';
 import { RoomManager } from '../game/RoomManager.js';
 import { WorldManager } from '../game/WorldManager.js';
@@ -160,6 +162,10 @@ export function setupSocketHandlers(io: SocketIOServer, roomManager: RoomManager
       const result = room.placeBuilding(socket.id, payload.position, payload.type);
       if (!result.success) {
         socket.emit(S2C.ERROR, { message: result.error!, code: 'PLACEMENT_FAILED' });
+      } else if (isRoad(payload.type)) {
+        // Recalculate and update edge connections when a road is placed
+        const connections = calculateEdgeConnections(room.state.buildings);
+        worldManager.updateCityEdgeConnections(currentRoomId, connections);
       }
     });
 
@@ -172,9 +178,18 @@ export function setupSocketHandlers(io: SocketIOServer, roomManager: RoomManager
       const room = roomManager.getRoom(currentRoomId);
       if (!room) return;
 
+      // Check if we're demolishing a road before actually demolishing
+      const cell = room.state.grid[payload.position.x]?.[payload.position.z];
+      const building = cell?.buildingId ? room.state.buildings.find((b: import('@cityzen/shared').PlacedBuilding) => b.id === cell.buildingId) : null;
+      const wasRoad = building && isRoad(building.type);
+
       const result = room.demolishBuilding(payload.position);
       if (!result.success) {
         socket.emit(S2C.ERROR, { message: result.error!, code: 'DEMOLISH_FAILED' });
+      } else if (wasRoad) {
+        // Recalculate and update edge connections when a road is demolished
+        const connections = calculateEdgeConnections(room.state.buildings);
+        worldManager.updateCityEdgeConnections(currentRoomId, connections);
       }
     });
 

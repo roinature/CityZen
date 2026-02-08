@@ -6,7 +6,7 @@ export type { ResourceState, DemandState } from './types/resources.js';
 export type { CityState } from './types/city.js';
 export type { Player, PlayerProfile } from './types/player.js';
 export type { GameClock } from './types/time.js';
-export type { WorldState, WorldCityEntry, WorldPosition } from './types/world.js';
+export type { WorldState, WorldCityEntry, WorldPosition, EdgeDirection, EdgeConnection } from './types/world.js';
 export {
   C2S, S2C,
   type JoinCityPayload,
@@ -45,3 +45,10 @@ export { canPlaceBuilding, createEmptyGrid } from './logic/placement.js';
 export { calculateTaxRevenue, calculateMaintenance, calculateNetIncome, calculatePopulationGrowth, calculateHappiness, clamp, calculateCityScore } from './logic/resources.js';
 export { simulateTick, advanceClock } from './logic/simulation.js';
 export { calculateDemand, processZoneGrowth } from './logic/demand.js';
+export {
+  calculateEdgeConnections,
+  getOppositeDirection,
+  getNeighborDirection,
+  findMatchingConnections,
+  findAdjacentCity
+} from './logic/edgeConnections.js';

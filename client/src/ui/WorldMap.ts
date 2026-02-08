@@ -1,5 +1,5 @@
-import type { WorldState, WorldCityEntry, WorldPosition } from '@cityzen/shared';
-import { WORLD_MAP_SIZE } from '@cityzen/shared';
+import type { WorldState, WorldCityEntry, WorldPosition, EdgeDirection } from '@cityzen/shared';
+import { WORLD_MAP_SIZE, findMatchingConnections, getNeighborDirection } from '@cityzen/shared';
 
 export interface WorldMapCallbacks {
   onClaimPlot: (position: WorldPosition, cityName: string) => void;
@@ -110,7 +110,12 @@ export class WorldMap {
 
       if (city) {
         el.className = 'worldmap-cell worldmap-cell-occupied';
+
+        // Check for edge connections and render indicators
+        const connectionIndicators = this.getConnectionIndicators(city);
+
         el.innerHTML = `
+          ${connectionIndicators}
           <div class="worldmap-city-label">${city.name}</div>
           <div class="worldmap-city-owner">${city.ownerName}</div>
           <div class="worldmap-city-pop">Pop: ${city.population}</div>
@@ -120,6 +125,55 @@ export class WorldMap {
         el.innerHTML = '';
       }
     });
+  }
+
+  /**
+   * Generate HTML for connection indicators on each edge of a city cell.
+   * Shows solid indicators for matched connections, dashed for unmatched roads.
+   */
+  private getConnectionIndicators(city: WorldCityEntry): string {
+    if (!this.world || !city.edgeConnections?.length) return '';
+
+    const indicators: string[] = [];
+    const directions: EdgeDirection[] = ['north', 'south', 'east', 'west'];
+
+    for (const direction of directions) {
+      const hasRoadAtEdge = city.edgeConnections.some(e => e.direction === direction);
+      if (!hasRoadAtEdge) continue;
+
+      // Check if there's a neighbor city with matching connection
+      const neighbor = this.findNeighborCity(city.position, direction);
+      const isConnected = neighbor && findMatchingConnections(city, neighbor) !== null;
+
+      const indicatorClass = isConnected
+        ? `worldmap-connection worldmap-connection-${direction} worldmap-connection-matched`
+        : `worldmap-connection worldmap-connection-${direction} worldmap-connection-unmatched`;
+
+      indicators.push(`<div class="${indicatorClass}"></div>`);
+    }
+
+    return indicators.join('');
+  }
+
+  /**
+   * Find the neighboring city in a given direction.
+   */
+  private findNeighborCity(position: WorldPosition, direction: EdgeDirection): WorldCityEntry | null {
+    if (!this.world) return null;
+
+    let targetWx = position.wx;
+    let targetWz = position.wz;
+
+    switch (direction) {
+      case 'north': targetWz -= 1; break;
+      case 'south': targetWz += 1; break;
+      case 'east': targetWx += 1; break;
+      case 'west': targetWx -= 1; break;
+    }
+
+    return this.world.cities.find(c =>
+      c.position.wx === targetWx && c.position.wz === targetWz
+    ) || null;
   }
 
   show(): void {
@@ -135,3 +189,4 @@ export class WorldMap {
     return this.overlay.style.display !== 'none';
   }
 }
+

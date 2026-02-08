@@ -17,7 +17,7 @@ export class CityRenderer {
 
   syncState(state: CityState): void {
     const currentIds = new Set(this.meshes.keys());
-    const newIds = new Set(state.buildings.map((b) => b.id));
+    const newIds = new Set(state.buildings.map((b: PlacedBuilding) => b.id));
 
     // Update factory with current city score
     const score = calculateCityScore(state);

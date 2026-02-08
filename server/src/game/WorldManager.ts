@@ -3,6 +3,7 @@ import {
   type WorldState,
   type WorldPosition,
   type WorldCityEntry,
+  type EdgeConnection,
   S2C,
   WORLD_MAP_SIZE,
 } from '@cityzen/shared';
@@ -31,7 +32,7 @@ export class WorldManager {
 
   isPlotAvailable(position: WorldPosition): boolean {
     if (position.wx < 0 || position.wx >= WORLD_MAP_SIZE ||
-        position.wz < 0 || position.wz >= WORLD_MAP_SIZE) {
+      position.wz < 0 || position.wz >= WORLD_MAP_SIZE) {
       return false;
     }
     return !this.world.cities.some(
@@ -77,6 +78,31 @@ export class WorldManager {
     if (entry) {
       entry.population = population;
     }
+  }
+
+  /**
+   * Update edge connections for a city and broadcast world state.
+   * Called when roads are placed or demolished near grid edges.
+   */
+  updateCityEdgeConnections(cityId: string, connections: EdgeConnection[]): void {
+    const entry = this.world.cities.find(c => c.cityId === cityId);
+    if (entry) {
+      entry.edgeConnections = connections;
+      this.world.updatedAt = Date.now();
+
+      // Broadcast updated world state so all clients see the new connections
+      this.io.emit(S2C.WORLD_STATE, { world: this.world });
+
+      // Persist to disk
+      this.save();
+    }
+  }
+
+  /**
+   * Get the city entry for a given cityId
+   */
+  getCityEntry(cityId: string): WorldCityEntry | undefined {
+    return this.world.cities.find(c => c.cityId === cityId);
   }
 
   async save(): Promise<void> {

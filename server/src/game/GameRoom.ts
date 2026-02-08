@@ -200,7 +200,7 @@ export class GameRoom {
     }
 
     const buildingId = cell.buildingId;
-    const building = this.state.buildings.find(b => b.id === buildingId);
+    const building = this.state.buildings.find((b: PlacedBuilding) => b.id === buildingId);
     if (!building) {
       return { success: false, error: 'Building not found' };
     }
@@ -215,7 +215,7 @@ export class GameRoom {
     }
 
     // Remove building, refund half cost
-    this.state.buildings = this.state.buildings.filter(b => b.id !== buildingId);
+    this.state.buildings = this.state.buildings.filter((b: PlacedBuilding) => b.id !== buildingId);
     if (!this.unlimitedMoney) {
       this.state.resources.money += Math.floor(def.cost / 2);
     }

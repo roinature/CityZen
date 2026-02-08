@@ -10,7 +10,7 @@ export function calculateTaxRevenue(state: CityState): number {
 export function calculateMaintenance(state: CityState): number {
   return state.buildings.reduce((sum, b) => {
     const def = BUILDING_DEFS[b.type];
-    let maint = def.effects.maintenance ?? 0;
+    let maint = def?.effects?.maintenance ?? 0;
 
     if (isZone(b.type) && b.developmentLevel && b.developmentLevel > 0) {
       const levelDef = ZONE_LEVELS[b.type as ZoneType][b.developmentLevel - 1];
@@ -31,8 +31,8 @@ export function calculatePopulationGrowth(state: CityState): number {
 
   for (const b of state.buildings) {
     const def = BUILDING_DEFS[b.type];
-    capacity += def.effects.populationCapacity ?? 0;
-    jobs += def.effects.jobs ?? 0;
+    capacity += def?.effects?.populationCapacity ?? 0;
+    jobs += def?.effects?.jobs ?? 0;
 
     if (isZone(b.type) && b.developmentLevel && b.developmentLevel > 0) {
       const levelDef = ZONE_LEVELS[b.type as ZoneType][b.developmentLevel - 1];
@@ -56,8 +56,8 @@ export function calculateHappiness(state: CityState): number {
 
   for (const b of state.buildings) {
     const def = BUILDING_DEFS[b.type];
-    buildingEffect += def.effects.happiness ?? 0;
-    capacity += def.effects.populationCapacity ?? 0;
+    buildingEffect += def?.effects?.happiness ?? 0;
+    capacity += def?.effects?.populationCapacity ?? 0;
 
     if (isZone(b.type) && b.developmentLevel && b.developmentLevel > 0) {
       const levelDef = ZONE_LEVELS[b.type as ZoneType][b.developmentLevel - 1];

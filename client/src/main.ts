@@ -2,7 +2,12 @@ import * as THREE from 'three';
 import {
   type CityState,
   type BuildingType,
+  type WorldState,
+  type EdgeDirection,
+  type PlacedBuilding,
   BUILDING_DEFS,
+  findAdjacentCity,
+  getOppositeDirection,
 } from '@cityzen/shared';
 import { SceneManager } from './scene/SceneManager.js';
 import { CameraController } from './scene/CameraController.js';
@@ -18,6 +23,8 @@ import { WorldMap } from './ui/WorldMap.js';
 import { GameMenu } from './ui/GameMenu.js';
 import { OptionsPanel, type GameOptions } from './ui/OptionsPanel.js';
 import { CarManager } from './world/CarManager.js';
+import { ToolSidebar, type ToolMode } from './ui/ToolSidebar.js';
+import { FinancePanel } from './ui/FinancePanel.js';
 import { SocketClient } from './network/SocketClient.js';
 
 const SERVER_URL = 'http://localhost:3030';
@@ -60,6 +67,7 @@ function getOrCreatePlayerId(): string {
 
 // --- State ---
 let cityState: CityState | null = null;
+let worldState: WorldState | null = null;
 const playerId = getOrCreatePlayerId();
 
 // --- Scene setup ---
@@ -68,7 +76,7 @@ const uiRoot = document.getElementById('ui-root')!;
 
 const sceneManager = new SceneManager(canvas);
 const cameraController = new CameraController(sceneManager);
-setupLighting(sceneManager.scene);
+const lighting = setupLighting(sceneManager.scene);
 createTerrain(sceneManager.scene);
 const gridHelper = createGridOverlay(sceneManager.scene);
 
@@ -83,9 +91,37 @@ const toolbar = new Toolbar(uiRoot, (type: BuildingType) => {
     buildMode.deselect();
     toolbar.setActive(null);
   } else {
+    buildMode.setToolMode('build');
+    cameraController.setLeftClickPanEnabled(false);
+    toolSidebar.setActiveMode('build');
     buildMode.select(type);
     toolbar.setActive(type);
   }
+});
+
+// --- Tool Sidebar ---
+let isNight = false;
+const financePanel = new FinancePanel(uiRoot);
+
+const toolSidebar = new ToolSidebar(uiRoot, {
+  onToolChange: (mode: ToolMode) => {
+    buildMode.setToolMode(mode);
+    cameraController.setLeftClickPanEnabled(mode === 'pointer');
+    if (mode !== 'build') {
+      toolbar.setActive(null);
+    }
+  },
+  onBrushSizeChange: (size: number) => {
+    buildMode.setBrushSize(size);
+  },
+  onDayNightToggle: () => {
+    isNight = !isNight;
+    lighting.setNight(isNight);
+  },
+  onFinanceToggle: () => {
+    if (cityState) financePanel.update(cityState);
+    financePanel.toggle();
+  },
 });
 
 // --- Session ---
@@ -94,11 +130,13 @@ let currentPlayerName = 'Player';
 // --- Network ---
 const socketClient = new SocketClient(SERVER_URL, {
   onWorldState: (world) => {
+    worldState = world;
     worldMap.updateWorld(world);
   },
 
   onCityState: (city, players) => {
     cityState = city;
+    buildMode.setCityState(city);
     cityRenderer.syncState(city);
     carManager.clear();
     resourceBar.update(city.resources, cityState);
@@ -126,7 +164,7 @@ const socketClient = new SocketClient(SERVER_URL, {
 
   onBuildingDemolished: (payload) => {
     if (!cityState) return;
-    const building = cityState.buildings.find(b => b.id === payload.buildingId);
+    const building = cityState.buildings.find((b: PlacedBuilding) => b.id === payload.buildingId);
     if (building) {
       const def = BUILDING_DEFS[building.type];
       for (let dx = 0; dx < def.size.w; dx++) {
@@ -135,7 +173,7 @@ const socketClient = new SocketClient(SERVER_URL, {
         }
       }
     }
-    cityState.buildings = cityState.buildings.filter(b => b.id !== payload.buildingId);
+    cityState.buildings = cityState.buildings.filter((b: PlacedBuilding) => b.id !== payload.buildingId);
     cityState.resources = payload.resources;
     cityRenderer.syncState(cityState);
     resourceBar.update(cityState.resources, cityState);
@@ -153,7 +191,7 @@ const socketClient = new SocketClient(SERVER_URL, {
   onZoneGrowth: (payload) => {
     if (!cityState) return;
     for (const update of payload.buildings) {
-      const building = cityState.buildings.find(b => b.id === update.id);
+      const building = cityState.buildings.find((b: PlacedBuilding) => b.id === update.id);
       if (building) {
         building.developmentLevel = update.developmentLevel;
         building.developedAt = update.developedAt;
@@ -200,6 +238,39 @@ buildMode.onPlace = (pos, type) => {
 
 buildMode.onDemolish = (pos) => {
   socketClient.demolish(pos);
+};
+
+// --- Edge road click: Navigate to adjacent city ---
+buildMode.onEdgeRoadClick = (direction: EdgeDirection, position: number) => {
+  if (!worldState || !cityState) return;
+
+  // Find current city's world position
+  const currentCityEntry = worldState.cities.find(c => c.cityId === cityState!.id);
+  if (!currentCityEntry) return;
+
+  // Find adjacent city in the clicked direction
+  const adjacentCity = findAdjacentCity(currentCityEntry.position, direction, worldState.cities);
+  if (!adjacentCity) {
+    console.log(`No city found to the ${direction}`);
+    return;
+  }
+
+  // Check if the adjacent city has a matching connection
+  const oppositeDir = getOppositeDirection(direction);
+  const hasMatchingRoad = adjacentCity.edgeConnections?.some(
+    conn => conn.direction === oppositeDir && conn.positions.includes(position)
+  );
+
+  if (hasMatchingRoad) {
+    console.log(`Traveling ${direction} to ${adjacentCity.name}`);
+    socketClient.leave();
+    cityState = null;
+    cityRenderer.clear();
+    carManager.clear();
+    socketClient.joinCity(adjacentCity.cityId, currentPlayerName, playerId);
+  } else {
+    console.log(`Road not connected to ${adjacentCity.name}`);
+  }
 };
 
 // --- Lobby (name entry) ---

@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 
-export function setupLighting(scene: THREE.Scene): void {
+export interface LightingControls {
+  setNight(isNight: boolean): void;
+}
+
+export function setupLighting(scene: THREE.Scene): LightingControls {
   // Directional light (sun)
   const sun = new THREE.DirectionalLight(0xffffff, 1.0);
   sun.position.set(30, 50, 30);
@@ -21,4 +25,30 @@ export function setupLighting(scene: THREE.Scene): void {
   // Hemisphere light for natural sky/ground color
   const hemi = new THREE.HemisphereLight(0x87ceeb, 0x7ec850, 0.3);
   scene.add(hemi);
+
+  return {
+    setNight(isNight: boolean): void {
+      if (isNight) {
+        sun.intensity = 0.15;
+        sun.color.setHex(0x8888cc);
+        sun.position.set(30, 20, 30);
+        ambient.intensity = 0.3;
+        ambient.color.setHex(0x101030);
+        hemi.intensity = 0.1;
+        hemi.color.setHex(0x1a1a3e);
+        hemi.groundColor.setHex(0x0a0a1a);
+        scene.background = new THREE.Color(0x0a0a1e);
+      } else {
+        sun.intensity = 1.0;
+        sun.color.setHex(0xffffff);
+        sun.position.set(30, 50, 30);
+        ambient.intensity = 0.6;
+        ambient.color.setHex(0x404060);
+        hemi.intensity = 0.3;
+        hemi.color.setHex(0x87ceeb);
+        hemi.groundColor.setHex(0x7ec850);
+        scene.background = null;
+      }
+    },
+  };
 }

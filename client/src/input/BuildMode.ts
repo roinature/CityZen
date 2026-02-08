@@ -3,14 +3,18 @@ import {
   type BuildingType,
   type Position,
   type CityState,
+  type EdgeDirection,
+  type PlacedBuilding,
   isRoad,
   isZone,
   BUILDING_DEFS,
   CELL_SIZE,
+  DEFAULT_GRID_SIZE,
   canPlaceBuilding,
 } from '@cityzen/shared';
 import { BuildingFactory } from '../world/BuildingFactory.js';
 import { GridRaycaster } from './Raycaster.js';
+import type { ToolMode } from '../ui/ToolSidebar.js';
 
 function isContinuousType(type: BuildingType): boolean {
   return isRoad(type);
@@ -35,6 +39,10 @@ export class BuildMode {
   private previewMesh: THREE.Group | null = null;
   private currentHoverPos: Position | null = null;
 
+  // Tool mode
+  private toolMode: ToolMode = 'pointer';
+  private brushSize = 1;
+
   // Continuous drawing state (for roads)
   private isDragging = false;
   private lastPlacedPos: Position | null = null;
@@ -46,6 +54,7 @@ export class BuildMode {
 
   onPlace: ((pos: Position, type: BuildingType) => void) | null = null;
   onDemolish: ((pos: Position) => void) | null = null;
+  onEdgeRoadClick: ((direction: EdgeDirection, position: number) => void) | null = null;
 
   constructor(scene: THREE.Scene, camera: THREE.Camera) {
     this.scene = scene;
@@ -84,6 +93,21 @@ export class BuildMode {
 
   setUnlimitedMoney(enabled: boolean): void {
     this.unlimitedMoney = enabled;
+  }
+
+  setToolMode(mode: ToolMode): void {
+    this.toolMode = mode;
+    if (mode !== 'build') {
+      this.deselect();
+    }
+  }
+
+  getToolMode(): ToolMode {
+    return this.toolMode;
+  }
+
+  setBrushSize(size: number): void {
+    this.brushSize = Math.max(1, Math.min(3, size));
   }
 
   updatePreview(state: CityState | null): void {
@@ -169,6 +193,7 @@ export class BuildMode {
 
   private onMouseDown(e: MouseEvent): void {
     if (e.button !== 0) return; // Left click only
+    if (this.toolMode !== 'build') return;
     if (!this.selectedType || !this.onPlace) return;
     if ((e.target as HTMLElement).closest('#ui-root')) return;
 
@@ -217,8 +242,27 @@ export class BuildMode {
   }
 
   private onClick(e: MouseEvent): void {
-    if (!this.selectedType || !this.onPlace) return;
     if ((e.target as HTMLElement).closest('#ui-root')) return;
+
+    // Bulldoze mode: left-click demolishes
+    if (this.toolMode === 'bulldoze' && e.button === 0) {
+      const pos = this.raycaster.getGridPosition(e.clientX, e.clientY, this.camera);
+      if (pos && this.onDemolish) {
+        this.demolishArea(pos);
+      }
+      return;
+    }
+
+    // Pointer mode: check for edge road click to enter adjacent city
+    if (this.toolMode === 'pointer') {
+      const pos = this.raycaster.getGridPosition(e.clientX, e.clientY, this.camera);
+      if (pos && this.onEdgeRoadClick) {
+        this.checkEdgeRoadClick(pos);
+      }
+      return;
+    }
+
+    if (!this.selectedType || !this.onPlace) return;
 
     // Skip click handler for continuous and rect-drag types — handled by mousedown/move/up
     if (isContinuousType(this.selectedType) || isRectDragType(this.selectedType)) return;
@@ -229,6 +273,16 @@ export class BuildMode {
     }
   }
 
+  private demolishArea(center: Position): void {
+    if (!this.onDemolish) return;
+    const half = Math.floor(this.brushSize / 2);
+    for (let dx = -half; dx < this.brushSize - half; dx++) {
+      for (let dz = -half; dz < this.brushSize - half; dz++) {
+        this.onDemolish({ x: center.x + dx, z: center.z + dz });
+      }
+    }
+  }
+
   private onRightClick(e: MouseEvent): void {
     if ((e.target as HTMLElement).closest('#ui-root')) return;
 
@@ -236,6 +290,49 @@ export class BuildMode {
     if (pos && this.onDemolish) {
       this.onDemolish(pos);
     }
+  }
+
+  /**
+   * Check if clicked position is an edge road and emit callback for cross-city navigation.
+   */
+  private checkEdgeRoadClick(pos: Position): void {
+    if (!this.currentCityState || !this.onEdgeRoadClick) return;
+
+    // Find building at this position
+    const cell = this.currentCityState.grid[pos.x]?.[pos.z];
+    if (!cell?.buildingId) return;
+
+    const building = this.currentCityState.buildings.find((b: PlacedBuilding) => b.id === cell.buildingId);
+    if (!building || !isRoad(building.type)) return;
+
+    // Check if this road is at an edge
+    const maxCoord = DEFAULT_GRID_SIZE - 1;
+    let direction: EdgeDirection | null = null;
+    let edgePosition: number | null = null;
+
+    if (pos.x === 0) {
+      direction = 'west';
+      edgePosition = pos.z;
+    } else if (pos.x === maxCoord) {
+      direction = 'east';
+      edgePosition = pos.z;
+    } else if (pos.z === 0) {
+      direction = 'north';
+      edgePosition = pos.x;
+    } else if (pos.z === maxCoord) {
+      direction = 'south';
+      edgePosition = pos.x;
+    }
+
+    if (direction && edgePosition !== null) {
+      this.onEdgeRoadClick(direction, edgePosition);
+    }
+  }
+
+  private currentCityState: CityState | null = null;
+
+  setCityState(state: CityState | null): void {
+    this.currentCityState = state;
   }
 
   private clearPreview(): void {

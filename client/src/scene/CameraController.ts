@@ -27,6 +27,9 @@ export class CameraController {
   private lastMouseY = 0;
   private mousePanSpeed = 0.15;
 
+  // Left-click pan mode (enabled when pointer tool is active)
+  private leftClickPanEnabled = false;
+
   constructor(sceneManager: SceneManager) {
     this.sceneManager = sceneManager;
 
@@ -106,6 +109,10 @@ export class CameraController {
     this.panSpeed = speed;
   }
 
+  setLeftClickPanEnabled(enabled: boolean): void {
+    this.leftClickPanEnabled = enabled;
+  }
+
   private onWheel(e: WheelEvent): void {
     e.preventDefault();
     const delta = e.deltaY > 0 ? 3 : -3;
@@ -116,7 +123,9 @@ export class CameraController {
 
   private onMouseDown(e: MouseEvent): void {
     // Right-click (button 2) or middle-click (button 1) to pan
-    if (e.button === 2 || e.button === 1) {
+    // Also left-click (button 0) when pointer tool is active
+    if (e.button === 2 || e.button === 1 || (e.button === 0 && this.leftClickPanEnabled)) {
+      if (e.button === 0 && (e.target as HTMLElement).closest('#ui-root')) return;
       this.isPanning = true;
       this.lastMouseX = e.clientX;
       this.lastMouseY = e.clientY;
@@ -155,7 +164,7 @@ export class CameraController {
   }
 
   private onMouseUp(e: MouseEvent): void {
-    if (e.button === 2 || e.button === 1) {
+    if (e.button === 2 || e.button === 1 || (e.button === 0 && this.leftClickPanEnabled)) {
       this.stopPanning();
     }
   }

@@ -5,6 +5,15 @@ export interface WorldPosition {
   wz: number;
 }
 
+// Edge directions for road connections between city plots
+export type EdgeDirection = 'north' | 'south' | 'east' | 'west';
+
+// Represents roads at a specific edge of a city plot
+export interface EdgeConnection {
+  direction: EdgeDirection;
+  positions: number[]; // Grid positions along the edge where roads exist
+}
+
 export interface WorldCityEntry {
   cityId: string;
   ownerId: string;
@@ -12,6 +21,7 @@ export interface WorldCityEntry {
   name: string;
   position: WorldPosition;
   population: number;
+  edgeConnections?: EdgeConnection[]; // Roads at plot edges
 }
 
 export interface WorldState {
