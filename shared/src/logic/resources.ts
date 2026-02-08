@@ -1,21 +1,45 @@
 import type { CityState } from '../types/city.js';
 import { BUILDING_DEFS } from '../constants/buildings.js';
+import { ZONE_LEVELS } from '../constants/buildings.js';
+import { isZone, type ZoneType } from '../types/building.js';
 
-export function calculateIncome(state: CityState): number {
+export function calculateTaxRevenue(state: CityState): number {
+  return Math.floor(state.resources.population * (state.resources.taxRate / 100));
+}
+
+export function calculateMaintenance(state: CityState): number {
   return state.buildings.reduce((sum, b) => {
     const def = BUILDING_DEFS[b.type];
-    return sum + (def.effects.income ?? 0);
+    let maint = def.effects.maintenance ?? 0;
+
+    if (isZone(b.type) && b.developmentLevel && b.developmentLevel > 0) {
+      const levelDef = ZONE_LEVELS[b.type as ZoneType][b.developmentLevel - 1];
+      maint += levelDef.maintenance;
+    }
+
+    return sum + maint;
   }, 0);
 }
 
-export function calculatePopulationGrowth(state: CityState): number {
-  const capacity = state.buildings.reduce((sum, b) => {
-    return sum + (BUILDING_DEFS[b.type].effects.populationCapacity ?? 0);
-  }, 0);
+export function calculateNetIncome(state: CityState): number {
+  return calculateTaxRevenue(state) - calculateMaintenance(state);
+}
 
-  const jobs = state.buildings.reduce((sum, b) => {
-    return sum + (BUILDING_DEFS[b.type].effects.jobs ?? 0);
-  }, 0);
+export function calculatePopulationGrowth(state: CityState): number {
+  let capacity = 0;
+  let jobs = 0;
+
+  for (const b of state.buildings) {
+    const def = BUILDING_DEFS[b.type];
+    capacity += def.effects.populationCapacity ?? 0;
+    jobs += def.effects.jobs ?? 0;
+
+    if (isZone(b.type) && b.developmentLevel && b.developmentLevel > 0) {
+      const levelDef = ZONE_LEVELS[b.type as ZoneType][b.developmentLevel - 1];
+      capacity += levelDef.populationCapacity;
+      jobs += levelDef.jobs;
+    }
+  }
 
   if (state.resources.population >= capacity) return 0;
   if (state.resources.happiness < 30) return -1;
@@ -26,19 +50,31 @@ export function calculatePopulationGrowth(state: CityState): number {
 
 export function calculateHappiness(state: CityState): number {
   const base = 50;
-  const buildingEffect = state.buildings.reduce((sum, b) => {
-    return sum + (BUILDING_DEFS[b.type].effects.happiness ?? 0);
-  }, 0);
 
-  const capacity = state.buildings.reduce((sum, b) => {
-    return sum + (BUILDING_DEFS[b.type].effects.populationCapacity ?? 0);
-  }, 0);
+  let buildingEffect = 0;
+  let capacity = 0;
+
+  for (const b of state.buildings) {
+    const def = BUILDING_DEFS[b.type];
+    buildingEffect += def.effects.happiness ?? 0;
+    capacity += def.effects.populationCapacity ?? 0;
+
+    if (isZone(b.type) && b.developmentLevel && b.developmentLevel > 0) {
+      const levelDef = ZONE_LEVELS[b.type as ZoneType][b.developmentLevel - 1];
+      buildingEffect += levelDef.happiness;
+      capacity += levelDef.populationCapacity;
+    }
+  }
 
   const overcrowdingPenalty = capacity > 0 && state.resources.population > capacity
     ? Math.floor((state.resources.population - capacity) / 5) * -2
     : 0;
 
-  return base + buildingEffect + overcrowdingPenalty;
+  const taxPenalty = state.resources.taxRate > 10
+    ? -Math.floor((state.resources.taxRate - 10) / 2)
+    : 0;
+
+  return base + buildingEffect + overcrowdingPenalty + taxPenalty;
 }
 
 export function clamp(value: number, min: number, max: number): number {

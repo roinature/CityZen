@@ -20,7 +20,7 @@ import { OptionsPanel, type GameOptions } from './ui/OptionsPanel.js';
 import { CarManager } from './world/CarManager.js';
 import { SocketClient } from './network/SocketClient.js';
 
-const SERVER_URL = 'http://localhost:3000';
+const SERVER_URL = 'http://localhost:3030';
 const SESSION_KEY = 'cityzen_session';
 
 interface SavedSession {
@@ -86,7 +86,7 @@ const socketClient = new SocketClient(SERVER_URL, {
     cityState = city;
     cityRenderer.syncState(city);
     carManager.clear();
-    resourceBar.update(city.resources);
+    resourceBar.update(city.resources, cityState);
     lobby.hide();
     saveSession(city.id, currentPlayerName);
     console.log(`Joined city: ${city.name} with ${players.length} players`);
@@ -105,7 +105,7 @@ const socketClient = new SocketClient(SERVER_URL, {
 
     cityState.resources = payload.resources;
     cityRenderer.syncState(cityState);
-    resourceBar.update(cityState.resources);
+    resourceBar.update(cityState.resources, cityState);
   },
 
   onBuildingDemolished: (payload) => {
@@ -122,14 +122,26 @@ const socketClient = new SocketClient(SERVER_URL, {
     cityState.buildings = cityState.buildings.filter(b => b.id !== payload.buildingId);
     cityState.resources = payload.resources;
     cityRenderer.syncState(cityState);
-    resourceBar.update(cityState.resources);
+    resourceBar.update(cityState.resources, cityState);
   },
 
   onResourcesUpdate: (resources, tick) => {
     if (!cityState) return;
     cityState.resources = resources;
     cityState.tick = tick;
-    resourceBar.update(resources);
+    resourceBar.update(resources, cityState);
+  },
+
+  onZoneGrowth: (payload) => {
+    if (!cityState) return;
+    for (const update of payload.buildings) {
+      const building = cityState.buildings.find(b => b.id === update.id);
+      if (building) {
+        building.developmentLevel = update.developmentLevel;
+        building.developedAt = update.developedAt;
+      }
+    }
+    cityRenderer.syncState(cityState);
   },
 
   onPlayerJoined: (player) => {
@@ -155,6 +167,11 @@ const socketClient = new SocketClient(SERVER_URL, {
 });
 
 // --- Build mode wiring ---
+// --- Tax rate wiring ---
+resourceBar.onTaxRateChange = (rate) => {
+  socketClient.setTaxRate(rate);
+};
+
 buildMode.onPlace = (pos, type) => {
   socketClient.placeBuilding(pos, type);
 };
@@ -227,6 +244,11 @@ function applyOptions(options: GameOptions): void {
 
   // Camera speed
   cameraController.setPanSpeed(options.cameraSpeed);
+
+  // Unlimited money
+  socketClient.setUnlimitedMoney(options.unlimitedMoney);
+  resourceBar.setUnlimitedMoney(options.unlimitedMoney);
+  buildMode.setUnlimitedMoney(options.unlimitedMoney);
 
   // Shadows
   sceneManager.renderer.shadowMap.enabled = options.shadowsEnabled;

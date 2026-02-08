@@ -1,10 +1,29 @@
-import type { ResourceState } from '@cityzen/shared';
+import {
+  type ResourceState,
+  type CityState,
+  calculateTaxRevenue,
+  calculateMaintenance,
+  MIN_TAX_RATE,
+  MAX_TAX_RATE,
+  TAX_RATE_STEP,
+} from '@cityzen/shared';
 
 export class ResourceBar {
   private container: HTMLDivElement;
   private moneyEl: HTMLSpanElement;
   private popEl: HTMLSpanElement;
   private happyEl: HTMLSpanElement;
+  private taxRevenueEl: HTMLSpanElement;
+  private maintenanceEl: HTMLSpanElement;
+  private netIncomeEl: HTMLSpanElement;
+  private taxSlider: HTMLInputElement;
+  private taxLabel: HTMLSpanElement;
+  private demandResEl: HTMLDivElement;
+  private demandComEl: HTMLDivElement;
+  private demandIndEl: HTMLDivElement;
+
+  onTaxRateChange: ((rate: number) => void) | null = null;
+  private unlimited = false;
 
   constructor(parent: HTMLElement) {
     this.container = document.createElement('div');
@@ -22,17 +41,100 @@ export class ResourceBar {
         <span class="resource-icon">H</span>
         <span class="resource-value" id="res-happy">50</span>
       </div>
+      <div class="resource-separator"></div>
+      <div class="resource-item budget-item">
+        <span class="budget-label">Tax</span>
+        <span class="resource-value budget-positive" id="res-tax-revenue">+$0</span>
+      </div>
+      <div class="resource-item budget-item">
+        <span class="budget-label">Maint</span>
+        <span class="resource-value budget-negative" id="res-maintenance">-$0</span>
+      </div>
+      <div class="resource-item budget-item">
+        <span class="budget-label">Net</span>
+        <span class="resource-value" id="res-net-income">$0</span>
+      </div>
+      <div class="resource-separator"></div>
+      <div class="resource-item tax-slider-item">
+        <span class="budget-label" id="tax-rate-label">Tax: 10%</span>
+        <input type="range" id="tax-slider" min="${MIN_TAX_RATE}" max="${MAX_TAX_RATE}" step="${TAX_RATE_STEP}" value="10" class="tax-slider" />
+      </div>
+      <div class="resource-separator"></div>
+      <div class="demand-bar">
+        <span class="demand-title">Demand</span>
+        <div class="demand-item">
+          <span class="demand-label" style="color:#66BB6A">R</span>
+          <div class="demand-meter-track"><div class="demand-meter-fill" id="demand-res"></div></div>
+        </div>
+        <div class="demand-item">
+          <span class="demand-label" style="color:#42A5F5">C</span>
+          <div class="demand-meter-track"><div class="demand-meter-fill" id="demand-com"></div></div>
+        </div>
+        <div class="demand-item">
+          <span class="demand-label" style="color:#FFA726">I</span>
+          <div class="demand-meter-track"><div class="demand-meter-fill" id="demand-ind"></div></div>
+        </div>
+      </div>
     `;
     parent.appendChild(this.container);
 
     this.moneyEl = this.container.querySelector('#res-money')!;
     this.popEl = this.container.querySelector('#res-pop')!;
     this.happyEl = this.container.querySelector('#res-happy')!;
+    this.taxRevenueEl = this.container.querySelector('#res-tax-revenue')!;
+    this.maintenanceEl = this.container.querySelector('#res-maintenance')!;
+    this.netIncomeEl = this.container.querySelector('#res-net-income')!;
+    this.taxSlider = this.container.querySelector('#tax-slider')!;
+    this.taxLabel = this.container.querySelector('#tax-rate-label')!;
+    this.demandResEl = this.container.querySelector('#demand-res')!;
+    this.demandComEl = this.container.querySelector('#demand-com')!;
+    this.demandIndEl = this.container.querySelector('#demand-ind')!;
+
+    this.taxSlider.addEventListener('input', () => {
+      const rate = parseInt(this.taxSlider.value, 10);
+      this.taxLabel.textContent = `Tax: ${rate}%`;
+      this.onTaxRateChange?.(rate);
+    });
   }
 
-  update(resources: ResourceState): void {
-    this.moneyEl.textContent = resources.money.toLocaleString();
+  setUnlimitedMoney(enabled: boolean): void {
+    this.unlimited = enabled;
+  }
+
+  update(resources: ResourceState, state?: CityState): void {
+    this.moneyEl.textContent = this.unlimited ? '\u221E' : resources.money.toLocaleString();
     this.popEl.textContent = resources.population.toLocaleString();
     this.happyEl.textContent = `${resources.happiness}%`;
+
+    // Sync slider to server state (in case another player changed it)
+    if (this.taxSlider.value !== String(resources.taxRate)) {
+      this.taxSlider.value = String(resources.taxRate);
+      this.taxLabel.textContent = `Tax: ${resources.taxRate}%`;
+    }
+
+    if (state) {
+      const taxRevenue = calculateTaxRevenue(state);
+      const maintenance = calculateMaintenance(state);
+      const net = taxRevenue - maintenance;
+
+      this.taxRevenueEl.textContent = `+$${taxRevenue}`;
+      this.maintenanceEl.textContent = `-$${maintenance}`;
+      this.netIncomeEl.textContent = net >= 0 ? `+$${net}` : `-$${Math.abs(net)}`;
+      this.netIncomeEl.className = `resource-value ${net >= 0 ? 'budget-positive' : 'budget-negative'}`;
+    }
+
+    // Update demand bars
+    if (resources.demand) {
+      this.updateDemandBar(this.demandResEl, resources.demand.residential, '#66BB6A');
+      this.updateDemandBar(this.demandComEl, resources.demand.commercial, '#42A5F5');
+      this.updateDemandBar(this.demandIndEl, resources.demand.industrial, '#FFA726');
+    }
+  }
+
+  private updateDemandBar(el: HTMLDivElement, value: number, color: string): void {
+    // value is -1 to 1, map to 0-100% width
+    const pct = Math.max(0, Math.min(100, (value + 1) * 50));
+    el.style.width = `${pct}%`;
+    el.style.backgroundColor = value > 0 ? color : '#666';
   }
 }

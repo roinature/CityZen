@@ -2,23 +2,23 @@ import { io, Socket } from 'socket.io-client';
 import {
   C2S,
   S2C,
-  type CityState,
   type CityStatePayload,
   type BuildingPlacedPayload,
   type BuildingDemolishedPayload,
+  type ZoneGrowthPayload,
   type ErrorPayload,
   type Position,
   type BuildingType,
   type ResourceState,
   type Player,
-  type CityListItem,
 } from '@cityzen/shared';
 
 export interface GameCallbacks {
-  onCityState: (city: CityState, players: Player[]) => void;
+  onCityState: (city: import('@cityzen/shared').CityState, players: Player[]) => void;
   onBuildingPlaced: (payload: BuildingPlacedPayload) => void;
   onBuildingDemolished: (payload: BuildingDemolishedPayload) => void;
   onResourcesUpdate: (resources: ResourceState, tick: number) => void;
+  onZoneGrowth: (payload: ZoneGrowthPayload) => void;
   onPlayerJoined: (player: Player) => void;
   onPlayerLeft: (playerId: string) => void;
   onError: (error: ErrorPayload) => void;
@@ -50,6 +50,10 @@ export class SocketClient {
 
     this.socket.on(S2C.RESOURCES_UPDATE, (payload: { resources: ResourceState; tick: number }) => {
       this.callbacks.onResourcesUpdate(payload.resources, payload.tick);
+    });
+
+    this.socket.on(S2C.ZONE_GROWTH, (payload: ZoneGrowthPayload) => {
+      this.callbacks.onZoneGrowth(payload);
     });
 
     this.socket.on(S2C.PLAYER_JOINED, (payload: { player: Player }) => {
@@ -91,6 +95,14 @@ export class SocketClient {
 
   restart(): void {
     this.socket.emit(C2S.RESTART);
+  }
+
+  setTaxRate(taxRate: number): void {
+    this.socket.emit(C2S.SET_TAX_RATE, { taxRate });
+  }
+
+  setUnlimitedMoney(enabled: boolean): void {
+    this.socket.emit(C2S.SET_UNLIMITED_MONEY, { enabled });
   }
 
   leave(): void {

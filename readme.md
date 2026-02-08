@@ -23,7 +23,7 @@ npm install
 npm run dev
 ```
 
-This starts both the server (port 3000) and the Vite dev server (port 5173). Open `http://localhost:5173` in your browser.
+This starts both the server (port 3030) and the Vite dev server (port 5173). Open `http://localhost:5173` in your browser.
 
 ### Build for Production
 

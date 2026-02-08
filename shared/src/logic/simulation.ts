@@ -1,16 +1,32 @@
 import type { CityState } from '../types/city.js';
-import { calculateIncome, calculatePopulationGrowth, calculateHappiness, clamp } from './resources.js';
+import { calculateNetIncome, calculatePopulationGrowth, calculateHappiness, clamp } from './resources.js';
+import { calculateDemand, processZoneGrowth } from './demand.js';
 
 export function simulateTick(state: CityState): CityState {
-  const income = calculateIncome(state);
-  const popGrowth = calculatePopulationGrowth(state);
-  const happiness = calculateHappiness(state);
+  // Update demand first
+  const newDemand = calculateDemand(state);
+
+  // Create a working copy with updated demand and shallow-copied buildings
+  const working: CityState = {
+    ...state,
+    resources: { ...state.resources, demand: newDemand },
+    buildings: state.buildings.map(b => ({ ...b })),
+  };
+
+  // Process zone growth (mutates building copies in place)
+  processZoneGrowth(working);
+
+  // Calculate resource changes based on updated state
+  const netIncome = calculateNetIncome(working);
+  const popGrowth = calculatePopulationGrowth(working);
+  const happiness = calculateHappiness(working);
 
   return {
-    ...state,
+    ...working,
     resources: {
-      money: Math.max(0, state.resources.money + income),
-      population: Math.max(0, state.resources.population + popGrowth),
+      ...working.resources,
+      money: Math.max(0, working.resources.money + netIncome),
+      population: Math.max(0, working.resources.population + popGrowth),
       happiness: clamp(happiness, 0, 100),
     },
     tick: state.tick + 1,

@@ -14,6 +14,8 @@ export const C2S = {
   LEAVE: 'city:leave',
   SAVE: 'city:save',
   RESTART: 'city:restart',
+  SET_TAX_RATE: 'city:taxRate',
+  SET_UNLIMITED_MONEY: 'city:unlimitedMoney',
 } as const;
 
 // Server -> Client event names
@@ -22,6 +24,7 @@ export const S2C = {
   BUILDING_PLACED: 'building:placed',
   BUILDING_DEMOLISHED: 'building:demolished',
   RESOURCES_UPDATE: 'city:resources',
+  ZONE_GROWTH: 'zone:growth',
   PLAYER_JOINED: 'player:joined',
   PLAYER_LEFT: 'player:left',
   ERROR: 'error',
@@ -49,6 +52,14 @@ export interface DemolishPayload {
   position: Position;
 }
 
+export interface SetTaxRatePayload {
+  taxRate: number;
+}
+
+export interface SetUnlimitedMoneyPayload {
+  enabled: boolean;
+}
+
 // Server -> Client payloads
 export interface CityStatePayload {
   city: CityState;
@@ -64,6 +75,14 @@ export interface BuildingDemolishedPayload {
   position: Position;
   buildingId: string;
   resources: ResourceState;
+}
+
+export interface ZoneGrowthPayload {
+  buildings: Array<{
+    id: string;
+    developmentLevel: number;
+    developedAt: number;
+  }>;
 }
 
 export interface ErrorPayload {

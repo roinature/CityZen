@@ -6,10 +6,13 @@ import {
   type PlacedBuilding,
   type Position,
   BuildingType,
+  isZone,
   S2C,
   TICK_INTERVAL_MS,
   AUTO_SAVE_INTERVAL_MS,
   INITIAL_RESOURCES,
+  MIN_TAX_RATE,
+  MAX_TAX_RATE,
   BUILDING_DEFS,
   createEmptyGrid,
   canPlaceBuilding,
@@ -25,6 +28,7 @@ export class GameRoom {
   private saveInterval: ReturnType<typeof setInterval> | null = null;
   private io: SocketIOServer;
   private debouncedSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  unlimitedMoney = false;
 
   constructor(io: SocketIOServer, id: string, name: string, existingState?: CityState) {
     this.io = io;
@@ -43,8 +47,39 @@ export class GameRoom {
 
   start(): void {
     this.tickInterval = setInterval(() => {
+      // Snapshot development levels before tick
+      const prevLevels = new Map<string, number>();
+      for (const b of this.state.buildings) {
+        if (isZone(b.type)) {
+          prevLevels.set(b.id, b.developmentLevel ?? 0);
+        }
+      }
+
       this.state = simulateTick(this.state);
+
+      // Broadcast resources (includes demand)
       this.broadcast(S2C.RESOURCES_UPDATE, { resources: this.state.resources, tick: this.state.tick });
+
+      // Detect zone growth and broadcast
+      const grownBuildings: Array<{ id: string; developmentLevel: number; developedAt: number }> = [];
+      for (const b of this.state.buildings) {
+        if (isZone(b.type)) {
+          const prevLevel = prevLevels.get(b.id) ?? 0;
+          const currLevel = b.developmentLevel ?? 0;
+          if (currLevel > prevLevel) {
+            grownBuildings.push({
+              id: b.id,
+              developmentLevel: currLevel,
+              developedAt: b.developedAt!,
+            });
+          }
+        }
+      }
+
+      if (grownBuildings.length > 0) {
+        this.broadcast(S2C.ZONE_GROWTH, { buildings: grownBuildings });
+        this.saveAfterMutation();
+      }
     }, TICK_INTERVAL_MS);
 
     this.saveInterval = setInterval(() => {
@@ -89,7 +124,10 @@ export class GameRoom {
   }
 
   placeBuilding(playerId: string, position: Position, type: BuildingType): { success: boolean; error?: string } {
-    const result = canPlaceBuilding(this.state.grid, position, type, this.state.resources);
+    const result = canPlaceBuilding(
+      this.state.grid, position, type, this.state.resources,
+      this.unlimitedMoney, this.state.buildings,
+    );
     if (!result.valid) {
       return { success: false, error: result.reason };
     }
@@ -101,6 +139,7 @@ export class GameRoom {
       position,
       placedBy: playerId,
       placedAt: Date.now(),
+      ...(isZone(type) ? { developmentLevel: 0 } : {}),
     };
 
     // Update grid
@@ -112,7 +151,9 @@ export class GameRoom {
 
     // Update state
     this.state.buildings.push(building);
-    this.state.resources.money -= def.cost;
+    if (!this.unlimitedMoney) {
+      this.state.resources.money -= def.cost;
+    }
     this.state.updatedAt = Date.now();
 
     // Broadcast to all players in room
@@ -148,7 +189,9 @@ export class GameRoom {
 
     // Remove building, refund half cost
     this.state.buildings = this.state.buildings.filter(b => b.id !== buildingId);
-    this.state.resources.money += Math.floor(def.cost / 2);
+    if (!this.unlimitedMoney) {
+      this.state.resources.money += Math.floor(def.cost / 2);
+    }
     this.state.updatedAt = Date.now();
 
     this.broadcast(S2C.BUILDING_DEMOLISHED, {
@@ -159,6 +202,32 @@ export class GameRoom {
 
     this.saveAfterMutation();
     return { success: true };
+  }
+
+  setTaxRate(rate: number): { success: boolean; error?: string } {
+    if (rate < MIN_TAX_RATE || rate > MAX_TAX_RATE || !Number.isInteger(rate)) {
+      return { success: false, error: 'Invalid tax rate' };
+    }
+
+    this.state.resources.taxRate = rate;
+    this.state.updatedAt = Date.now();
+
+    this.broadcast(S2C.RESOURCES_UPDATE, {
+      resources: this.state.resources,
+      tick: this.state.tick,
+    });
+
+    this.saveAfterMutation();
+    return { success: true };
+  }
+
+  setUnlimitedMoney(enabled: boolean): void {
+    this.unlimitedMoney = enabled;
+    // Broadcast updated resources so UI reflects state
+    this.broadcast(S2C.RESOURCES_UPDATE, {
+      resources: this.state.resources,
+      tick: this.state.tick,
+    });
   }
 
   restart(): void {

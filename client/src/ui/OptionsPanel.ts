@@ -4,6 +4,7 @@ export interface GameOptions {
   maxCars: number;
   cameraSpeed: number;
   shadowsEnabled: boolean;
+  unlimitedMoney: boolean;
 }
 
 const OPTIONS_KEY = 'cityzen_options';
@@ -14,6 +15,7 @@ const DEFAULT_OPTIONS: GameOptions = {
   maxCars: 20,
   cameraSpeed: 30,
   shadowsEnabled: true,
+  unlimitedMoney: false,
 };
 
 export type OptionsChangeCallback = (options: GameOptions) => void;
@@ -56,6 +58,10 @@ export class OptionsPanel {
             <label for="opt-shadows">Shadows</label>
             <input type="checkbox" id="opt-shadows" />
           </div>
+          <div class="option-row">
+            <label for="opt-unlimited">Unlimited Money</label>
+            <input type="checkbox" id="opt-unlimited" />
+          </div>
         </div>
         <div class="options-buttons">
           <button class="menu-btn" id="opt-back">Back</button>
@@ -81,6 +87,7 @@ export class OptionsPanel {
     this.bindCheckbox('opt-grid', 'showGrid');
     this.bindCheckbox('opt-cars', 'showCars');
     this.bindCheckbox('opt-shadows', 'shadowsEnabled');
+    this.bindCheckbox('opt-unlimited', 'unlimitedMoney');
     this.bindRange('opt-max-cars', 'maxCars', 'opt-max-cars-val');
     this.bindRange('opt-cam-speed', 'cameraSpeed', 'opt-cam-speed-val');
 
@@ -110,6 +117,7 @@ export class OptionsPanel {
     (this.overlay.querySelector('#opt-grid') as HTMLInputElement).checked = this.options.showGrid;
     (this.overlay.querySelector('#opt-cars') as HTMLInputElement).checked = this.options.showCars;
     (this.overlay.querySelector('#opt-shadows') as HTMLInputElement).checked = this.options.shadowsEnabled;
+    (this.overlay.querySelector('#opt-unlimited') as HTMLInputElement).checked = this.options.unlimitedMoney;
 
     const maxCarsEl = this.overlay.querySelector('#opt-max-cars') as HTMLInputElement;
     maxCarsEl.value = String(this.options.maxCars);

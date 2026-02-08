@@ -1,4 +1,15 @@
-import { BuildingType, BUILDING_DEFS } from '@cityzen/shared';
+import { BuildingType, BUILDING_DEFS, ZONE_TYPES, ROAD_TYPES } from '@cityzen/shared';
+
+interface ToolbarSection {
+  label: string;
+  types: readonly BuildingType[];
+}
+
+const SECTIONS: ToolbarSection[] = [
+  { label: 'Zones', types: ZONE_TYPES },
+  { label: 'Roads', types: ROAD_TYPES },
+  { label: 'Other', types: [BuildingType.PARK] },
+];
 
 export class Toolbar {
   private container: HTMLDivElement;
@@ -14,31 +25,48 @@ export class Toolbar {
   }
 
   private render(): void {
-    for (const [type, def] of Object.entries(BUILDING_DEFS)) {
-      const btn = document.createElement('button');
-      btn.className = 'toolbar-btn';
+    for (const section of SECTIONS) {
+      const sectionEl = document.createElement('div');
+      sectionEl.className = 'toolbar-section';
 
-      const icon = document.createElement('div');
-      icon.className = 'building-icon';
-      icon.style.backgroundColor = def.color;
+      const header = document.createElement('span');
+      header.className = 'toolbar-section-label';
+      header.textContent = section.label;
+      sectionEl.appendChild(header);
 
-      const label = document.createElement('span');
-      label.textContent = def.label;
+      const btnGroup = document.createElement('div');
+      btnGroup.className = 'toolbar-btn-group';
 
-      const cost = document.createElement('span');
-      cost.className = 'cost';
-      cost.textContent = `$${def.cost}`;
+      for (const type of section.types) {
+        const def = BUILDING_DEFS[type];
+        const btn = document.createElement('button');
+        btn.className = 'toolbar-btn';
 
-      btn.appendChild(icon);
-      btn.appendChild(label);
-      btn.appendChild(cost);
+        const icon = document.createElement('div');
+        icon.className = 'building-icon';
+        icon.style.backgroundColor = def.color;
 
-      btn.addEventListener('click', () => {
-        this.onSelect(type as BuildingType);
-      });
+        const label = document.createElement('span');
+        label.textContent = def.label;
 
-      this.container.appendChild(btn);
-      this.buttons.set(type as BuildingType, btn);
+        const cost = document.createElement('span');
+        cost.className = 'cost';
+        cost.textContent = `$${def.cost}`;
+
+        btn.appendChild(icon);
+        btn.appendChild(label);
+        btn.appendChild(cost);
+
+        btn.addEventListener('click', () => {
+          this.onSelect(type);
+        });
+
+        btnGroup.appendChild(btn);
+        this.buttons.set(type, btn);
+      }
+
+      sectionEl.appendChild(btnGroup);
+      this.container.appendChild(sectionEl);
     }
   }
 

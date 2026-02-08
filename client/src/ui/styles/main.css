@@ -60,6 +60,89 @@ body {
   min-width: 40px;
 }
 
+.resource-separator {
+  width: 1px;
+  background: rgba(255, 255, 255, 0.3);
+  align-self: stretch;
+}
+
+.budget-label {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.budget-positive {
+  color: #4CAF50;
+}
+
+.budget-negative {
+  color: #f44336;
+}
+
+.tax-slider-item {
+  flex-direction: column;
+  gap: 2px !important;
+}
+
+.tax-slider {
+  width: 80px;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.tax-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: white;
+  cursor: pointer;
+}
+
+/* Demand bars */
+.demand-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.demand-title {
+  font-size: 11px;
+  opacity: 0.7;
+  margin-right: 2px;
+}
+
+.demand-item {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.demand-label {
+  font-size: 11px;
+  font-weight: bold;
+}
+
+.demand-meter-track {
+  width: 30px;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.demand-meter-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease, background-color 0.3s ease;
+}
+
 /* Toolbar */
 .toolbar {
   position: absolute;
@@ -67,11 +150,36 @@ body {
   left: 50%;
   transform: translateX(-50%);
   display: flex;
-  gap: 8px;
+  gap: 4px;
   background: rgba(0, 0, 0, 0.7);
   padding: 10px 16px;
   border-radius: 10px;
   backdrop-filter: blur(4px);
+}
+
+.toolbar-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.toolbar-section-label {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.5);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.toolbar-btn-group {
+  display: flex;
+  gap: 4px;
+}
+
+.toolbar-section + .toolbar-section {
+  margin-left: 8px;
+  padding-left: 8px;
+  border-left: 1px solid rgba(255, 255, 255, 0.15);
 }
 
 .toolbar-btn {

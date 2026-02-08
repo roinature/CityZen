@@ -6,6 +6,8 @@ import {
   type JoinCityPayload,
   type PlaceBuildingPayload,
   type DemolishPayload,
+  type SetTaxRatePayload,
+  type SetUnlimitedMoneyPayload,
 } from '@cityzen/shared';
 import { RoomManager } from '../game/RoomManager.js';
 
@@ -81,6 +83,28 @@ export function setupSocketHandlers(io: SocketIOServer, roomManager: RoomManager
       if (!result.success) {
         socket.emit(S2C.ERROR, { message: result.error!, code: 'DEMOLISH_FAILED' });
       }
+    });
+
+    socket.on(C2S.SET_TAX_RATE, (payload: SetTaxRatePayload) => {
+      if (!currentRoomId) {
+        socket.emit(S2C.ERROR, { message: 'Not in a city', code: 'NO_ROOM' });
+        return;
+      }
+
+      const room = roomManager.getRoom(currentRoomId);
+      if (!room) return;
+
+      const result = room.setTaxRate(payload.taxRate);
+      if (!result.success) {
+        socket.emit(S2C.ERROR, { message: result.error!, code: 'TAX_RATE_FAILED' });
+      }
+    });
+
+    socket.on(C2S.SET_UNLIMITED_MONEY, (payload: SetUnlimitedMoneyPayload) => {
+      if (!currentRoomId) return;
+      const room = roomManager.getRoom(currentRoomId);
+      if (!room) return;
+      room.setUnlimitedMoney(payload.enabled);
     });
 
     socket.on(C2S.SAVE, async () => {
