@@ -1,0 +1,1 @@
+{"root":["./src/config.ts","./src/index.ts","./src/game/gameroom.ts","./src/game/roommanager.ts","./src/game/worldmanager.ts","./src/persistence/jsonstore.ts","./src/persistence/playerstore.ts","./src/persistence/worldstore.ts","./src/services/xservice.ts","./src/socket/handlers.ts"],"version":"5.9.3"}
