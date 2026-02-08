@@ -5,11 +5,13 @@ import type { ResourceState } from './resources.js';
 import type { PlacedBuilding } from './building.js';
 import type { Player } from './player.js';
 import type { GameClock } from './time.js';
+import type { WorldState, WorldPosition } from './world.js';
 
 // Client -> Server event names
 export const C2S = {
   JOIN_CITY: 'city:join',
   CREATE_CITY: 'city:create',
+  CLAIM_PLOT: 'world:claimPlot',
   PLACE_BUILDING: 'building:place',
   DEMOLISH: 'building:demolish',
   LEAVE: 'city:leave',
@@ -23,6 +25,7 @@ export const C2S = {
 // Server -> Client event names
 export const S2C = {
   CITY_STATE: 'city:state',
+  WORLD_STATE: 'world:state',
   BUILDING_PLACED: 'building:placed',
   BUILDING_DEMOLISHED: 'building:demolished',
   RESOURCES_UPDATE: 'city:resources',
@@ -42,6 +45,13 @@ export interface JoinCityPayload {
 }
 
 export interface CreateCityPayload {
+  cityName: string;
+  playerName: string;
+  playerId?: string;
+}
+
+export interface ClaimPlotPayload {
+  position: WorldPosition;
   cityName: string;
   playerName: string;
   playerId?: string;
@@ -72,6 +82,10 @@ export interface SetGameSpeedPayload {
 export interface CityStatePayload {
   city: CityState;
   players: Player[];
+}
+
+export interface WorldStatePayload {
+  world: WorldState;
 }
 
 export interface BuildingPlacedPayload {

@@ -6,13 +6,16 @@ export type { ResourceState, DemandState } from './types/resources.js';
 export type { CityState } from './types/city.js';
 export type { Player, PlayerProfile } from './types/player.js';
 export type { GameClock } from './types/time.js';
+export type { WorldState, WorldCityEntry, WorldPosition } from './types/world.js';
 export {
   C2S, S2C,
   type JoinCityPayload,
   type CreateCityPayload,
+  type ClaimPlotPayload,
   type PlaceBuildingPayload,
   type DemolishPayload,
   type CityStatePayload,
+  type WorldStatePayload,
   type BuildingPlacedPayload,
   type BuildingDemolishedPayload,
   type ResourcesUpdatePayload,
@@ -33,6 +36,7 @@ export {
   GAME_MS_PER_TICK, TICKS_PER_GAME_DAY, DAYS_PER_GAME_YEAR,
   DEFAULT_GAME_SPEED, MAX_GAME_SPEED,
 } from './constants/simulation.js';
+export { WORLD_MAP_SIZE, DEFAULT_WORLD_NAME } from './constants/world.js';
 export { BUILDING_DEFS, ZONE_LEVELS } from './constants/buildings.js';
 export type { ZoneLevelDef } from './constants/buildings.js';
 

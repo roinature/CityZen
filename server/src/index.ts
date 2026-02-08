@@ -3,6 +3,7 @@ import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import { PORT, CLIENT_ORIGIN } from './config.js';
 import { RoomManager } from './game/RoomManager.js';
+import { WorldManager } from './game/WorldManager.js';
 import { setupSocketHandlers } from './socket/handlers.js';
 
 const app = express();
@@ -16,6 +17,7 @@ const io = new SocketIOServer(httpServer, {
 });
 
 const roomManager = new RoomManager(io);
+const worldManager = new WorldManager(io, roomManager);
 
 // REST endpoints
 app.get('/api/health', (_req, res) => {
@@ -27,9 +29,16 @@ app.get('/api/cities', async (_req, res) => {
   res.json(cities);
 });
 
-// Setup socket handlers
-setupSocketHandlers(io, roomManager);
+app.get('/api/world', (_req, res) => {
+  res.json(worldManager.getWorldState());
+});
 
-httpServer.listen(PORT, () => {
-  console.log(`CityZen server running on http://localhost:${PORT}`);
+// Setup socket handlers
+setupSocketHandlers(io, roomManager, worldManager);
+
+// Initialize world then start server
+worldManager.init().then(() => {
+  httpServer.listen(PORT, () => {
+    console.log(`CityZen server running on http://localhost:${PORT}`);
+  });
 });
