@@ -43,7 +43,7 @@ export async function saveCityState(cityId: string, state: CityState): Promise<v
   });
 
   // Replace all buildings atomically: delete existing, then bulk insert
-  await prisma.$transaction(async (tx) => {
+  await prisma.$transaction(async (tx: Omit<typeof prisma, '$connect' | '$disconnect' | '$on' | '$transaction' | '$extends'>) => {
     await tx.building.deleteMany({ where: { cityId } });
 
     if (state.buildings.length > 0) {
@@ -73,7 +73,7 @@ export async function loadCityState(cityId: string): Promise<CityState | null> {
   if (!city) return null;
 
   // Reconstruct buildings array
-  const buildings: PlacedBuilding[] = city.buildings.map((b) => ({
+  const buildings: PlacedBuilding[] = city.buildings.map((b: typeof city.buildings[number]) => ({
     id: b.id,
     type: b.type as PlacedBuilding['type'],
     position: { x: b.positionX, z: b.positionZ },
@@ -129,7 +129,7 @@ export async function listSavedCities(): Promise<string[]> {
   const cities = await prisma.city.findMany({
     select: { id: true },
   });
-  return cities.map(c => c.id);
+  return cities.map((c: { id: string }) => c.id);
 }
 
 export async function deleteCityState(cityId: string): Promise<void> {
