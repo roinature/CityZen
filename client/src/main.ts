@@ -29,7 +29,7 @@ import { FooterIndicator } from './ui/FooterIndicator.js';
 import { InfraToolbar } from './ui/InfraToolbar.js';
 import { GameClient } from './network/GameClient.js';
 
-const SERVER_URL = 'http://localhost:3030';
+const SERVER_URL = window.location.origin;
 const SESSION_KEY = 'cityzen_session';
 const PLAYER_ID_KEY = 'cityzen_player_id';
 
