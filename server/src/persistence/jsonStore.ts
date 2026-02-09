@@ -42,24 +42,26 @@ export async function saveCityState(cityId: string, state: CityState): Promise<v
     },
   });
 
-  // Replace all buildings: delete existing, then bulk insert
-  await prisma.building.deleteMany({ where: { cityId } });
+  // Replace all buildings atomically: delete existing, then bulk insert
+  await prisma.$transaction(async (tx) => {
+    await tx.building.deleteMany({ where: { cityId } });
 
-  if (state.buildings.length > 0) {
-    await prisma.building.createMany({
-      data: state.buildings.map((b) => ({
-        id: b.id,
-        cityId,
-        type: b.type,
-        positionX: b.position.x,
-        positionZ: b.position.z,
-        placedBy: b.placedBy,
-        placedAt: b.placedAt,
-        developmentLevel: b.developmentLevel ?? null,
-        developedAt: b.developedAt ?? null,
-      })),
-    });
-  }
+    if (state.buildings.length > 0) {
+      await tx.building.createMany({
+        data: state.buildings.map((b) => ({
+          id: b.id,
+          cityId,
+          type: b.type,
+          positionX: b.position.x,
+          positionZ: b.position.z,
+          placedBy: b.placedBy,
+          placedAt: b.placedAt,
+          developmentLevel: b.developmentLevel ?? null,
+          developedAt: b.developedAt ?? null,
+        })),
+      });
+    }
+  });
 }
 
 export async function loadCityState(cityId: string): Promise<CityState | null> {

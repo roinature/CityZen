@@ -314,11 +314,25 @@ export class GameRoom {
     this.debouncedSaveTimer = setTimeout(() => this.save(), 1000);
   }
 
+  private isSaving = false;
+  private savePending = false;
+
   private async save(): Promise<void> {
+    if (this.isSaving) {
+      this.savePending = true;
+      return;
+    }
+    this.isSaving = true;
     try {
       await saveCityState(this.id, this.state);
     } catch (err) {
       console.error(`Failed to save city ${this.id}:`, err);
+    } finally {
+      this.isSaving = false;
+      if (this.savePending) {
+        this.savePending = false;
+        this.save();
+      }
     }
   }
 }

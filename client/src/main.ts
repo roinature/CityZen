@@ -25,6 +25,7 @@ import { OptionsPanel, type GameOptions } from './ui/OptionsPanel.js';
 import { CarManager } from './world/CarManager.js';
 import { ToolSidebar, type ToolMode } from './ui/ToolSidebar.js';
 import { FinancePanel } from './ui/FinancePanel.js';
+import { FooterIndicator } from './ui/FooterIndicator.js';
 import { SocketClient } from './network/SocketClient.js';
 
 const SERVER_URL = 'http://localhost:3030';
@@ -86,6 +87,7 @@ const buildMode = new BuildMode(sceneManager.scene, sceneManager.camera);
 
 // --- UI ---
 const resourceBar = new ResourceBar(uiRoot);
+const footerIndicator = new FooterIndicator(uiRoot);
 const toolbar = new Toolbar(uiRoot, (type: BuildingType) => {
   if (buildMode.getSelectedType() === type) {
     buildMode.deselect();
@@ -143,6 +145,8 @@ const socketClient = new SocketClient(SERVER_URL, {
     lobby.hide();
     worldMap.hide();
     saveSession(city.id, currentPlayerName);
+    // Re-apply options to the new server room (unlimited money, etc.)
+    applyOptions(optionsPanel.getOptions());
     console.log(`Joined city: ${city.name} with ${players.length} players`);
   },
 
@@ -238,6 +242,14 @@ buildMode.onPlace = (pos, type) => {
 
 buildMode.onDemolish = (pos) => {
   socketClient.demolish(pos);
+};
+
+buildMode.onDragCostUpdate = (cost) => {
+  if (cost !== null) {
+    footerIndicator.show(`Road cost: $${cost}`);
+  } else {
+    footerIndicator.hide();
+  }
 };
 
 // --- Edge road click: Navigate to adjacent city ---

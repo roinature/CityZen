@@ -1,7 +1,7 @@
 import type { Grid, Position } from '../types/grid.js';
 import type { ResourceState } from '../types/resources.js';
 import type { PlacedBuilding } from '../types/building.js';
-import { BuildingType, isZone, isRoad } from '../types/building.js';
+import { BuildingType } from '../types/building.js';
 import { BUILDING_DEFS } from '../constants/buildings.js';
 import { DEFAULT_GRID_SIZE } from '../constants/grid.js';
 
@@ -40,42 +40,6 @@ export function canPlaceBuilding(
   }
 
   return { valid: true };
-}
-
-function hasAdjacentRoadOrZone(
-  pos: Position,
-  size: { w: number; d: number },
-  buildings: PlacedBuilding[],
-): boolean {
-  const validPositions = new Set<string>();
-  for (const b of buildings) {
-    if (isRoad(b.type) || isZone(b.type)) {
-      const def = BUILDING_DEFS[b.type];
-      for (let dx = 0; dx < def.size.w; dx++) {
-        for (let dz = 0; dz < def.size.d; dz++) {
-          validPositions.add(`${b.position.x + dx},${b.position.z + dz}`);
-        }
-      }
-    }
-  }
-
-  for (let dx = 0; dx < size.w; dx++) {
-    for (let dz = 0; dz < size.d; dz++) {
-      const cx = pos.x + dx;
-      const cz = pos.z + dz;
-      const neighbors = [
-        `${cx - 1},${cz}`,
-        `${cx + 1},${cz}`,
-        `${cx},${cz - 1}`,
-        `${cx},${cz + 1}`,
-      ];
-      for (const n of neighbors) {
-        if (validPositions.has(n)) return true;
-      }
-    }
-  }
-
-  return false;
 }
 
 export function createEmptyGrid(size: number = DEFAULT_GRID_SIZE): Grid {

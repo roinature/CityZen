@@ -28,20 +28,32 @@ function computeStraightLine(start: Position, end: Position, stepW: number, step
   const dx = end.x - start.x;
   const dz = end.z - start.z;
   const positions: Position[] = [];
+  const maxX = DEFAULT_GRID_SIZE - stepW;
+  const maxZ = DEFAULT_GRID_SIZE - stepD;
+
+  // Clamp the start so the line always begins within valid bounds
+  const clampedStart: Position = {
+    x: Math.max(0, Math.min(maxX, start.x)),
+    z: Math.max(0, Math.min(maxZ, start.z)),
+  };
 
   if (Math.abs(dx) >= Math.abs(dz)) {
-    // Horizontal dominant
+    // Horizontal dominant — clamp end x to grid bounds
     const dir = dx >= 0 ? 1 : -1;
-    const steps = Math.floor(Math.abs(dx) / stepW);
+    const clampedEndX = Math.max(0, Math.min(maxX, end.x));
+    const dist = Math.abs(clampedEndX - clampedStart.x);
+    const steps = Math.floor(dist / stepW);
     for (let i = 0; i <= steps; i++) {
-      positions.push({ x: start.x + i * stepW * dir, z: start.z });
+      positions.push({ x: clampedStart.x + i * stepW * dir, z: clampedStart.z });
     }
   } else {
-    // Vertical dominant
+    // Vertical dominant — clamp end z to grid bounds
     const dir = dz >= 0 ? 1 : -1;
-    const steps = Math.floor(Math.abs(dz) / stepD);
+    const clampedEndZ = Math.max(0, Math.min(maxZ, end.z));
+    const dist = Math.abs(clampedEndZ - clampedStart.z);
+    const steps = Math.floor(dist / stepD);
     for (let i = 0; i <= steps; i++) {
-      positions.push({ x: start.x, z: start.z + i * stepD * dir });
+      positions.push({ x: clampedStart.x, z: clampedStart.z + i * stepD * dir });
     }
   }
 
