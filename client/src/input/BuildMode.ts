@@ -236,6 +236,7 @@ export class BuildMode {
     if ((e.target as HTMLElement).closest('#ui-root')) return;
 
     const pos = this.raycaster.getGridPosition(e.clientX, e.clientY, this.camera);
+    console.log('[BuildMode] mousedown', { pos, selectedType: this.selectedType, toolMode: this.toolMode });
 
     // Rectangle drag for zones
     if (isRectDragType(this.selectedType)) {
@@ -257,10 +258,20 @@ export class BuildMode {
   }
 
   private onMouseUp(): void {
+    console.log('[BuildMode] mouseup', {
+      isDragging: this.isDragging,
+      lineDragStart: this.lineDragStart,
+      selectedType: this.selectedType,
+      isLineDrag: this.selectedType ? isLineDragType(this.selectedType) : null,
+      hasOnPlace: !!this.onPlace,
+      currentHoverPos: this.currentHoverPos,
+    });
+
     // Line drag release — place all roads along the straight line
     if (this.isDragging && this.lineDragStart && this.selectedType && isLineDragType(this.selectedType) && this.onPlace && this.currentHoverPos) {
       const def = BUILDING_DEFS[this.selectedType];
       const positions = computeStraightLine(this.lineDragStart, this.currentHoverPos, def.size.w, def.size.d);
+      console.log('[BuildMode] placing roads', { count: positions.length, positions });
       for (const pos of positions) {
         this.onPlace(pos, this.selectedType);
       }

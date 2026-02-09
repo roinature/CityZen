@@ -30,6 +30,11 @@ export class SceneManager {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
+    // Initialize layers: 0 (Common), 1 (Day) enabled; 2 (Night) disabled
+    this.camera.layers.enable(0);
+    this.camera.layers.enable(1);
+    this.camera.layers.disable(2);
+
     window.addEventListener('resize', () => this.onResize());
   }
 
@@ -50,6 +55,16 @@ export class SceneManager {
   setFrustumSize(size: number): void {
     this.frustumSize = size;
     this.onResize();
+  }
+
+  setDayNight(isNight: boolean): void {
+    if (isNight) {
+      this.camera.layers.enable(2);
+      this.camera.layers.disable(1);
+    } else {
+      this.camera.layers.enable(1);
+      this.camera.layers.disable(2);
+    }
   }
 
   render(): void {

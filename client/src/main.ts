@@ -119,6 +119,7 @@ const toolSidebar = new ToolSidebar(uiRoot, {
   onDayNightToggle: () => {
     isNight = !isNight;
     lighting.setNight(isNight);
+    sceneManager.setDayNight(isNight);
   },
   onFinanceToggle: () => {
     if (cityState) financePanel.update(cityState);
@@ -237,6 +238,7 @@ resourceBar.onGameSpeedChange = (speed) => {
 };
 
 buildMode.onPlace = (pos, type) => {
+  console.log('[Client] onPlace called', { pos, type });
   socketClient.placeBuilding(pos, type);
 };
 

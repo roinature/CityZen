@@ -151,15 +151,18 @@ export function setupSocketHandlers(io: SocketIOServer, roomManager: RoomManager
     });
 
     socket.on(C2S.PLACE_BUILDING, (payload: PlaceBuildingPayload) => {
+      console.log('[Server] PLACE_BUILDING received', { position: payload.position, type: payload.type, currentRoomId });
+
       if (!currentRoomId) {
         socket.emit(S2C.ERROR, { message: 'Not in a city', code: 'NO_ROOM' });
         return;
       }
 
       const room = roomManager.getRoom(currentRoomId);
-      if (!room) return;
+      if (!room) { console.log('[Server] Room not found:', currentRoomId); return; }
 
       const result = room.placeBuilding(socket.id, payload.position, payload.type);
+      console.log('[Server] placeBuilding result:', result);
       if (!result.success) {
         socket.emit(S2C.ERROR, { message: result.error!, code: 'PLACEMENT_FAILED' });
       } else if (isRoad(payload.type)) {

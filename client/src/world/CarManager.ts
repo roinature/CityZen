@@ -44,6 +44,8 @@ interface Car {
   speedMultiplier: number;
   /** Whether the car is performing a U-turn at a dead end */
   uTurn: boolean;
+  /** Whether the car is driving off the grid edge */
+  exiting: boolean;
 }
 
 export class CarManager {
@@ -75,7 +77,8 @@ export class CarManager {
     this.rebuildRoadSet(state);
     this.adjustCarCount();
 
-    for (const car of this.cars) {
+    for (let ci = this.cars.length - 1; ci >= 0; ci--) {
+      const car = this.cars[ci];
       // Check for cars ahead and adjust speed
       const carAhead = this.getCarAhead(car);
       if (carAhead) {
@@ -100,6 +103,13 @@ export class CarManager {
       car.progress += CAR_SPEED * deltaTime * car.speedMultiplier * speedFactor * roadSpeed;
 
       if (car.progress >= 1) {
+        if (car.exiting) {
+          // Car has driven off the edge — remove it
+          this.scene.remove(car.mesh);
+          this.disposeMesh(car.mesh);
+          this.cars.splice(ci, 1);
+          continue;
+        }
         // Arrived at destination cell — pick next cell
         car.from = car.to;
         car.progress = 0;
@@ -224,7 +234,7 @@ export class CarManager {
     let closestDistance = Infinity;
 
     for (const other of this.cars) {
-      if (other === car) continue;
+      if (other === car || other.exiting) continue;
 
       // Check if the other car is ahead of this car
       if (this.isCarAhead(car, other)) {
@@ -437,6 +447,12 @@ export class CarManager {
     const roads = Array.from(this.roadSet);
     if (roads.length === 0) return null;
 
+    // 30% chance to spawn from a grid edge if edge roads exist
+    if (Math.random() < 0.3) {
+      const edgeCar = this.spawnEdgeCar();
+      if (edgeCar) return edgeCar;
+    }
+
     // Pick a random road cell
     const startKey = roads[Math.floor(Math.random() * roads.length)];
     const from = this.keyToPos(startKey);
@@ -456,10 +472,60 @@ export class CarManager {
       prevDirection: dir,
       speedMultiplier: 1,
       uTurn: false,
+      exiting: false,
     };
 
     this.pickNextCell(car);
     return car;
+  }
+
+  /** Find road cells on the grid edges that can receive cars from outside */
+  private getEdgeRoadCells(): { pos: Position; dir: Direction }[] {
+    const result: { pos: Position; dir: Direction }[] = [];
+    for (const key of this.roadSet) {
+      const pos = this.keyToPos(key);
+      // West edge: car enters heading east
+      if (pos.x === 0) result.push({ pos, dir: { dx: 1, dz: 0 } });
+      // East edge: car enters heading west
+      if (pos.x === DEFAULT_GRID_SIZE - 1) result.push({ pos, dir: { dx: -1, dz: 0 } });
+      // North edge: car enters heading south
+      if (pos.z === 0) result.push({ pos, dir: { dx: 0, dz: 1 } });
+      // South edge: car enters heading north
+      if (pos.z === DEFAULT_GRID_SIZE - 1) result.push({ pos, dir: { dx: 0, dz: -1 } });
+    }
+    return result;
+  }
+
+  /** Spawn a car entering from outside the grid at an edge road cell */
+  private spawnEdgeCar(): Car | null {
+    const edges = this.getEdgeRoadCells();
+    if (edges.length === 0) return null;
+
+    const pick = edges[Math.floor(Math.random() * edges.length)];
+    // Start one cell outside the grid
+    const from: Position = {
+      x: pick.pos.x - pick.dir.dx,
+      z: pick.pos.z - pick.dir.dz,
+    };
+
+    const mesh = this.createCarMesh();
+    const worldPos = this.gridToWorld(from);
+    mesh.position.set(worldPos.x, CAR_Y, worldPos.z);
+    const angle = Math.atan2(-pick.dir.dz, pick.dir.dx);
+    mesh.rotation.y = angle;
+    this.scene.add(mesh);
+
+    return {
+      mesh,
+      from,
+      to: pick.pos,
+      progress: 0,
+      direction: pick.dir,
+      prevDirection: pick.dir,
+      speedMultiplier: 1,
+      uTurn: false,
+      exiting: false,
+    };
   }
 
   private pickNextCell(car: Car): void {
@@ -474,6 +540,14 @@ export class CarManager {
 
     if (this.canMoveTo(car.from, forward)) {
       car.to = forward;
+      this.rotateCarMesh(car);
+      return;
+    }
+
+    // If forward is off-grid, let the car drive off the edge
+    if (this.isOffGrid(forward) && this.isEdgeRoad(car.from, car.direction)) {
+      car.to = forward;
+      car.exiting = true;
       this.rotateCarMesh(car);
       return;
     }
@@ -511,6 +585,21 @@ export class CarManager {
 
     // Completely isolated — stay put
     car.to = { ...car.from };
+  }
+
+  /** Check if a position is outside the grid bounds */
+  private isOffGrid(pos: Position): boolean {
+    return pos.x < 0 || pos.x >= DEFAULT_GRID_SIZE || pos.z < 0 || pos.z >= DEFAULT_GRID_SIZE;
+  }
+
+  /** Check if a road cell is on the grid edge facing the given direction */
+  private isEdgeRoad(pos: Position, dir: Direction): boolean {
+    if (!this.roadSet.has(this.posKey(pos))) return false;
+    if (dir.dx === 1 && pos.x === DEFAULT_GRID_SIZE - 1) return true;
+    if (dir.dx === -1 && pos.x === 0) return true;
+    if (dir.dz === 1 && pos.z === DEFAULT_GRID_SIZE - 1) return true;
+    if (dir.dz === -1 && pos.z === 0) return true;
+    return false;
   }
 
   private isRoad(pos: Position): boolean {

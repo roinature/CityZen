@@ -115,7 +115,7 @@ export class CameraController {
 
   private onWheel(e: WheelEvent): void {
     e.preventDefault();
-    const delta = e.deltaY > 0 ? 3 : -3;
+    const delta = e.deltaY > 0 ? 1 : -1;
     const currentSize = this.sceneManager.getFrustumSize();
     const newSize = clamp(currentSize + delta, this.minZoom, this.maxZoom);
     this.sceneManager.setFrustumSize(newSize);

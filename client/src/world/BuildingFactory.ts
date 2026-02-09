@@ -56,6 +56,13 @@ export class BuildingFactory {
     return tex;
   }
 
+  private getNightTexturePath(path: string): string {
+    const parts = path.split('.');
+    if (parts.length < 2) return path;
+    const ext = parts.pop();
+    return `${parts.join('.')}_night.${ext}`;
+  }
+
   createBuilding(building: PlacedBuilding, neighbors?: RoadNeighbors): THREE.Group {
     const def = BUILDING_DEFS[building.type];
     const group = new THREE.Group();
@@ -229,31 +236,89 @@ export class BuildingFactory {
       const roofRepeatW = Math.max(1, bw / 2);
       const roofRepeatD = Math.max(1, bd / 2);
 
-      const matRoof = new THREE.MeshLambertMaterial({
+      // --- Create Day Mesh (Layer 1) ---
+      const matRoofDay = new THREE.MeshLambertMaterial({
         map: this.getTexture(roofTexPath, roofRepeatW, roofRepeatD)
       });
-
-      // We use specialized materials for sides to handle specific aspect ratios
-      // SideX (Right/Left) uses depth as width
-      const matSideX = new THREE.MeshLambertMaterial({ map: this.getTexture(facadeTexPath, bd / 2, h / 2) });
-      // SideZ (Front/Back) uses width as width
-      const matSideZ = new THREE.MeshLambertMaterial({ map: this.getTexture(facadeTexPath, bw / 2, h / 2) });
+      const matSideXDay = new THREE.MeshLambertMaterial({ map: this.getTexture(facadeTexPath, bd / 2, h / 2) });
+      const matSideZDay = new THREE.MeshLambertMaterial({ map: this.getTexture(facadeTexPath, bw / 2, h / 2) });
       const matBottom = new THREE.MeshLambertMaterial({ color: 0x333333 });
 
-      const materials = [
-        matSideX, // Right
-        matSideX, // Left
-        matRoof,  // Top
-        matBottom,// Bottom
-        matSideZ, // Front
-        matSideZ  // Back
+      const materialsDay = [
+        matSideXDay, // Right
+        matSideXDay, // Left
+        matRoofDay,  // Top
+        matBottom,   // Bottom
+        matSideZDay, // Front
+        matSideZDay  // Back
       ];
 
-      const mesh = new THREE.Mesh(geometry, materials);
-      mesh.position.y = h / 2;
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      group.add(mesh);
+      const meshDay = new THREE.Mesh(geometry, materialsDay);
+      meshDay.position.y = h / 2;
+      meshDay.castShadow = true;
+      meshDay.receiveShadow = true;
+      meshDay.layers.set(1); // Layer 1 = Day
+      group.add(meshDay);
+
+      // --- Create Night Mesh (Layer 2) ---
+      const facadeNightPath = this.getNightTexturePath(facadeTexPath);
+      const roofNightPath = this.getNightTexturePath(roofTexPath);
+      const facadeNightTex = this.getTexture(facadeNightPath, bd / 2, h / 2);
+      const roofNightTex = this.getTexture(roofNightPath, roofRepeatW, roofRepeatD);
+
+      console.log('Night/Day paths:', { facadeTexPath, facadeNightPath, roofTexPath, roofNightPath });
+      
+      const matRoofNight = new THREE.MeshBasicMaterial({
+        map: roofNightTex,
+        color: 0xffffff
+      });
+      const matSideXNight = new THREE.MeshBasicMaterial({
+        map: facadeNightTex,
+        color: 0xffffff 
+      });
+      const matSideZNight = new THREE.MeshBasicMaterial({ 
+        map: facadeNightTex,
+        color: 0xffffff
+      });
+
+      const materialsNight = [
+        matSideXNight, // Right
+        matSideXNight, // Left
+        matRoofNight,  // Top
+        matBottom,     // Bottom
+        matSideZNight, // Front
+        matSideZNight  // Back
+      ];
+
+      const meshNight = new THREE.Mesh(geometry, materialsNight);
+      meshNight.position.y = h / 2;
+      meshNight.castShadow = true;
+      meshNight.receiveShadow = true;
+      meshNight.layers.set(2); // Layer 2 = Night
+      group.add(meshNight);
+
+      // --- Add Building Lights (Layer 2) ---
+      // Add a point light for developed zones to simulate window/building glow on surrounding area
+      if (level > 0) {
+        let lightColor = 0xffaa00; // Default warm residential
+        let intensity = 1.0;
+        let distance = 8;
+
+        if (building.type === BuildingType.ZONE_COMMERCIAL) {
+          lightColor = 0xaaccff; // Cool commercial
+          intensity = 1.5;
+          distance = 12;
+        } else if (building.type === BuildingType.ZONE_INDUSTRIAL) {
+          lightColor = 0xff8800; // Orange industrial
+          intensity = 1.2;
+          distance = 10;
+        }
+
+        const light = new THREE.PointLight(lightColor, intensity, distance);
+        light.position.set(0, h * 0.7, 0); // Position slightly up
+        light.layers.set(2); // Night only
+        group.add(light);
+      }
     }
   }
 
@@ -284,6 +349,24 @@ export class BuildingFactory {
     if (isMultiCell) {
       this.addCurbBarriers(group, n, w, d);
     }
+
+    // --- Add Street Lights (Layer 2) ---
+    // Add lights at intersections (3+ way) or for Avenue/Highway to simulate street lamps
+    const isIntersection = count >= 3;
+    const isMajorRoad = building.type === BuildingType.ROAD_AVENUE || building.type === BuildingType.ROAD_HIGHWAY;
+    
+    if (isIntersection || (isMajorRoad && Math.random() > 0.5)) { // 50% chance for major roads to reduce count
+       const lightColor = 0xffffcc; // Warm street light
+       const intensity = 0.8;
+       const distance = 10;
+       
+       const light = new THREE.PointLight(lightColor, intensity, distance);
+       light.position.set(0, 4, 0); // High up like a street lamp
+       light.layers.set(2); // Night only
+       group.add(light);
+    }
+
+
 
     // Road markings vary by type
     if (building.type === BuildingType.ROAD_DIRT) {
