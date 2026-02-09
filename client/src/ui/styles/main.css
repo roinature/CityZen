@@ -220,15 +220,15 @@ body {
   width: 24px;
   height: 24px;
   border-radius: 4px;
+  flex-shrink: 0;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
 }
 
 .toolbar-btn .cost {
   font-size: 10px;
   opacity: 0.7;
-}
-
-.toolbar-btn .building-icon {
-  flex-shrink: 0;
 }
 
 /* Footer Indicator */
@@ -891,7 +891,7 @@ body {
 }
 
 .tool-btn.active {
-  border-color: #4CAF50;
+  border-color: #4caf50;
   background: rgba(76, 175, 80, 0.3);
 }
 
@@ -997,7 +997,7 @@ body {
 }
 
 .finance-positive {
-  color: #4CAF50;
+  color: #4caf50;
 }
 
 .finance-negative {
@@ -1008,4 +1008,153 @@ body {
   height: 1px;
   background: rgba(255, 255, 255, 0.1);
   margin: 4px 0;
+}
+
+/* ==============================
+   Infrastructure Bottom Toolbar
+   ============================== */
+.infra-toolbar {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  z-index: 30;
+  pointer-events: auto;
+}
+
+/* Category icon row */
+.infra-category-bar {
+  display: flex;
+  gap: 2px;
+  background: rgba(0, 0, 0, 0.8);
+  padding: 6px 12px;
+  border-radius: 12px 12px 0 0;
+  backdrop-filter: blur(8px);
+}
+
+.infra-cat-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 2px solid transparent;
+  border-radius: 8px;
+  color: white;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  min-width: 56px;
+}
+
+.infra-cat-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.infra-cat-btn.active {
+  border-color: #4caf50;
+  background: rgba(76, 175, 80, 0.25);
+}
+
+.infra-cat-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.infra-cat-label {
+  font-size: 9px;
+  opacity: 0.7;
+  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+/* Item pane (slides up when a category is selected) */
+.infra-item-pane {
+  display: none;
+  gap: 6px;
+  background: rgba(0, 0, 0, 0.85);
+  padding: 10px 14px;
+  border-radius: 12px 12px 0 0;
+  backdrop-filter: blur(8px);
+  max-width: 90vw;
+  overflow-x: auto;
+}
+
+.infra-item-pane.open {
+  display: flex;
+}
+
+/* Individual item card */
+.infra-item-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 2px solid transparent;
+  border-radius: 10px;
+  color: white;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  min-width: 90px;
+  flex-shrink: 0;
+}
+
+.infra-item-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  transform: translateY(-2px);
+}
+
+.infra-item-btn.active {
+  border-color: #4caf50;
+  background: rgba(76, 175, 80, 0.25);
+}
+
+/* Color preview / texture block */
+.infra-item-preview {
+  width: 64px;
+  height: 48px;
+  border-radius: 6px;
+  position: relative;
+  box-shadow: inset 0 -2px 6px rgba(0, 0, 0, 0.3);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+.infra-item-size {
+  position: absolute;
+  bottom: 2px;
+  right: 3px;
+  font-size: 9px;
+  background: rgba(0, 0, 0, 0.6);
+  padding: 1px 4px;
+  border-radius: 3px;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.infra-item-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+
+.infra-item-name {
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.infra-item-cost {
+  font-size: 10px;
+  color: #4caf50;
+  font-weight: bold;
+  font-variant-numeric: tabular-nums;
 }

@@ -18,6 +18,7 @@
     "typescript": "^5.7.0"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.95.3",
     "@xdevplatform/xdk": "^0.4.0"
   }
 }

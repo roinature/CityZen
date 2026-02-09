@@ -76,6 +76,8 @@ export class BuildingFactory {
       this.createRoad(group, building, neighbors);
     } else if (isZone(building.type)) {
       this.createZone(group, building);
+    } else {
+      this.createInfrastructure(group, building);
     }
 
     // Position on grid
@@ -116,6 +118,138 @@ export class BuildingFactory {
     group.add(canopy);
   }
 
+
+  // Texture mapping for infrastructure buildings
+  public static readonly INFRASTRUCTURE_TEXTURES: Partial<Record<BuildingType, string>> = {
+    [BuildingType.POLICE_STATION]: 'police_station_facade.png',
+    [BuildingType.POLICE_HQ]: 'police_hq_facade.png',
+    [BuildingType.POLICE_JAIL]: 'police_jail_facade.png',
+    [BuildingType.POLICE_ACADEMY]: 'police_academy_facade.png',
+  };
+
+  /**
+   * Returns a path to an image file represent the building icon/preview.
+   */
+  public static getBuildingIcon(type: BuildingType): string | null {
+    // 1. Check mapped infrastructure icons
+    if (this.INFRASTRUCTURE_TEXTURES[type]) {
+      return `/textures/buildings/${this.INFRASTRUCTURE_TEXTURES[type]}`;
+    }
+
+    // 2. Check hardcoded zone fallbacks
+    if (type === BuildingType.ZONE_RESIDENTIAL) return '/textures/buildings/residential_facade.png';
+    if (type === BuildingType.ZONE_COMMERCIAL) return '/textures/buildings/commercial_facade.png';
+    if (type === BuildingType.ZONE_INDUSTRIAL) return '/textures/buildings/industrial_facade.png';
+
+    return null;
+  }
+
+  private createInfrastructure(group: THREE.Group, building: PlacedBuilding): void {
+    const def = BUILDING_DEFS[building.type];
+    const w = def.size.w * CELL_SIZE;
+    const d = def.size.d * CELL_SIZE;
+    const h = def.height;
+    const color = new THREE.Color(def.color);
+
+    // Foundation pad
+    const pad = new THREE.Mesh(
+      new THREE.PlaneGeometry(w * 0.95, d * 0.95),
+      new THREE.MeshLambertMaterial({ color: color.clone().multiplyScalar(0.3) }),
+    );
+    pad.rotation.x = -Math.PI / 2;
+    pad.position.y = 0.01;
+    pad.receiveShadow = true;
+    group.add(pad);
+
+    // Main body dimensions
+    const bodyW = w * 0.8;
+    const bodyD = d * 0.8;
+    const bodyH = h * 0.7;
+
+    // Check if this building has a texture
+    const texturePath = BuildingFactory.INFRASTRUCTURE_TEXTURES[building.type];
+
+    let bodyMesh: THREE.Mesh;
+    if (texturePath) {
+      // Create textured building
+      const geometry = new THREE.BoxGeometry(bodyW, bodyH, bodyD);
+      const facadeTexPath = `/textures/buildings/${texturePath}`;
+
+      // Create materials for each face
+      const matSideX = new THREE.MeshStandardMaterial({
+        map: this.getTexture(facadeTexPath, bodyD / 2, bodyH / 2),
+        emissiveMap: this.getTexture(facadeTexPath, bodyD / 2, bodyH / 2),
+        emissive: new THREE.Color(0xffff00),
+        emissiveIntensity: 0 // Will be updated by LightingSetup
+      });
+      const matSideZ = new THREE.MeshStandardMaterial({
+        map: this.getTexture(facadeTexPath, bodyW / 2, bodyH / 2),
+        emissiveMap: this.getTexture(facadeTexPath, bodyW / 2, bodyH / 2),
+        emissive: new THREE.Color(0xffff00),
+        emissiveIntensity: 0
+      });
+      const matTop = new THREE.MeshStandardMaterial({ color: color.clone().multiplyScalar(0.7) });
+      const matBottom = new THREE.MeshStandardMaterial({ color: 0x333333 });
+
+      const materials = [
+        matSideX, // Right
+        matSideX, // Left
+        matTop,   // Top
+        matBottom,// Bottom
+        matSideZ, // Front
+        matSideZ  // Back
+      ];
+
+      bodyMesh = new THREE.Mesh(geometry, materials);
+    } else {
+      // Fallback to colored building
+      bodyMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(bodyW, bodyH, bodyD),
+        new THREE.MeshLambertMaterial({ color: color }),
+      );
+    }
+
+    bodyMesh.position.y = bodyH / 2;
+    bodyMesh.castShadow = true;
+    bodyMesh.receiveShadow = true;
+    group.add(bodyMesh);
+
+    // Roof / top accent (slightly wider, flat)
+    const roofH = h * 0.08;
+    const roof = new THREE.Mesh(
+      new THREE.BoxGeometry(bodyW * 1.05, roofH, bodyD * 1.05),
+      new THREE.MeshLambertMaterial({ color: color.clone().multiplyScalar(0.6) }),
+    );
+    roof.position.y = bodyH + roofH / 2;
+    roof.castShadow = true;
+    group.add(roof);
+
+    // Accent tower/feature for taller buildings (height >= 4) - only for non-textured
+    if (h >= 4 && !texturePath) {
+      const towerW = bodyW * 0.25;
+      const towerD = bodyD * 0.25;
+      const towerH = h * 0.35;
+      const tower = new THREE.Mesh(
+        new THREE.BoxGeometry(towerW, towerH, towerD),
+        new THREE.MeshLambertMaterial({ color: color.clone().multiplyScalar(0.8) }),
+      );
+      tower.position.y = bodyH + roofH + towerH / 2;
+      tower.castShadow = true;
+      group.add(tower);
+    }
+
+    // Door indicator (front face) - only for non-textured buildings
+    if (!texturePath) {
+      const doorW = Math.min(bodyW * 0.2, CELL_SIZE * 0.3);
+      const doorH = Math.min(bodyH * 0.4, CELL_SIZE * 0.5);
+      const door = new THREE.Mesh(
+        new THREE.PlaneGeometry(doorW, doorH),
+        new THREE.MeshBasicMaterial({ color: color.clone().multiplyScalar(0.2) }),
+      );
+      door.position.set(0, doorH / 2, bodyD / 2 + 0.01);
+      group.add(door);
+    }
+  }
 
   private createZone(group: THREE.Group, building: PlacedBuilding): void {
     const def = BUILDING_DEFS[building.type];
@@ -267,16 +401,16 @@ export class BuildingFactory {
       const roofNightTex = this.getTexture(roofNightPath, roofRepeatW, roofRepeatD);
 
       console.log('Night/Day paths:', { facadeTexPath, facadeNightPath, roofTexPath, roofNightPath });
-      
+
       const matRoofNight = new THREE.MeshBasicMaterial({
         map: roofNightTex,
         color: 0xffffff
       });
       const matSideXNight = new THREE.MeshBasicMaterial({
         map: facadeNightTex,
-        color: 0xffffff 
+        color: 0xffffff
       });
-      const matSideZNight = new THREE.MeshBasicMaterial({ 
+      const matSideZNight = new THREE.MeshBasicMaterial({
         map: facadeNightTex,
         color: 0xffffff
       });
@@ -354,16 +488,16 @@ export class BuildingFactory {
     // Add lights at intersections (3+ way) or for Avenue/Highway to simulate street lamps
     const isIntersection = count >= 3;
     const isMajorRoad = building.type === BuildingType.ROAD_AVENUE || building.type === BuildingType.ROAD_HIGHWAY;
-    
+
     if (isIntersection || (isMajorRoad && Math.random() > 0.5)) { // 50% chance for major roads to reduce count
-       const lightColor = 0xffffcc; // Warm street light
-       const intensity = 0.8;
-       const distance = 10;
-       
-       const light = new THREE.PointLight(lightColor, intensity, distance);
-       light.position.set(0, 4, 0); // High up like a street lamp
-       light.layers.set(2); // Night only
-       group.add(light);
+      const lightColor = 0xffffcc; // Warm street light
+      const intensity = 0.8;
+      const distance = 10;
+
+      const light = new THREE.PointLight(lightColor, intensity, distance);
+      light.position.set(0, 4, 0); // High up like a street lamp
+      light.layers.set(2); // Night only
+      group.add(light);
     }
 
 

@@ -1,23 +1,23 @@
+import 'dotenv/config';
 import express from 'express';
-import { createServer } from 'http';
-import { Server as SocketIOServer } from 'socket.io';
+import cors from 'cors';
 import { PORT, CLIENT_ORIGIN } from './config.js';
 import { RoomManager } from './game/RoomManager.js';
 import { WorldManager } from './game/WorldManager.js';
-import { setupSocketHandlers } from './socket/handlers.js';
+import { createGameRoutes } from './routes/gameRoutes.js';
+import { initBroadcast } from './realtime/supabaseBroadcast.js';
 
 const app = express();
-const httpServer = createServer(app);
 
-const io = new SocketIOServer(httpServer, {
-  cors: {
-    origin: CLIENT_ORIGIN,
-    methods: ['GET', 'POST'],
-  },
-});
+// Middleware
+app.use(cors({ origin: CLIENT_ORIGIN }));
+app.use(express.json());
 
-const roomManager = new RoomManager(io);
-const worldManager = new WorldManager(io, roomManager);
+// Initialize Supabase broadcast
+initBroadcast();
+
+const roomManager = new RoomManager();
+const worldManager = new WorldManager(roomManager);
 
 // REST endpoints
 app.get('/api/health', (_req, res) => {
@@ -33,12 +33,16 @@ app.get('/api/world', (_req, res) => {
   res.json(worldManager.getWorldState());
 });
 
-// Setup socket handlers
-setupSocketHandlers(io, roomManager, worldManager);
+app.get('/api/config', (_req, res) => {
+  res.json({ supabaseUrl: SUPABASE_URL, supabaseAnonKey: SUPABASE_ANON_KEY });
+});
+
+// Game routes (replaces socket handlers)
+app.use('/api', createGameRoutes(roomManager, worldManager));
 
 // Session Middleware
 import session from 'express-session';
-import { SESSION_SECRET, TWITTER_CLIENT_ID, TWITTER_CLIENT_SECRET, TWITTER_CALLBACK_URL } from './config.js';
+import { SESSION_SECRET, TWITTER_CLIENT_ID, TWITTER_CLIENT_SECRET, TWITTER_CALLBACK_URL, SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 import { XService } from './services/XService.js';
 
 app.use(session({
@@ -95,7 +99,7 @@ app.get('/api/auth/twitter/callback', async (req, res) => {
 });
 
 // Endpoint to post updates
-app.post('/api/x/post', express.json(), async (req, res) => {
+app.post('/api/x/post', async (req, res) => {
   const accessToken = (req.session as any).xAccessToken;
   if (!accessToken) {
     res.status(401).json({ error: 'Not authenticated with X' });
@@ -118,7 +122,7 @@ app.post('/api/x/post', express.json(), async (req, res) => {
 
 // Initialize world then start server
 worldManager.init().then(() => {
-  httpServer.listen(PORT, () => {
+  app.listen(PORT, () => {
     console.log(`CityZen server running on http://localhost:${PORT}`);
   });
 });

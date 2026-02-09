@@ -1,7 +1,7 @@
 // Types
 export type { Position, GridCell, Grid } from './types/grid.js';
-export { BuildingType, isZone, isRoad, ZONE_TYPES, ROAD_TYPES } from './types/building.js';
-export type { BuildingDef, BuildingEffects, PlacedBuilding, ZoneType, RoadType } from './types/building.js';
+export { BuildingType, isZone, isRoad, ZONE_TYPES, ROAD_TYPES, INFRA_CATEGORIES } from './types/building.js';
+export type { BuildingDef, BuildingEffects, PlacedBuilding, ZoneType, RoadType, InfraCategory } from './types/building.js';
 export type { ResourceState, DemandState } from './types/resources.js';
 export type { CityState } from './types/city.js';
 export type { Player, PlayerProfile } from './types/player.js';

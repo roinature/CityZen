@@ -1,4 +1,3 @@
-import { Server as SocketIOServer } from 'socket.io';
 import { v4 as uuid } from 'uuid';
 import type { CityListItem } from '@cityzen/shared';
 import { GameRoom } from './GameRoom.js';
@@ -7,15 +6,10 @@ import { loadPlayerProfile } from '../persistence/playerStore.js';
 
 export class RoomManager {
   private rooms: Map<string, GameRoom> = new Map();
-  private io: SocketIOServer;
-
-  constructor(io: SocketIOServer) {
-    this.io = io;
-  }
 
   async createRoom(cityName: string, ownerId: string, ownerName: string): Promise<GameRoom> {
     const id = uuid();
-    const room = new GameRoom(this.io, id, cityName, ownerId, ownerName);
+    const room = new GameRoom(id, cityName, ownerId, ownerName);
     room.start();
     this.rooms.set(id, room);
     return room;
@@ -39,7 +33,7 @@ export class RoomManager {
       if (profile) ownerName = profile.name;
     }
 
-    const room = new GameRoom(this.io, cityId, state.name, state.ownerId || '', ownerName, state);
+    const room = new GameRoom(cityId, state.name, state.ownerId || '', ownerName, state);
     room.start();
     this.rooms.set(cityId, room);
     return room;

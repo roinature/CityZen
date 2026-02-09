@@ -17,11 +17,13 @@
     "express-session": "^1.19.0",
     "pg": "^8.18.0",
     "prisma": "^7.3.0",
-    "socket.io": "^4.8.0",
+    "@supabase/supabase-js": "^2.49.0",
+    "cors": "^2.8.5",
     "twitter-api-v2": "^1.29.0",
     "uuid": "^11.0.0"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/express-session": "^1.18.2",
     "@types/node": "^22.0.0",

@@ -1,4 +1,3 @@
-import { Server as SocketIOServer, Socket } from 'socket.io';
 import { v4 as uuid } from 'uuid';
 import {
   type CityState,
@@ -22,6 +21,7 @@ import {
   simulateTick,
 } from '@cityzen/shared';
 import { saveCityState } from '../persistence/jsonStore.js';
+import { broadcastToChannel } from '../realtime/supabaseBroadcast.js';
 
 function createInitialClock(): GameClock {
   return {
@@ -35,16 +35,14 @@ function createInitialClock(): GameClock {
 export class GameRoom {
   id: string;
   state: CityState;
-  players: Map<string, { player: Player; socket: Socket }> = new Map();
+  players: Map<string, { player: Player }> = new Map();
   private tickInterval: ReturnType<typeof setInterval> | null = null;
   private saveInterval: ReturnType<typeof setInterval> | null = null;
-  private io: SocketIOServer;
   private debouncedSaveTimer: ReturnType<typeof setTimeout> | null = null;
   unlimitedMoney = false;
   ownerName = 'Unknown';
 
-  constructor(io: SocketIOServer, id: string, name: string, ownerId: string, ownerName: string, existingState?: CityState) {
-    this.io = io;
+  constructor(id: string, name: string, ownerId: string, ownerName: string, existingState?: CityState) {
     this.id = id;
     this.ownerName = ownerName;
     this.state = existingState ?? {
@@ -122,32 +120,31 @@ export class GameRoom {
     this.save();
   }
 
-  addPlayer(socket: Socket, playerName: string): Player {
+  addPlayer(playerId: string, playerName: string): Player {
     const player: Player = {
-      id: socket.id,
+      id: playerId,
       name: playerName,
       joinedAt: Date.now(),
     };
-    this.players.set(socket.id, { player, socket });
-    socket.join(this.id);
+    this.players.set(playerId, { player });
 
-    // Send full state to the new player
-    socket.emit(S2C.CITY_STATE, {
+    // Broadcast full state to the channel (new player will receive it via subscription)
+    this.broadcast(S2C.CITY_STATE, {
       city: this.state,
       players: this.getPlayerList(),
     });
 
-    // Notify others
-    socket.to(this.id).emit(S2C.PLAYER_JOINED, { player });
+    // Notify about new player
+    this.broadcast(S2C.PLAYER_JOINED, { player });
 
     return player;
   }
 
-  removePlayer(socketId: string): void {
-    const entry = this.players.get(socketId);
+  removePlayer(playerId: string): void {
+    const entry = this.players.get(playerId);
     if (!entry) return;
-    this.players.delete(socketId);
-    this.broadcast(S2C.PLAYER_LEFT, { playerId: socketId });
+    this.players.delete(playerId);
+    this.broadcast(S2C.PLAYER_LEFT, { playerId });
   }
 
   placeBuilding(playerId: string, position: Position, type: BuildingType): { success: boolean; error?: string } {
@@ -286,13 +283,11 @@ export class GameRoom {
       updatedAt: Date.now(),
     };
 
-    // Send fresh state to all players
-    for (const { socket } of this.players.values()) {
-      socket.emit(S2C.CITY_STATE, {
-        city: this.state,
-        players: this.getPlayerList(),
-      });
-    }
+    // Broadcast fresh state to all players via channel
+    this.broadcast(S2C.CITY_STATE, {
+      city: this.state,
+      players: this.getPlayerList(),
+    });
 
     this.saveAfterMutation();
   }
@@ -306,7 +301,7 @@ export class GameRoom {
   }
 
   private broadcast(event: string, data: unknown): void {
-    this.io.to(this.id).emit(event, data);
+    broadcastToChannel(`city:${this.id}`, event, data);
   }
 
   private saveAfterMutation(): void {

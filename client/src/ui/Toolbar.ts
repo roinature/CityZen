@@ -1,4 +1,5 @@
 import { BuildingType, BUILDING_DEFS, ZONE_TYPES, ROAD_TYPES } from '@cityzen/shared';
+import { BuildingFactory } from '../world/BuildingFactory.js';
 
 interface ToolbarSection {
   label: string;
@@ -44,7 +45,14 @@ export class Toolbar {
 
         const icon = document.createElement('div');
         icon.className = 'building-icon';
-        icon.style.backgroundColor = def.color;
+        const iconPath = BuildingFactory.getBuildingIcon(type);
+        if (iconPath) {
+          icon.style.backgroundImage = `url(${iconPath})`;
+          icon.style.backgroundSize = 'cover';
+          icon.style.backgroundPosition = 'center';
+        } else {
+          icon.style.backgroundColor = def.color;
+        }
 
         const label = document.createElement('span');
         label.textContent = def.label;

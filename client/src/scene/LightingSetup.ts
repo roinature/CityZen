@@ -49,6 +49,24 @@ export function setupLighting(scene: THREE.Scene): LightingControls {
         hemi.groundColor.setHex(0x7ec850);
         scene.background = null;
       }
+
+      // Update emissive glow for buildings and cars
+      scene.traverse((obj) => {
+        if (obj instanceof THREE.Mesh && obj.material) {
+          const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+          for (const mat of materials) {
+            if (mat instanceof THREE.MeshStandardMaterial && mat.emissive.getHex() !== 0) {
+              // Buildings have an emissiveMap, cars only have emissive color
+              if (mat.emissiveMap) {
+                mat.emissiveIntensity = isNight ? 0.4 : 0;
+              } else {
+                // Car lights: make them much brighter at night
+                mat.emissiveIntensity = isNight ? 2.5 : 0.4;
+              }
+            }
+          }
+        }
+      });
     },
   };
 }

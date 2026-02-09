@@ -26,7 +26,8 @@ import { CarManager } from './world/CarManager.js';
 import { ToolSidebar, type ToolMode } from './ui/ToolSidebar.js';
 import { FinancePanel } from './ui/FinancePanel.js';
 import { FooterIndicator } from './ui/FooterIndicator.js';
-import { SocketClient } from './network/SocketClient.js';
+import { InfraToolbar } from './ui/InfraToolbar.js';
+import { GameClient } from './network/GameClient.js';
 
 const SERVER_URL = 'http://localhost:3030';
 const SESSION_KEY = 'cityzen_session';
@@ -98,6 +99,23 @@ const toolbar = new Toolbar(uiRoot, (type: BuildingType) => {
     toolSidebar.setActiveMode('build');
     buildMode.select(type);
     toolbar.setActive(type);
+    infraToolbar.setActive(null);
+  }
+});
+
+// --- Infrastructure Toolbar (bottom) ---
+const infraToolbar = new InfraToolbar(uiRoot, (type: BuildingType) => {
+  if (buildMode.getSelectedType() === type) {
+    buildMode.deselect();
+    infraToolbar.setActive(null);
+    toolbar.setActive(null);
+  } else {
+    buildMode.setToolMode('build');
+    cameraController.setLeftClickPanEnabled(false);
+    toolSidebar.setActiveMode('build');
+    buildMode.select(type);
+    toolbar.setActive(null);
+    infraToolbar.setActive(type);
   }
 });
 
@@ -111,6 +129,7 @@ const toolSidebar = new ToolSidebar(uiRoot, {
     cameraController.setLeftClickPanEnabled(mode === 'pointer');
     if (mode !== 'build') {
       toolbar.setActive(null);
+      infraToolbar.setActive(null);
     }
   },
   onBrushSizeChange: (size: number) => {
@@ -131,7 +150,9 @@ const toolSidebar = new ToolSidebar(uiRoot, {
 let currentPlayerName = 'Player';
 
 // --- Network ---
-const socketClient = new SocketClient(SERVER_URL, {
+let gameClient!: GameClient;
+
+GameClient.create(SERVER_URL, {
   onWorldState: (world) => {
     worldState = world;
     worldMap.updateWorld(world);
@@ -209,8 +230,8 @@ const socketClient = new SocketClient(SERVER_URL, {
     console.log(`${player.name} joined the city`);
   },
 
-  onPlayerLeft: (playerId) => {
-    console.log(`Player ${playerId} left the city`);
+  onPlayerLeft: (leftPlayerId) => {
+    console.log(`Player ${leftPlayerId} left the city`);
   },
 
   onError: (error) => {
@@ -224,26 +245,35 @@ const socketClient = new SocketClient(SERVER_URL, {
   onSaved: () => {
     gameMenu.showStatus('Game saved!');
   },
+}).then((client) => {
+  gameClient = client;
+
+  // Auto-rejoin saved session or show lobby
+  const savedSession = loadSession();
+  if (savedSession) {
+    currentPlayerName = savedSession.playerName;
+    gameClient.joinCity(savedSession.cityId, savedSession.playerName, playerId);
+  }
 });
 
 // --- Build mode wiring ---
 // --- Tax rate wiring ---
 resourceBar.onTaxRateChange = (rate) => {
-  socketClient.setTaxRate(rate);
+  gameClient.setTaxRate(rate, playerId);
 };
 
 // --- Game speed wiring ---
 resourceBar.onGameSpeedChange = (speed) => {
-  socketClient.setGameSpeed(speed);
+  gameClient.setGameSpeed(speed, playerId);
 };
 
 buildMode.onPlace = (pos, type) => {
   console.log('[Client] onPlace called', { pos, type });
-  socketClient.placeBuilding(pos, type);
+  gameClient.placeBuilding(pos, type, playerId);
 };
 
 buildMode.onDemolish = (pos) => {
-  socketClient.demolish(pos);
+  gameClient.demolish(pos, playerId);
 };
 
 buildMode.onDragCostUpdate = (cost) => {
@@ -277,11 +307,11 @@ buildMode.onEdgeRoadClick = (direction: EdgeDirection, position: number) => {
 
   if (hasMatchingRoad) {
     console.log(`Traveling ${direction} to ${adjacentCity.name}`);
-    socketClient.leave();
+    gameClient.leave(playerId);
     cityState = null;
     cityRenderer.clear();
     carManager.clear();
-    socketClient.joinCity(adjacentCity.cityId, currentPlayerName, playerId);
+    gameClient.joinCity(adjacentCity.cityId, currentPlayerName, playerId);
   } else {
     console.log(`Road not connected to ${adjacentCity.name}`);
   }
@@ -299,26 +329,26 @@ const lobby = new Lobby(uiRoot, {
 // --- World Map ---
 const worldMap = new WorldMap(uiRoot, {
   onClaimPlot: (position, cityName) => {
-    socketClient.claimPlot(position, cityName, currentPlayerName, playerId);
+    gameClient.claimPlot(position, cityName, currentPlayerName, playerId);
   },
   onEnterCity: (cityId) => {
-    socketClient.joinCity(cityId, currentPlayerName, playerId);
+    gameClient.joinCity(cityId, currentPlayerName, playerId);
   },
 });
 
 // --- Game Menu ---
 const gameMenu = new GameMenu(uiRoot, {
   onSave: () => {
-    socketClient.save();
+    gameClient.save(playerId);
     gameMenu.showStatus('Saving...');
   },
   onLoadCity: (cityId: string) => {
-    socketClient.leave();
+    gameClient.leave(playerId);
     cityState = null;
     cityRenderer.clear();
     carManager.clear();
     clearSession();
-    socketClient.joinCity(cityId, currentPlayerName, playerId);
+    gameClient.joinCity(cityId, currentPlayerName, playerId);
   },
   fetchCities: async () => {
     const res = await fetch(`${SERVER_URL}/api/cities`);
@@ -327,11 +357,11 @@ const gameMenu = new GameMenu(uiRoot, {
   onRestart: () => {
     cityRenderer.clear();
     carManager.clear();
-    socketClient.restart();
+    gameClient.restart(playerId);
   },
   onEndGame: () => {
-    socketClient.save();
-    socketClient.leave();
+    gameClient.save(playerId);
+    gameClient.leave(playerId);
     cityState = null;
     cityRenderer.clear();
     carManager.clear();
@@ -358,8 +388,8 @@ function applyOptions(options: GameOptions): void {
   // Camera speed
   cameraController.setPanSpeed(options.cameraSpeed);
 
-  // Unlimited money
-  socketClient.setUnlimitedMoney(options.unlimitedMoney);
+  // Unlimited money (gameClient may not be ready during initial OptionsPanel construction)
+  gameClient?.setUnlimitedMoney(options.unlimitedMoney, playerId);
   resourceBar.setUnlimitedMoney(options.unlimitedMoney);
   buildMode.setUnlimitedMoney(options.unlimitedMoney);
 
@@ -401,6 +431,7 @@ window.addEventListener('keydown', (e) => {
     if (buildMode.getSelectedType()) {
       buildMode.deselect();
       toolbar.setActive(null);
+      infraToolbar.setActive(null);
     } else {
       gameMenu.show();
     }
@@ -411,14 +442,6 @@ window.addEventListener('keydown', (e) => {
 function showWorldMap(): void {
   worldMap.show();
 }
-
-// Auto-rejoin saved session or show lobby
-const savedSession = loadSession();
-if (savedSession) {
-  currentPlayerName = savedSession.playerName;
-  socketClient.joinCity(savedSession.cityId, savedSession.playerName, playerId);
-}
-// Otherwise lobby is already visible (default), world state arrives via socket
 
 // --- Game loop ---
 let lastTime = performance.now();

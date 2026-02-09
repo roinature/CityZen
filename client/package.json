@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@cityzen/shared": "*",
-    "socket.io-client": "^4.8.0",
+    "@supabase/supabase-js": "^2.49.0",
     "three": "^0.170.0"
   },
   "devDependencies": {

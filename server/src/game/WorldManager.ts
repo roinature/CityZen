@@ -1,4 +1,3 @@
-import { Server as SocketIOServer } from 'socket.io';
 import {
   type WorldState,
   type WorldPosition,
@@ -9,14 +8,13 @@ import {
 } from '@cityzen/shared';
 import { RoomManager } from './RoomManager.js';
 import { saveWorldState, loadOrCreateDefaultWorld } from '../persistence/worldStore.js';
+import { broadcastToAll } from '../realtime/supabaseBroadcast.js';
 
 export class WorldManager {
   private world!: WorldState;
-  private io: SocketIOServer;
   private roomManager: RoomManager;
 
-  constructor(io: SocketIOServer, roomManager: RoomManager) {
-    this.io = io;
+  constructor(roomManager: RoomManager) {
     this.roomManager = roomManager;
   }
 
@@ -68,7 +66,7 @@ export class WorldManager {
     await this.save();
 
     // Broadcast updated world state to everyone
-    this.io.emit(S2C.WORLD_STATE, { world: this.world });
+    broadcastToAll(S2C.WORLD_STATE, { world: this.world });
 
     return { success: true, cityId: room.id };
   }
@@ -80,10 +78,6 @@ export class WorldManager {
     }
   }
 
-  /**
-   * Update edge connections for a city and broadcast world state.
-   * Called when roads are placed or demolished near grid edges.
-   */
   updateCityEdgeConnections(cityId: string, connections: EdgeConnection[]): void {
     const entry = this.world.cities.find((c: WorldCityEntry) => c.cityId === cityId);
     if (entry) {
@@ -91,16 +85,13 @@ export class WorldManager {
       this.world.updatedAt = Date.now();
 
       // Broadcast updated world state so all clients see the new connections
-      this.io.emit(S2C.WORLD_STATE, { world: this.world });
+      broadcastToAll(S2C.WORLD_STATE, { world: this.world });
 
       // Persist to disk
       this.save();
     }
   }
 
-  /**
-   * Get the city entry for a given cityId
-   */
   getCityEntry(cityId: string): WorldCityEntry | undefined {
     return this.world.cities.find((c: WorldCityEntry) => c.cityId === cityId);
   }
