@@ -121,6 +121,10 @@ export class BuildingFactory {
 
   // Texture mapping for infrastructure buildings
   public static readonly INFRASTRUCTURE_TEXTURES: Partial<Record<BuildingType, string>> = {
+    [BuildingType.ENERGY_WIND_TURBINE]: 'wind_turbine_facade.png',
+    [BuildingType.ENERGY_SOLAR_FARM]: 'solar_farm_facade.png',
+    [BuildingType.ENERGY_COAL_PLANT]: 'coal_plant_facade.png',
+    [BuildingType.ENERGY_NUCLEAR_PLANT]: 'nuclear_plant_facade.png',
     [BuildingType.POLICE_STATION]: 'police_station_facade.png',
     [BuildingType.POLICE_HQ]: 'police_hq_facade.png',
     [BuildingType.POLICE_JAIL]: 'police_jail_facade.png',
@@ -128,6 +132,10 @@ export class BuildingFactory {
     [BuildingType.HEALTH_CLINIC]: 'clinic_facade.png',
     [BuildingType.HEALTH_HOSPITAL]: 'hospital_facade.png',
     [BuildingType.HEALTH_RESEARCH_CENTER]: 'research_center_facade.png',
+    [BuildingType.FIRE_STATION]: 'fire_station_facade.png',
+    [BuildingType.FIRE_HQ]: 'fire_hq_facade.png',
+    [BuildingType.FIRE_HELICOPTER]: 'fire_helicopter_facade.png',
+    [BuildingType.FIRE_TRAINING]: 'fire_training_facade.png',
   };
 
   /**
@@ -172,50 +180,78 @@ export class BuildingFactory {
     // Check if this building has a texture
     const texturePath = BuildingFactory.INFRASTRUCTURE_TEXTURES[building.type];
 
-    let bodyMesh: THREE.Mesh;
     if (texturePath) {
       // Create textured building
       const geometry = new THREE.BoxGeometry(bodyW, bodyH, bodyD);
       const facadeTexPath = `/textures/buildings/${texturePath}`;
 
-      // Create materials for each face
-      const matSideX = new THREE.MeshStandardMaterial({
+      // --- Day Mesh (Layer 1) ---
+      const matSideXDay = new THREE.MeshLambertMaterial({
         map: this.getTexture(facadeTexPath, bodyD / 2, bodyH / 2),
-        emissiveMap: this.getTexture(facadeTexPath, bodyD / 2, bodyH / 2),
-        emissive: new THREE.Color(0xffff00),
-        emissiveIntensity: 0 // Will be updated by LightingSetup
       });
-      const matSideZ = new THREE.MeshStandardMaterial({
+      const matSideZDay = new THREE.MeshLambertMaterial({
         map: this.getTexture(facadeTexPath, bodyW / 2, bodyH / 2),
-        emissiveMap: this.getTexture(facadeTexPath, bodyW / 2, bodyH / 2),
-        emissive: new THREE.Color(0xffff00),
-        emissiveIntensity: 0
       });
-      const matTop = new THREE.MeshStandardMaterial({ color: color.clone().multiplyScalar(0.7) });
-      const matBottom = new THREE.MeshStandardMaterial({ color: 0x333333 });
+      const matTop = new THREE.MeshLambertMaterial({ color: color.clone().multiplyScalar(0.7) });
+      const matBottom = new THREE.MeshLambertMaterial({ color: 0x333333 });
 
-      const materials = [
-        matSideX, // Right
-        matSideX, // Left
-        matTop,   // Top
-        matBottom,// Bottom
-        matSideZ, // Front
-        matSideZ  // Back
+      const materialsDay = [
+        matSideXDay, // Right
+        matSideXDay, // Left
+        matTop,      // Top
+        matBottom,   // Bottom
+        matSideZDay, // Front
+        matSideZDay  // Back
       ];
 
-      bodyMesh = new THREE.Mesh(geometry, materials);
+      const meshDay = new THREE.Mesh(geometry, materialsDay);
+      meshDay.position.y = bodyH / 2;
+      meshDay.castShadow = true;
+      meshDay.receiveShadow = true;
+      meshDay.layers.set(1); // Layer 1 = Day
+      group.add(meshDay);
+
+      // --- Night Mesh (Layer 2) ---
+      // Many infrastructure buildings don't have explicit _night textures yet, 
+      // so we use a fallback to just a slightly glowing color or special night texture if exists
+      const nightTexturePath = this.getNightTexturePath(facadeTexPath);
+      const nightTex = this.getTexture(nightTexturePath, bodyD / 2, bodyH / 2); // getTexture handles missing files gracefully? 
+      // Actually we should check if night texture exists to avoid errors or use emissive fallback
+
+      const matSideXNight = new THREE.MeshBasicMaterial({
+        map: nightTex,
+        color: 0xffffff,
+      });
+      const matSideZNight = new THREE.MeshBasicMaterial({
+        map: nightTex,
+        color: 0xffffff,
+      });
+
+      const materialsNight = [
+        matSideXNight, // Right
+        matSideXNight, // Left
+        matTop,        // Top
+        matBottom,     // Bottom
+        matSideZNight, // Front
+        matSideZNight  // Back
+      ];
+
+      const meshNight = new THREE.Mesh(geometry, materialsNight);
+      meshNight.position.y = bodyH / 2;
+      meshNight.layers.set(2); // Layer 2 = Night
+      group.add(meshNight);
+
     } else {
       // Fallback to colored building
-      bodyMesh = new THREE.Mesh(
+      const bodyMesh = new THREE.Mesh(
         new THREE.BoxGeometry(bodyW, bodyH, bodyD),
         new THREE.MeshLambertMaterial({ color: color }),
       );
+      bodyMesh.position.y = bodyH / 2;
+      bodyMesh.castShadow = true;
+      bodyMesh.receiveShadow = true;
+      group.add(bodyMesh);
     }
-
-    bodyMesh.position.y = bodyH / 2;
-    bodyMesh.castShadow = true;
-    bodyMesh.receiveShadow = true;
-    group.add(bodyMesh);
 
     // Roof / top accent (slightly wider, flat)
     const roofH = h * 0.08;

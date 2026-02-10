@@ -3,47 +3,48 @@ import type { CityState, PlacedBuilding } from '@cityzen/shared';
 import { createEmptyGrid, BUILDING_DEFS } from '@cityzen/shared';
 
 export async function saveCityState(cityId: string, state: CityState): Promise<void> {
-  // Upsert city metadata (resources, clock, tick)
-  await prisma.city.upsert({
-    where: { id: cityId },
-    update: {
-      name: state.name,
-      ownerId: state.ownerId || '',
-      money: state.resources.money,
-      population: state.resources.population,
-      happiness: state.resources.happiness,
-      taxRate: state.resources.taxRate,
-      demandResidential: state.resources.demand.residential,
-      demandCommercial: state.resources.demand.commercial,
-      demandIndustrial: state.resources.demand.industrial,
-      clockGameTimeMs: state.clock.gameTimeMs,
-      clockSpeed: state.clock.speed,
-      clockGameDay: state.clock.gameDay,
-      clockGameYear: state.clock.gameYear,
-      tick: state.tick,
-      updatedAt: new Date(),
-    },
-    create: {
-      id: cityId,
-      name: state.name,
-      ownerId: state.ownerId || '',
-      money: state.resources.money,
-      population: state.resources.population,
-      happiness: state.resources.happiness,
-      taxRate: state.resources.taxRate,
-      demandResidential: state.resources.demand.residential,
-      demandCommercial: state.resources.demand.commercial,
-      demandIndustrial: state.resources.demand.industrial,
-      clockGameTimeMs: state.clock.gameTimeMs,
-      clockSpeed: state.clock.speed,
-      clockGameDay: state.clock.gameDay,
-      clockGameYear: state.clock.gameYear,
-      tick: state.tick,
-    },
-  });
+  // Use interactive transaction with increased timeout (15s) to handle large city saves
+  await prisma.$transaction(async (tx) => {
+    // 1. Upsert city metadata (resources, clock, tick)
+    await tx.city.upsert({
+      where: { id: cityId },
+      update: {
+        name: state.name,
+        ownerId: state.ownerId || '',
+        money: state.resources.money,
+        population: state.resources.population,
+        happiness: state.resources.happiness,
+        taxRate: state.resources.taxRate,
+        demandResidential: state.resources.demand.residential,
+        demandCommercial: state.resources.demand.commercial,
+        demandIndustrial: state.resources.demand.industrial,
+        clockGameTimeMs: state.clock.gameTimeMs,
+        clockSpeed: state.clock.speed,
+        clockGameDay: state.clock.gameDay,
+        clockGameYear: state.clock.gameYear,
+        tick: state.tick,
+        updatedAt: new Date(),
+      },
+      create: {
+        id: cityId,
+        name: state.name,
+        ownerId: state.ownerId || '',
+        money: state.resources.money,
+        population: state.resources.population,
+        happiness: state.resources.happiness,
+        taxRate: state.resources.taxRate,
+        demandResidential: state.resources.demand.residential,
+        demandCommercial: state.resources.demand.commercial,
+        demandIndustrial: state.resources.demand.industrial,
+        clockGameTimeMs: state.clock.gameTimeMs,
+        clockSpeed: state.clock.speed,
+        clockGameDay: state.clock.gameDay,
+        clockGameYear: state.clock.gameYear,
+        tick: state.tick,
+      },
+    });
 
-  // Replace all buildings atomically: delete existing, then bulk insert
-  await prisma.$transaction(async (tx: Omit<typeof prisma, '$connect' | '$disconnect' | '$on' | '$transaction' | '$extends'>) => {
+    // 2. Replace all buildings: delete existing, then bulk insert
     await tx.building.deleteMany({ where: { cityId } });
 
     if (state.buildings.length > 0) {
@@ -61,6 +62,9 @@ export async function saveCityState(cityId: string, state: CityState): Promise<v
         })),
       });
     }
+  }, {
+    maxWait: 10000, // Wait up to 10s to acquire a connection
+    timeout: 15000, // 15s execution timeout
   });
 }
 

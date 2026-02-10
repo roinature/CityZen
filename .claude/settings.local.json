@@ -14,7 +14,9 @@
       "Bash(/usr/local/bin/npx tsc:*)",
       "Bash(export PATH=\"$HOME/.nvm/versions/node/v22.20.0/bin:$PATH\")",
       "Bash(npx prisma migrate diff:*)",
-      "Bash(npx prisma generate:*)"
+      "Bash(npx prisma generate:*)",
+      "Bash(node -e:*)",
+      "Bash(node:*)"
     ]
   }
 }
