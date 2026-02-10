@@ -11,6 +11,6 @@ export default defineConfig({
     }
   },
   resolve: {
-    conditions: ['import'],
+    conditions: ['source', 'import'],
   },
 });
