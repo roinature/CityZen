@@ -14,6 +14,8 @@ The game engine runs multiple independent worlds. Each world is a self-contained
 - Each world is an independent simulation with its own state.
 - A world has an **initial population** of humans, assigned at creation.
 - A world has a **city cap** — a maximum number of cities it can host.
+- **The game always runs.** The simulation never pauses — worlds tick continuously whether players are online or not.
+- **Time is shared** across all cities within a world. There is a single world clock, and all cities experience the same time progression. There is no per-city time — when the world ticks, every city ticks.
 
 ### World Population
 
@@ -43,7 +45,9 @@ The game engine runs multiple independent worlds. Each world is a self-contained
 
 ### People (Individual Simulation)
 
-- Each person is an individual entity with **7 characteristic parameters** (TBD — see below).
+- Each person is an individual entity with **7 characteristic parameters** (see below).
+- Each person has an **age** that advances with the world clock.
+- Age determines **additional needs** on top of the 7 base parameters — the same Maslow levels apply, but *what* satisfies them changes with life stage.
 - These 7 parameters combine to determine the person's **happiness score**.
 - Happiness is evaluated continuously against a **threshold** set by the game's difficulty level.
 - When happiness drops **below the threshold**:
@@ -51,20 +55,68 @@ The game engine runs multiple independent worlds. Each world is a self-contained
   2. They look at **connected cities** to assess if any would make them happier.
   3. If a better alternative is found, the person **migrates** to that city.
   4. If no better alternative exists, they stay (unhappily).
+- People **die** of old age. A city needs a graveyard/cemetery to handle this.
+
+#### Age & Life Stages
+
+A person's age modifies which specific infrastructure they need. The same Maslow level (e.g. Cognitive, Health) requires different buildings depending on life stage.
+
+| Life Stage    | Age Range   | Age-Specific Needs                                              |
+|---------------|-------------|-----------------------------------------------------------------|
+| **Child**     | 0–12        | Elementary School (Cognitive), Clinic (Health)                  |
+| **Teen**      | 13–17       | High School (Cognitive), Clinic (Health)                        |
+| **Young Adult**| 18–25      | University (Cognitive), Jobs (Esteem), Hospital (Health)        |
+| **Adult**     | 26–59       | Jobs (Esteem), Hospital (Health), Full hierarchy                |
+| **Elder**     | 60+         | Hospital/Clinic (Health), reduced job need, Cemetery on death   |
+
+> Age ranges and specific needs are initial estimates — to be refined during balancing.
+
+Key implications:
+- A city full of children needs **schools** or Cognitive satisfaction drops.
+- A city with an aging population needs **hospitals** and eventually **cemeteries**.
+- A city without a cemetery suffers a happiness penalty when people die with no burial.
+- Age distribution across a city creates shifting infrastructure demands over time.
 
 #### The 7 Human Parameters (Maslow's Hierarchy of Needs)
 
 Every person carries these 7 need levels. Based on Maslow's hierarchy, **lower needs dominate** — a person won't care about higher-level needs until lower ones are sufficiently met. Each parameter has a satisfaction score determined by what the city provides.
 
-| # | Parameter          | Need Level | What Satisfies It (City Infrastructure)                          |
-|---|--------------------|------------|------------------------------------------------------------------|
-| 1 | **Physiological**  | Base       | Food, water, shelter, warmth — residential zones, water/energy   |
-| 2 | **Safety**         | Base       | Security, stability, order — police, fire stations, low crime    |
-| 3 | **Love/Belonging** | Social     | Relationships, community, family — population density, parks, community buildings |
-| 4 | **Esteem**         | Social     | Respect, recognition, status — jobs, commercial zones, government buildings |
-| 5 | **Cognitive**      | Growth     | Knowledge, curiosity, learning — schools, universities, libraries |
-| 6 | **Aesthetic**       | Growth     | Beauty, order, environment — parks, landmarks, museums, city planning |
-| 7 | **Self-actualization** | Peak   | Purpose, potential, creativity — diverse economy, culture, tourism, monuments |
+| # | Parameter              | Need Level | Infrastructure Categories          | What Satisfies It                                    |
+|---|------------------------|------------|------------------------------------|------------------------------------------------------|
+| 1 | **Physiological**      | Base       | Energy + Water & Sewage            | Power, clean water, shelter, warmth                  |
+| 2 | **Safety**             | Base       | Police + Fire Dept                 | Security, crime prevention, disaster protection      |
+| 3 | **Love/Belonging**     | Social     | Health + Transport                 | Community health, connectivity, access to people     |
+| 4 | **Esteem**             | Social     | Tourism                            | Landmarks, stadiums, recognition, civic pride        |
+| 5 | **Cognitive**          | Growth     | Education                          | Schools, universities, libraries, knowledge          |
+| 6 | **Aesthetic**          | Growth     | Art & Culture *(new)*              | Theaters, galleries, creative expression, beauty     |
+| 7 | **Self-actualization** | Peak       | Government                         | City Hall, Courthouse, Parliament — self-governance  |
+
+#### Infrastructure → Maslow Mapping
+
+Each infrastructure category directly feeds one Maslow level. This is the bridge between what the player builds and how people feel.
+
+```
+Maslow Level          Infrastructure Category      Buildings
+─────────────────────────────────────────────────────────────────────
+1. Physiological  ←── Energy                   ←── Wind Turbine, Solar Farm, Coal Plant, Nuclear Plant
+                  ←── Water & Sewage           ←── Water Tower, Pump Station, Treatment Plant, Sewage Plant
+
+2. Safety         ←── Police                   ←── Station, HQ, Jail, Academy
+                  ←── Fire Dept                ←── Station, HQ, Helicopter Pad, Training Center
+
+3. Love/Belonging ←── Health                   ←── Clinic, Hospital, Research Center, Cemetery
+                  ←── Transport                ←── Bus Depot, Train Station, Airport, Harbor
+
+4. Esteem         ←── Tourism                  ←── Landmark, Museum, Stadium, Amusement Park
+
+5. Cognitive      ←── Education                ←── Elementary, High School, University, Library
+
+6. Aesthetic      ←── Art & Culture (NEW)      ←── TBD (e.g. Theater, Gallery, Concert Hall, Studio)
+
+7. Self-actual.   ←── Government               ←── City Hall, Courthouse, Parliament, Monument
+```
+
+> **Art & Culture** is a new infrastructure category to be added. It provides creative expression, cultural identity, and beauty. Buildings TBD.
 
 #### Hierarchy Rule
 
@@ -137,6 +189,47 @@ A city's effective growth rate is determined by:
 
 ---
 
+## Economy & Money System
+
+The money system exists partially in the current codebase (building costs, maintenance, tax income). It needs to be extended so that **every infrastructure category has detailed costs** tied to the Maslow hierarchy.
+
+### Revenue
+
+- **Tax income** — collected from the population, scaled by tax rate and population size.
+- Tax rate affects happiness — too high and people leave, too low and the city can't sustain itself.
+
+### Expenses
+
+Every infrastructure category has ongoing costs. The player must balance spending across the Maslow pyramid.
+
+| Maslow Level       | Infrastructure Categories  | Cost Types                                          |
+|--------------------|----------------------------|-----------------------------------------------------|
+| 1. Physiological   | Energy + Water & Sewage    | Build cost, maintenance, fuel/resource consumption   |
+| 2. Safety          | Police + Fire Dept         | Build cost, maintenance, staffing                    |
+| 3. Love/Belonging  | Health + Transport         | Build cost, maintenance, staffing, vehicle upkeep    |
+| 4. Esteem          | Tourism                    | Build cost, maintenance, event costs                 |
+| 5. Cognitive       | Education                  | Build cost, maintenance, staffing                    |
+| 6. Aesthetic       | Art & Culture              | Build cost, maintenance, program funding             |
+| 7. Self-actual.    | Government                 | Build cost, maintenance, administrative overhead     |
+
+### Budget Pressure
+
+- Each Maslow level has a **total operational cost** based on the buildings placed.
+- If the city can't afford maintenance, buildings **degrade or shut down** — directly hitting the Maslow level they serve.
+- This creates a cascading failure: budget crisis → buildings shut down → happiness drops → people leave → less tax revenue → deeper crisis.
+- Conversely, a well-funded city retains people, grows tax base, and can invest in higher Maslow levels.
+
+### Key Mechanics
+
+- **Build cost** — one-time payment to place a building.
+- **Maintenance** — recurring per-tick cost to keep it running (already partially exists).
+- **Staffing** — some buildings require population to operate (e.g. hospitals need adults with jobs).
+- **Upgrade cost** — cost to improve existing buildings or zones.
+
+> The exact cost formulas per category are TBD — to be defined during balancing.
+
+---
+
 ## Architecture (Current → Target)
 
 ### Current State
@@ -159,7 +252,9 @@ A city's effective growth rate is determined by:
 - ~~What are the 7 human characteristic parameters~~ → Resolved: Maslow's hierarchy — Physiological, Safety, Love/Belonging, Esteem, Cognitive, Aesthetic, Self-actualization.
 - How exactly does the hierarchy weighting work? (hard cutoff vs diminishing returns vs multiplier chain?)
 - Birth rate formula — flat rate, or influenced by city conditions?
-- Death rate — do humans die? Age? Natural lifespan?
+- ~~Death rate — do humans die?~~ → Resolved: Yes. People age with the world clock and die of old age. Cities need cemeteries.
+- What is the natural lifespan range? (e.g. 70–90 game years?)
+- ~~Cemetery — is this a new building, or does it fit into an existing category?~~ → Resolved: Health category. New building alongside Clinic, Hospital, Research Center.
 - Unclaimed pool behavior — do unclaimed humans seek cities on their own?
 - World creation parameters — how are initial population and city cap configured?
 - Connection types — are all connections equal, or do they have bandwidth/capacity?
