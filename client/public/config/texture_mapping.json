@@ -1,0 +1,36 @@
+{
+  "categories": [
+    {
+      "id": "standard",
+      "minScore": 0,
+      "textures": {
+        "residential": {
+          "facades": [
+            "residential_facade.png",
+            "residential_facade_01.png"
+          ],
+          "roofs": [
+            "residential_roof.png",
+            "residential_roof_01.png"
+          ]
+        },
+        "commercial": {
+          "facades": [
+            "commercial_facade.png"
+          ],
+          "roofs": [
+            "commercial_roof.png"
+          ]
+        },
+        "industrial": {
+          "facades": [
+            "industrial_facade.png"
+          ],
+          "roofs": [
+            "industrial_roof.png"
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -235,6 +235,35 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     height: 3,
   },
 
+  // === HEALTH ===
+  [BuildingType.HEALTH_CLINIC]: {
+    type: BuildingType.HEALTH_CLINIC,
+    label: 'Clinic',
+    cost: 400,
+    size: { w: 2, d: 2 },
+    effects: { maintenance: 8, happiness: 6 },
+    color: '#80CBC4',
+    height: 2,
+  },
+  [BuildingType.HEALTH_HOSPITAL]: {
+    type: BuildingType.HEALTH_HOSPITAL,
+    label: 'Hospital',
+    cost: 3000,
+    size: { w: 3, d: 3 },
+    effects: { maintenance: 25, happiness: 15 },
+    color: '#009688',
+    height: 5,
+  },
+  [BuildingType.HEALTH_RESEARCH_CENTER]: {
+    type: BuildingType.HEALTH_RESEARCH_CENTER,
+    label: 'Research Center',
+    cost: 8000,
+    size: { w: 4, d: 4 },
+    effects: { maintenance: 50, happiness: 20 },
+    color: '#004D40',
+    height: 6,
+  },
+
   // === EDUCATION ===
   [BuildingType.EDU_ELEMENTARY]: {
     type: BuildingType.EDU_ELEMENTARY,

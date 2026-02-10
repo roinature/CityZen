@@ -58,11 +58,16 @@ export enum BuildingType {
   TOUR_STADIUM = 'tour_stadium',
   TOUR_AMUSEMENT = 'tour_amusement',
 
-  // Transportation
+  // Transport
   TRANS_BUS_DEPOT = 'trans_bus_depot',
   TRANS_TRAIN_STATION = 'trans_train_station',
   TRANS_AIRPORT = 'trans_airport',
   TRANS_HARBOR = 'trans_harbor',
+
+  // Health
+  HEALTH_CLINIC = 'health_clinic',
+  HEALTH_HOSPITAL = 'health_hospital',
+  HEALTH_RESEARCH_CENTER = 'health_research_center',
 }
 
 export const ZONE_TYPES = [
@@ -99,6 +104,11 @@ export const INFRA_FIRE_TYPES = [
   BuildingType.FIRE_HELICOPTER, BuildingType.FIRE_TRAINING,
 ] as const;
 
+export const INFRA_HEALTH_TYPES = [
+  BuildingType.HEALTH_CLINIC, BuildingType.HEALTH_HOSPITAL,
+  BuildingType.HEALTH_RESEARCH_CENTER,
+] as const;
+
 export const INFRA_EDU_TYPES = [
   BuildingType.EDU_ELEMENTARY, BuildingType.EDU_HIGH_SCHOOL,
   BuildingType.EDU_UNIVERSITY, BuildingType.EDU_LIBRARY,
@@ -131,6 +141,7 @@ export const INFRA_CATEGORIES: InfraCategory[] = [
   { id: 'water', label: 'Water & Sewage', icon: '\uD83D\uDCA7', types: INFRA_WATER_TYPES },
   { id: 'police', label: 'Police', icon: '\uD83D\uDEA8', types: INFRA_POLICE_TYPES },
   { id: 'fire', label: 'Fire Dept', icon: '\uD83D\uDE92', types: INFRA_FIRE_TYPES },
+  { id: 'health', label: 'Health', icon: '\uD83C\uDFE5', types: INFRA_HEALTH_TYPES },
   { id: 'education', label: 'Education', icon: '\uD83C\uDF93', types: INFRA_EDU_TYPES },
   { id: 'government', label: 'Government', icon: '\uD83C\uDFDB', types: INFRA_GOV_TYPES },
   { id: 'tourism', label: 'Tourism', icon: '\uD83C\uDFA1', types: INFRA_TOUR_TYPES },

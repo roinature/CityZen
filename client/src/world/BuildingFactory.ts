@@ -125,6 +125,9 @@ export class BuildingFactory {
     [BuildingType.POLICE_HQ]: 'police_hq_facade.png',
     [BuildingType.POLICE_JAIL]: 'police_jail_facade.png',
     [BuildingType.POLICE_ACADEMY]: 'police_academy_facade.png',
+    [BuildingType.HEALTH_CLINIC]: 'clinic_facade.png',
+    [BuildingType.HEALTH_HOSPITAL]: 'hospital_facade.png',
+    [BuildingType.HEALTH_RESEARCH_CENTER]: 'research_center_facade.png',
   };
 
   /**
