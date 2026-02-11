@@ -155,6 +155,12 @@ export class BuildingFactory {
     [BuildingType.FIRE_HQ]: 'fire_hq_facade.png',
     [BuildingType.FIRE_HELICOPTER]: 'fire_helicopter_facade.png',
     [BuildingType.FIRE_TRAINING]: 'fire_training_facade.png',
+    [BuildingType.WATER_TOWER]: 'water_tower_facade.png',
+    [BuildingType.WATER_PUMP_STATION]: 'water_pump_facade.png',
+    [BuildingType.WATER_TREATMENT]: 'water_treatment_facade.png',
+    [BuildingType.WATER_SEWAGE_PLANT]: 'sewage_plant_facade.png',
+    [BuildingType.EDU_ELEMENTARY]: 'elementary_facade.png',
+    [BuildingType.EDU_HIGH_SCHOOL]: 'high_school_facade.png',
   };
 
   public static readonly INFRASTRUCTURE_ROOFS: Partial<Record<BuildingType, string>> = {
@@ -166,6 +172,11 @@ export class BuildingFactory {
     [BuildingType.HEALTH_HOSPITAL]: 'hospital_roof.png',
     [BuildingType.HEALTH_RESEARCH_CENTER]: 'research_center_roof.png',
     [BuildingType.FIRE_STATION]: 'fire_station_roof.png',
+    [BuildingType.WATER_TOWER]: 'water_tower_roof.png',
+    [BuildingType.WATER_PUMP_STATION]: 'water_pump_roof.png',
+    [BuildingType.WATER_TREATMENT]: 'water_treatment_roof.png',
+    [BuildingType.WATER_SEWAGE_PLANT]: 'sewage_plant_roof.png',
+    [BuildingType.EDU_ELEMENTARY]: 'elementary_roof.png',
   };
 
   /**

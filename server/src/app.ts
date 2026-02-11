@@ -7,6 +7,7 @@ import { WorldManager } from './game/WorldManager.js';
 import { createGameRoutes } from './routes/gameRoutes.js';
 import { initBroadcast } from './realtime/supabaseBroadcast.js';
 import { XService } from './services/XService.js';
+import { GoogleService } from './services/GoogleService.js';
 
 const app = express();
 
@@ -93,6 +94,8 @@ const xService = new XService({
   callbackUrl: TWITTER_CALLBACK_URL
 });
 
+const googleService = new GoogleService();
+
 // X Auth Routes
 app.get('/api/auth/twitter', (req, res) => {
   const { url, codeVerifier, state } = xService.generateAuthLink();
@@ -127,6 +130,36 @@ app.get('/api/auth/twitter/callback', async (req, res) => {
   }
 });
 
+// Google Auth Routes
+app.get('/api/auth/google', (req, res) => {
+  try {
+    const authUrl = googleService.generateAuthUrl();
+    res.redirect(authUrl);
+  } catch (err) {
+    console.error('Google Auth Error:', err);
+    res.status(500).send('Failed to generate Google auth URL');
+  }
+});
+
+app.get('/api/auth/google/callback', async (req, res) => {
+  const { code } = req.query;
+
+  if (!code) {
+    res.status(400).send('Missing authorization code');
+    return;
+  }
+
+  try {
+    const { user, sessionToken } = await googleService.exchangeCodeForSession(code as string);
+    (req.session as any).googleAccessToken = sessionToken;
+    (req.session as any).googleUser = user;
+    res.redirect(`${CLIENT_ORIGIN}?google_auth=success&username=${encodeURIComponent(user.name)}&email=${encodeURIComponent(user.email)}`);
+  } catch (err) {
+    console.error('Google Auth Callback Error:', err);
+    res.status(403).send('Google authentication failed!');
+  }
+});
+
 app.post('/api/x/post', async (req, res) => {
   const accessToken = (req.session as any).xAccessToken;
   if (!accessToken) {
@@ -145,6 +178,27 @@ app.post('/api/x/post', async (req, res) => {
     res.json({ success: true, tweet });
   } catch (err) {
     res.status(500).json({ error: 'Failed to post tweet' });
+  }
+});
+
+// Google User Info Endpoint
+app.get('/api/auth/google/user', async (req, res) => {
+  const accessToken = (req.session as any).googleAccessToken;
+  if (!accessToken) {
+    res.status(401).json({ error: 'Not authenticated with Google' });
+    return;
+  }
+
+  try {
+    const user = await googleService.verifyUser(accessToken);
+    if (!user) {
+      res.status(401).json({ error: 'Invalid or expired Google session' });
+      return;
+    }
+    res.json({ user });
+  } catch (err) {
+    console.error('Google User Verification Error:', err);
+    res.status(500).json({ error: 'Failed to verify Google user' });
   }
 });
 
