@@ -60,6 +60,7 @@ export {
   BIRTH_RATE_PER_YEAR, ELDER_MORTALITY_BASE_AGE, ELDER_MORTALITY_RATE_PER_YEAR,
   MAX_PERSON_AGE, LOW_PHYSIO_DEATH_MULTIPLIER, INITIAL_CITY_SEED,
   MASLOW_LERP_RATE,
+  MIGRATION_HAPPINESS_THRESHOLD, MIGRATION_HAPPINESS_DELTA, MIGRATION_MAX_RATE,
 } from './constants/simulation.js';
 export { WORLD_MAP_SIZE, DEFAULT_WORLD_NAME } from './constants/world.js';
 export { BUILDING_DEFS, ZONE_LEVELS } from './constants/buildings.js';
@@ -79,6 +80,8 @@ export {
   LIFE_STAGE_MASLOW_WEIGHTS,
 } from './logic/maslow.js';
 export type { CityMaslowCapacity, CityMaslowProfile } from './logic/maslow.js';
+export { findConnectedCities, evaluateMigration } from './logic/migration.js';
+export type { MigrationCandidate } from './logic/migration.js';
 export {
   calculateEdgeConnections,
   getOppositeDirection,

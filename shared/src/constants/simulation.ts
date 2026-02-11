@@ -36,3 +36,8 @@ export const INITIAL_CITY_SEED = 10;            // People seeded from world pool
 
 // Maslow satisfaction
 export const MASLOW_LERP_RATE = 0.1;           // Per-tick lerp speed toward target (0-1). 0.1 ≈ converges in ~20 ticks
+
+// Migration
+export const MIGRATION_HAPPINESS_THRESHOLD = 35; // Person considers leaving when happiness drops below this
+export const MIGRATION_HAPPINESS_DELTA = 10;     // Target city must be this much better to attract migrants
+export const MIGRATION_MAX_RATE = 0.05;          // Max 5% of city population can leave per game day

@@ -1,5 +1,6 @@
 import {
   type WorldState,
+  type MigrationEventPayload,
   S2C,
   TICK_INTERVAL_MS,
   GAME_MS_PER_TICK,
@@ -11,14 +12,17 @@ import {
   calculateBirthCount,
   calculateCityMaslowCapacity,
   calculateBaseMaslowTargets,
+  findConnectedCities,
+  evaluateMigration,
 } from '@cityzen/shared';
 import type { GameRoom } from './GameRoom.js';
 import type { PopulationManager } from './PopulationManager.js';
-import { broadcastToAll } from '../realtime/supabaseBroadcast.js';
+import { broadcastToAll, broadcastToChannel } from '../realtime/supabaseBroadcast.js';
 
 export class WorldTickEngine {
   private interval: ReturnType<typeof setInterval> | null = null;
   private lastGameYear: number;
+  private lastGameDay: number;
 
   constructor(
     private worldState: WorldState,
@@ -26,6 +30,7 @@ export class WorldTickEngine {
     private populationManager: PopulationManager,
   ) {
     this.lastGameYear = worldState.clock.gameYear;
+    this.lastGameDay = worldState.clock.gameDay;
   }
 
   start(): void {
@@ -55,16 +60,23 @@ export class WorldTickEngine {
 
   private tick(): void {
     const prevYear = this.worldState.clock.gameYear;
+    const prevDay = this.worldState.clock.gameDay;
 
     // Advance world clock
     this.advanceWorldClock();
 
     const clock = this.worldState.clock;
     const yearChanged = clock.gameYear !== prevYear;
+    const dayChanged = clock.gameDay !== prevDay;
 
     // On year boundary: age all persons, process deaths, process births
     if (yearChanged && clock.speed > 0) {
       this.processYearBoundary();
+    }
+
+    // On day boundary: evaluate migration between connected cities
+    if (dayChanged && clock.speed > 0) {
+      this.processDailyMigration();
     }
 
     // Tick all active rooms: update Maslow → compute summary → tick room
@@ -102,6 +114,54 @@ export class WorldTickEngine {
         happiness: c.happiness,
       })),
     });
+  }
+
+  private processDailyMigration(): void {
+    const cities = this.worldState.cities;
+    if (cities.length < 2) return;
+
+    // Aggregate migrations per route for broadcasting
+    const migrationRoutes = new Map<string, { fromCityId: string; toCityId: string; count: number }>();
+
+    for (const cityEntry of cities) {
+      const connectedCities = findConnectedCities(cityEntry, cities);
+      if (connectedCities.length === 0) continue;
+
+      const persons = this.populationManager.getCityPopulation(cityEntry.cityId);
+      const candidates = evaluateMigration(cityEntry, persons, connectedCities);
+
+      for (const candidate of candidates) {
+        this.populationManager.migrate(candidate.personId, candidate.fromCityId, candidate.toCityId);
+
+        const routeKey = `${candidate.fromCityId}->${candidate.toCityId}`;
+        const existing = migrationRoutes.get(routeKey);
+        if (existing) {
+          existing.count++;
+        } else {
+          migrationRoutes.set(routeKey, {
+            fromCityId: candidate.fromCityId,
+            toCityId: candidate.toCityId,
+            count: 1,
+          });
+        }
+      }
+    }
+
+    // Broadcast migration events to affected city channels
+    for (const route of migrationRoutes.values()) {
+      const payload: MigrationEventPayload = {
+        personCount: route.count,
+        fromCityId: route.fromCityId,
+        toCityId: route.toCityId,
+        reason: 'low_happiness',
+      };
+      broadcastToChannel(`city:${route.fromCityId}`, S2C.MIGRATION_EVENT, payload);
+      broadcastToChannel(`city:${route.toCityId}`, S2C.MIGRATION_EVENT, payload);
+
+      const fromName = this.worldState.cities.find(c => c.cityId === route.fromCityId)?.name ?? route.fromCityId;
+      const toName = this.worldState.cities.find(c => c.cityId === route.toCityId)?.name ?? route.toCityId;
+      console.log(`Migration: ${route.count} people moved from "${fromName}" to "${toName}"`);
+    }
   }
 
   private processYearBoundary(): void {
