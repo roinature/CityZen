@@ -305,10 +305,10 @@ export class PopulationManager {
     return Array.from(this.persons.values()).map(serializePerson);
   }
 
-  static deserialize(data: SerializedPerson[]): PopulationManager {
+  static deserialize(data: unknown[]): PopulationManager {
     const pm = new PopulationManager();
     for (const tuple of data) {
-      const person = deserializePerson(tuple);
+      const person = deserializePerson(tuple as SerializedPerson);
       pm.persons.set(person.id, person);
       if (person.cityId) {
         pm.addToCityIndex(person.cityId, person.id);

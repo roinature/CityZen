@@ -10,7 +10,7 @@ import {
 import { RoomManager } from './RoomManager.js';
 import { WorldTickEngine } from './WorldTickEngine.js';
 import { PopulationManager } from './PopulationManager.js';
-import { saveWorldState, loadOrCreateDefaultWorld } from '../persistence/worldStore.js';
+import { saveWorldState, loadOrCreateDefaultWorld, loadPopulationData } from '../persistence/worldStore.js';
 import { broadcastToAll } from '../realtime/supabaseBroadcast.js';
 
 export class WorldManager {
@@ -28,7 +28,6 @@ export class WorldManager {
     this.world = state;
 
     // Initialize population manager
-    // TODO (Phase 7): deserialize from persisted populationData if available
     this.populationManager = new PopulationManager();
     if (isNew) {
       this.populationManager.initWorldPopulation(
@@ -36,6 +35,21 @@ export class WorldManager {
         this.world.clock.gameTimeMs,
       );
       this.world.totalPopulation = this.populationManager.getTotalPopulation();
+    } else {
+      // Restore persisted population data
+      const popData = await loadPopulationData(this.world.id);
+      if (popData && popData.length > 0) {
+        this.populationManager = PopulationManager.deserialize(popData);
+        this.world.totalPopulation = this.populationManager.getTotalPopulation();
+        console.log(`Restored ${this.populationManager.getTotalPopulation()} persons from database`);
+      } else {
+        // No saved population — re-seed
+        this.populationManager.initWorldPopulation(
+          this.world.initialPopulation,
+          this.world.clock.gameTimeMs,
+        );
+        this.world.totalPopulation = this.populationManager.getTotalPopulation();
+      }
     }
 
     // Create and start the world-level tick engine
@@ -144,7 +158,8 @@ export class WorldManager {
 
   async save(): Promise<void> {
     try {
-      await saveWorldState(this.world);
+      const populationData = this.populationManager.serialize();
+      await saveWorldState(this.world, populationData);
     } catch (err) {
       console.error('Failed to save world state:', err);
     }

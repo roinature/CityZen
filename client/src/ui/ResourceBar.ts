@@ -141,6 +141,17 @@ export class ResourceBar {
     this.popEl.textContent = resources.population.toLocaleString();
     this.happyEl.textContent = `${resources.happiness}%`;
 
+    // Update demographics tooltip
+    const summary = resources.populationSummary;
+    if (summary) {
+      this.popEl.title =
+        `Children: ${summary.children}\n` +
+        `Teens: ${summary.teens}\n` +
+        `Young Adults: ${summary.youngAdults}\n` +
+        `Adults: ${summary.adults}\n` +
+        `Elders: ${summary.elders}`;
+    }
+
     // Sync slider to server state (in case another player changed it)
     if (this.taxSlider.value !== String(resources.taxRate)) {
       this.taxSlider.value = String(resources.taxRate);

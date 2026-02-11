@@ -2,9 +2,36 @@ import type { CityState } from '../types/city.js';
 import { BUILDING_DEFS } from '../constants/buildings.js';
 import { ZONE_LEVELS } from '../constants/buildings.js';
 import { isZone, type ZoneType } from '../types/building.js';
+import { TAX_PER_PERSON, DEFICIT_MASLOW_PENALTY_RATE, MIN_BUDGET_MULTIPLIER } from '../constants/economy.js';
+import { LifeStage } from '../types/person.js';
 
 export function calculateTaxRevenue(state: CityState): number {
+  const summary = state.resources.populationSummary;
+  if (summary) {
+    // Demographic-based tax: each life stage contributes differently
+    const taxableIncome =
+      summary.children * TAX_PER_PERSON[LifeStage.CHILD] +
+      summary.teens * TAX_PER_PERSON[LifeStage.TEEN] +
+      summary.youngAdults * TAX_PER_PERSON[LifeStage.YOUNG_ADULT] +
+      summary.adults * TAX_PER_PERSON[LifeStage.ADULT] +
+      summary.elders * TAX_PER_PERSON[LifeStage.ELDER];
+    return Math.floor(taxableIncome * (state.resources.taxRate / 100));
+  }
+
+  // Legacy fallback
   return Math.floor(state.resources.population * (state.resources.taxRate / 100));
+}
+
+/**
+ * Calculate budget penalty multiplier (0.2–1.0).
+ * When money hits 0, infrastructure starts degrading.
+ * Deeper deficit = lower multiplier = lower Maslow targets.
+ */
+export function calculateBudgetPenalty(money: number): number {
+  if (money > 0) return 1.0;
+  const deficit = Math.abs(money);
+  const multiplier = 1.0 - deficit * DEFICIT_MASLOW_PENALTY_RATE;
+  return Math.max(multiplier, MIN_BUDGET_MULTIPLIER);
 }
 
 export function calculateMaintenance(state: CityState): number {

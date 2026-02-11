@@ -25,6 +25,7 @@ import { OptionsPanel, type GameOptions } from './ui/OptionsPanel.js';
 import { CarManager } from './world/CarManager.js';
 import { ToolSidebar, type ToolMode } from './ui/ToolSidebar.js';
 import { FinancePanel } from './ui/FinancePanel.js';
+import { MaslowPanel } from './ui/MaslowPanel.js';
 import { FooterIndicator } from './ui/FooterIndicator.js';
 import { InfraToolbar } from './ui/InfraToolbar.js';
 import { GameClient } from './network/GameClient.js';
@@ -122,6 +123,7 @@ const infraToolbar = new InfraToolbar(uiRoot, (type: BuildingType) => {
 // --- Tool Sidebar ---
 let isNight = false;
 const financePanel = new FinancePanel(uiRoot);
+const maslowPanel = new MaslowPanel(uiRoot);
 
 const toolSidebar = new ToolSidebar(uiRoot, {
   onToolChange: (mode: ToolMode) => {

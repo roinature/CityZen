@@ -1,6 +1,6 @@
 import prisma from './prismaClient.js';
 import type { CityState, PlacedBuilding } from '@cityzen/shared';
-import { createEmptyGrid, BUILDING_DEFS } from '@cityzen/shared';
+import { createEmptyGrid, BUILDING_DEFS, MaslowNeed } from '@cityzen/shared';
 
 export async function saveCityState(cityId: string, state: CityState): Promise<void> {
   // Use interactive transaction with increased timeout (15s) to handle large city saves
@@ -22,6 +22,13 @@ export async function saveCityState(cityId: string, state: CityState): Promise<v
         clockSpeed: state.clock.speed,
         clockGameDay: state.clock.gameDay,
         clockGameYear: state.clock.gameYear,
+        maslowPhysiological: state.resources.populationSummary?.averageMaslow?.[MaslowNeed.PHYSIOLOGICAL] ?? 50,
+        maslowSafety: state.resources.populationSummary?.averageMaslow?.[MaslowNeed.SAFETY] ?? 50,
+        maslowLoveBelonging: state.resources.populationSummary?.averageMaslow?.[MaslowNeed.LOVE_BELONGING] ?? 50,
+        maslowEsteem: state.resources.populationSummary?.averageMaslow?.[MaslowNeed.ESTEEM] ?? 50,
+        maslowCognitive: state.resources.populationSummary?.averageMaslow?.[MaslowNeed.COGNITIVE] ?? 50,
+        maslowAesthetic: state.resources.populationSummary?.averageMaslow?.[MaslowNeed.AESTHETIC] ?? 50,
+        maslowSelfActualization: state.resources.populationSummary?.averageMaslow?.[MaslowNeed.SELF_ACTUALIZATION] ?? 50,
         tick: state.tick,
         updatedAt: new Date(),
       },
@@ -40,6 +47,13 @@ export async function saveCityState(cityId: string, state: CityState): Promise<v
         clockSpeed: state.clock.speed,
         clockGameDay: state.clock.gameDay,
         clockGameYear: state.clock.gameYear,
+        maslowPhysiological: state.resources.populationSummary?.averageMaslow?.[MaslowNeed.PHYSIOLOGICAL] ?? 50,
+        maslowSafety: state.resources.populationSummary?.averageMaslow?.[MaslowNeed.SAFETY] ?? 50,
+        maslowLoveBelonging: state.resources.populationSummary?.averageMaslow?.[MaslowNeed.LOVE_BELONGING] ?? 50,
+        maslowEsteem: state.resources.populationSummary?.averageMaslow?.[MaslowNeed.ESTEEM] ?? 50,
+        maslowCognitive: state.resources.populationSummary?.averageMaslow?.[MaslowNeed.COGNITIVE] ?? 50,
+        maslowAesthetic: state.resources.populationSummary?.averageMaslow?.[MaslowNeed.AESTHETIC] ?? 50,
+        maslowSelfActualization: state.resources.populationSummary?.averageMaslow?.[MaslowNeed.SELF_ACTUALIZATION] ?? 50,
         tick: state.tick,
       },
     });
@@ -116,6 +130,25 @@ export async function loadCityState(cityId: string): Promise<CityState | null> {
         commercial: city.demandCommercial,
         industrial: city.demandIndustrial,
       },
+      // Restore Maslow summary stub — full summary recomputed by PopulationManager on first tick
+      populationSummary: city.population > 0 ? {
+        total: city.population,
+        children: 0,
+        teens: 0,
+        youngAdults: 0,
+        adults: 0,
+        elders: 0,
+        averageHappiness: city.happiness,
+        averageMaslow: {
+          [MaslowNeed.PHYSIOLOGICAL]: city.maslowPhysiological,
+          [MaslowNeed.SAFETY]: city.maslowSafety,
+          [MaslowNeed.LOVE_BELONGING]: city.maslowLoveBelonging,
+          [MaslowNeed.ESTEEM]: city.maslowEsteem,
+          [MaslowNeed.COGNITIVE]: city.maslowCognitive,
+          [MaslowNeed.AESTHETIC]: city.maslowAesthetic,
+          [MaslowNeed.SELF_ACTUALIZATION]: city.maslowSelfActualization,
+        },
+      } : undefined,
     },
     clock: {
       gameTimeMs: city.clockGameTimeMs,

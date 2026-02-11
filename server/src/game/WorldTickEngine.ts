@@ -12,6 +12,7 @@ import {
   calculateBirthCount,
   calculateCityMaslowCapacity,
   calculateBaseMaslowTargets,
+  calculateBudgetPenalty,
   findConnectedCities,
   evaluateMigration,
 } from '@cityzen/shared';
@@ -87,6 +88,15 @@ export class WorldTickEngine {
         const maslowProfile = calculateCityMaslowCapacity(room.state);
         const popCount = this.populationManager.getCityPopulationCount(room.id);
         const baseTargets = calculateBaseMaslowTargets(maslowProfile, popCount);
+
+        // Apply budget penalty: deficit reduces Maslow targets (cascading failure)
+        const budgetMultiplier = calculateBudgetPenalty(room.state.resources.money);
+        if (budgetMultiplier < 1.0) {
+          for (const need of Object.keys(baseTargets) as Array<keyof typeof baseTargets>) {
+            baseTargets[need] *= budgetMultiplier;
+          }
+        }
+
         this.populationManager.updateCityMaslow(room.id, baseTargets);
       }
 

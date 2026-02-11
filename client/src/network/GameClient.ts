@@ -8,6 +8,9 @@ import {
   type ResourcesUpdatePayload,
   type ZoneGrowthPayload,
   type ErrorPayload,
+  type PopulationUpdatePayload,
+  type MigrationEventPayload,
+  type WorldTickPayload,
   type Position,
   type BuildingType,
   type ResourceState,
@@ -15,6 +18,7 @@ import {
   type Player,
   type WorldState,
   type WorldPosition,
+  type PopulationSummary,
 } from '@cityzen/shared';
 
 export interface GameCallbacks {
@@ -28,6 +32,9 @@ export interface GameCallbacks {
   onPlayerLeft: (playerId: string) => void;
   onError: (error: ErrorPayload) => void;
   onSaved?: () => void;
+  onPopulationUpdate?: (summary: PopulationSummary) => void;
+  onMigrationEvent?: (payload: MigrationEventPayload) => void;
+  onWorldTick?: (payload: WorldTickPayload) => void;
 }
 
 export class GameClient {
@@ -61,6 +68,9 @@ export class GameClient {
       .on('broadcast', { event: S2C.WORLD_STATE }, (msg) => {
         const payload = msg.payload as WorldStatePayload;
         this.callbacks.onWorldState(payload.world);
+      })
+      .on('broadcast', { event: S2C.WORLD_TICK }, (msg) => {
+        this.callbacks.onWorldTick?.(msg.payload as WorldTickPayload);
       })
       .subscribe();
 
@@ -111,6 +121,13 @@ export class GameClient {
         .on('broadcast', { event: S2C.PLAYER_LEFT }, (msg) => {
           const payload = msg.payload as { playerId: string };
           this.callbacks.onPlayerLeft(payload.playerId);
+        })
+        .on('broadcast', { event: S2C.POPULATION_UPDATE }, (msg) => {
+          const payload = msg.payload as PopulationUpdatePayload;
+          this.callbacks.onPopulationUpdate?.(payload.summary);
+        })
+        .on('broadcast', { event: S2C.MIGRATION_EVENT }, (msg) => {
+          this.callbacks.onMigrationEvent?.(msg.payload as MigrationEventPayload);
         })
         .subscribe((status) => {
           if (status === 'SUBSCRIBED') resolve();

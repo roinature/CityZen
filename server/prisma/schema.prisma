@@ -21,13 +21,17 @@ model Player {
 
 /// World - the shared game world containing all cities
 model World {
-  id        String   @id @default("default")
-  name      String   @default("World")
-  gridSize  Int      @default(8)
-  cities    Json     @default("[]")  // Array of WorldCityEntry
-  clock     Json     @default("{}")  // GameClock state
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id               String   @id @default("default")
+  name             String   @default("World")
+  gridSize         Int      @default(8)
+  maxCities        Int      @default(64)
+  totalPopulation  Int      @default(100)
+  initialPopulation Int     @default(100)
+  cities           Json     @default("[]")   // Array of WorldCityEntry
+  clock            Json     @default("{}")   // GameClock state
+  populationData   Json     @default("[]")   // Serialized Person[] (compact tuple format)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 }
 
 /// City - metadata, resources, and clock (no grid blob)
@@ -52,6 +56,15 @@ model City {
   clockSpeed      Int   @default(1)
   clockGameDay    Int   @default(0)
   clockGameYear   Int   @default(1)
+
+  // Maslow satisfaction summary (city averages, 0-100)
+  maslowPhysiological     Float @default(50)
+  maslowSafety            Float @default(50)
+  maslowLoveBelonging     Float @default(50)
+  maslowEsteem            Float @default(50)
+  maslowCognitive         Float @default(50)
+  maslowAesthetic         Float @default(50)
+  maslowSelfActualization Float @default(50)
 
   // Simulation
   tick Int @default(0)

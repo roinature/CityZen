@@ -63,12 +63,13 @@ export {
   MIGRATION_HAPPINESS_THRESHOLD, MIGRATION_HAPPINESS_DELTA, MIGRATION_MAX_RATE,
 } from './constants/simulation.js';
 export { WORLD_MAP_SIZE, DEFAULT_WORLD_NAME } from './constants/world.js';
+export { TAX_PER_PERSON, DEFICIT_MASLOW_PENALTY_RATE, MIN_BUDGET_MULTIPLIER } from './constants/economy.js';
 export { BUILDING_DEFS, ZONE_LEVELS } from './constants/buildings.js';
 export type { ZoneLevelDef } from './constants/buildings.js';
 
 // Logic
 export { canPlaceBuilding, createEmptyGrid } from './logic/placement.js';
-export { calculateTaxRevenue, calculateMaintenance, calculateNetIncome, calculatePopulationGrowth, calculateHappiness, calculateHousingCapacity, clamp, calculateCityScore } from './logic/resources.js';
+export { calculateTaxRevenue, calculateMaintenance, calculateNetIncome, calculatePopulationGrowth, calculateHappiness, calculateHousingCapacity, calculateBudgetPenalty, clamp, calculateCityScore } from './logic/resources.js';
 export { simulateTick, simulateCityTick, advanceClock } from './logic/simulation.js';
 export { calculateDemand, processZoneGrowth } from './logic/demand.js';
 export { calculateBirthCount } from './logic/birth.js';
