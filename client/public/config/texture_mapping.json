@@ -7,28 +7,22 @@
         "residential": {
           "facades": [
             "residential_facade.png",
-            "residential_facade_01.png"
+            "residential_facade_01.png",
+            "residential_facade_02.png"
           ],
           "roofs": [
             "residential_roof.png",
-            "residential_roof_01.png"
+            "residential_roof_01.png",
+            "residential_roof_02.png"
           ]
         },
         "commercial": {
-          "facades": [
-            "commercial_facade.png"
-          ],
-          "roofs": [
-            "commercial_roof.png"
-          ]
+          "facades": ["commercial_facade.png", "commercial_facade_02.png"],
+          "roofs": ["commercial_roof.png", "commercial_roof_02.png"]
         },
         "industrial": {
-          "facades": [
-            "industrial_facade.png"
-          ],
-          "roofs": [
-            "industrial_roof.png"
-          ]
+          "facades": ["industrial_facade.png", "industrial_facade_02.png"],
+          "roofs": ["industrial_roof.png", "industrial_roof_02.png"]
         }
       }
     }

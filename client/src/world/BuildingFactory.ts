@@ -138,6 +138,17 @@ export class BuildingFactory {
     [BuildingType.FIRE_TRAINING]: 'fire_training_facade.png',
   };
 
+  public static readonly INFRASTRUCTURE_ROOFS: Partial<Record<BuildingType, string>> = {
+    [BuildingType.ENERGY_COAL_PLANT]: 'coal_plant_roof.png',
+    [BuildingType.ENERGY_SOLAR_FARM]: 'solar_farm_roof.png',
+    [BuildingType.ENERGY_WIND_TURBINE]: 'wind_turbine_roof.png',
+    [BuildingType.ENERGY_NUCLEAR_PLANT]: 'nuclear_plant_roof.png',
+    [BuildingType.HEALTH_CLINIC]: 'clinic_roof.png',
+    [BuildingType.HEALTH_HOSPITAL]: 'hospital_roof.png',
+    [BuildingType.HEALTH_RESEARCH_CENTER]: 'research_center_roof.png',
+    [BuildingType.FIRE_STATION]: 'fire_station_roof.png',
+  };
+
   /**
    * Returns a path to an image file represent the building icon/preview.
    */
@@ -192,7 +203,19 @@ export class BuildingFactory {
       const matSideZDay = new THREE.MeshLambertMaterial({
         map: this.getTexture(facadeTexPath, bodyW / 2, bodyH / 2),
       });
-      const matTop = new THREE.MeshLambertMaterial({ color: color.clone().multiplyScalar(0.7) });
+
+      // Roof texture
+      const roofTexFile = BuildingFactory.INFRASTRUCTURE_ROOFS[building.type];
+      let matTop: THREE.Material;
+      if (roofTexFile) {
+        const roofTexPath = `/textures/buildings/${roofTexFile}`;
+        matTop = new THREE.MeshLambertMaterial({
+          map: this.getTexture(roofTexPath, bodyW / 2, bodyD / 2),
+        });
+      } else {
+        matTop = new THREE.MeshLambertMaterial({ color: color.clone().multiplyScalar(0.7) });
+      }
+
       const matBottom = new THREE.MeshLambertMaterial({ color: 0x333333 });
 
       const materialsDay = [
@@ -227,10 +250,22 @@ export class BuildingFactory {
         color: 0xffffff,
       });
 
+      // Night roof
+      let matTopNight: THREE.Material;
+      if (roofTexFile) {
+        const roofNightTexPath = this.getNightTexturePath(`/textures/buildings/${roofTexFile}`);
+        matTopNight = new THREE.MeshBasicMaterial({
+          map: this.getTexture(roofNightTexPath, bodyW / 2, bodyD / 2),
+          color: 0xffffff,
+        });
+      } else {
+        matTopNight = matTop; // Fallback to day top
+      }
+
       const materialsNight = [
         matSideXNight, // Right
         matSideXNight, // Left
-        matTop,        // Top
+        matTopNight,   // Top
         matBottom,     // Bottom
         matSideZNight, // Front
         matSideZNight  // Back
