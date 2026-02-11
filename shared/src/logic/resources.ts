@@ -81,6 +81,19 @@ export function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
+export function calculateHousingCapacity(state: CityState): number {
+  let capacity = 0;
+  for (const b of state.buildings) {
+    const def = BUILDING_DEFS[b.type];
+    capacity += def?.effects?.populationCapacity ?? 0;
+    if (isZone(b.type) && b.developmentLevel && b.developmentLevel > 0) {
+      const levelDef = ZONE_LEVELS[b.type as ZoneType][b.developmentLevel - 1];
+      capacity += levelDef.populationCapacity;
+    }
+  }
+  return capacity;
+}
+
 export function calculateCityScore(state: CityState): number {
   // Simple score formula: Population + (Money/100) + (Happiness * 10)
   // This provides a growth metric based on overall city health and size

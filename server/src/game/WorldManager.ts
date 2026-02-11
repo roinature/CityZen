@@ -5,9 +5,11 @@ import {
   type EdgeConnection,
   S2C,
   WORLD_MAP_SIZE,
+  INITIAL_CITY_SEED,
 } from '@cityzen/shared';
 import { RoomManager } from './RoomManager.js';
 import { WorldTickEngine } from './WorldTickEngine.js';
+import { PopulationManager } from './PopulationManager.js';
 import { saveWorldState, loadOrCreateDefaultWorld } from '../persistence/worldStore.js';
 import { broadcastToAll } from '../realtime/supabaseBroadcast.js';
 
@@ -15,27 +17,47 @@ export class WorldManager {
   private world!: WorldState;
   private roomManager: RoomManager;
   private tickEngine!: WorldTickEngine;
+  private populationManager!: PopulationManager;
 
   constructor(roomManager: RoomManager) {
     this.roomManager = roomManager;
   }
 
   async init(): Promise<void> {
-    const { state } = await loadOrCreateDefaultWorld();
+    const { state, isNew } = await loadOrCreateDefaultWorld();
     this.world = state;
+
+    // Initialize population manager
+    // TODO (Phase 7): deserialize from persisted populationData if available
+    this.populationManager = new PopulationManager();
+    if (isNew) {
+      this.populationManager.initWorldPopulation(
+        this.world.initialPopulation,
+        this.world.clock.gameTimeMs,
+      );
+      this.world.totalPopulation = this.populationManager.getTotalPopulation();
+    }
 
     // Create and start the world-level tick engine
     this.tickEngine = new WorldTickEngine(
       this.world,
       () => this.roomManager.getActiveRooms(),
+      this.populationManager,
     );
     this.tickEngine.start();
 
-    console.log(`World loaded: "${this.world.name}" with ${this.world.cities.length} cities`);
+    console.log(
+      `World loaded: "${this.world.name}" with ${this.world.cities.length} cities, ` +
+      `${this.populationManager.getTotalPopulation()} people (${this.populationManager.getUnassignedCount()} unassigned)`,
+    );
   }
 
   getWorldState(): WorldState {
     return this.world;
+  }
+
+  getPopulationManager(): PopulationManager {
+    return this.populationManager;
   }
 
   setGameSpeed(speed: number): { success: boolean; error?: string } {
@@ -69,6 +91,9 @@ export class WorldManager {
     // Create the city room
     const room = await this.roomManager.createRoom(cityName, ownerId, ownerName);
 
+    // Seed city with people from the world pool
+    const seeded = this.populationManager.seedCity(room.id, INITIAL_CITY_SEED);
+
     // Add to world state
     const entry: WorldCityEntry = {
       cityId: room.id,
@@ -76,7 +101,7 @@ export class WorldManager {
       ownerName,
       name: cityName,
       position,
-      population: 0,
+      population: seeded.length,
       happiness: 50,
     };
     this.world.cities.push(entry);
@@ -86,6 +111,8 @@ export class WorldManager {
 
     // Broadcast updated world state to everyone
     broadcastToAll(S2C.WORLD_STATE, { world: this.world });
+
+    console.log(`City "${cityName}" seeded with ${seeded.length} people (${this.populationManager.getUnassignedCount()} remain in world pool)`);
 
     return { success: true, cityId: room.id };
   }

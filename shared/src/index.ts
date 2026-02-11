@@ -57,6 +57,8 @@ export {
   DEMAND_GROWTH_RATE, ZONE_GROWTH_CHANCE, MIN_DEMAND_TO_GROW,
   GAME_MS_PER_TICK, TICKS_PER_GAME_DAY, DAYS_PER_GAME_YEAR,
   DEFAULT_GAME_SPEED, MAX_GAME_SPEED,
+  BIRTH_RATE_PER_YEAR, ELDER_MORTALITY_BASE_AGE, ELDER_MORTALITY_RATE_PER_YEAR,
+  MAX_PERSON_AGE, LOW_PHYSIO_DEATH_MULTIPLIER, INITIAL_CITY_SEED,
 } from './constants/simulation.js';
 export { WORLD_MAP_SIZE, DEFAULT_WORLD_NAME } from './constants/world.js';
 export { BUILDING_DEFS, ZONE_LEVELS } from './constants/buildings.js';
@@ -64,9 +66,11 @@ export type { ZoneLevelDef } from './constants/buildings.js';
 
 // Logic
 export { canPlaceBuilding, createEmptyGrid } from './logic/placement.js';
-export { calculateTaxRevenue, calculateMaintenance, calculateNetIncome, calculatePopulationGrowth, calculateHappiness, clamp, calculateCityScore } from './logic/resources.js';
+export { calculateTaxRevenue, calculateMaintenance, calculateNetIncome, calculatePopulationGrowth, calculateHappiness, calculateHousingCapacity, clamp, calculateCityScore } from './logic/resources.js';
 export { simulateTick, simulateCityTick, advanceClock } from './logic/simulation.js';
 export { calculateDemand, processZoneGrowth } from './logic/demand.js';
+export { calculateBirthCount } from './logic/birth.js';
+export { getDeathProbability } from './logic/death.js';
 export {
   calculateEdgeConnections,
   getOppositeDirection,

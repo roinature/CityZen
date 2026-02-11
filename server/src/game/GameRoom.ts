@@ -5,6 +5,7 @@ import {
   type PlacedBuilding,
   type Position,
   type GameClock,
+  type PopulationSummary,
   BuildingType,
   isZone,
   S2C,
@@ -73,7 +74,7 @@ export class GameRoom {
   }
 
   /** Called by WorldTickEngine each world tick with the shared clock. */
-  worldTick(worldClock: GameClock): void {
+  worldTick(worldClock: GameClock, populationSummary?: PopulationSummary): void {
     // Copy world clock to city state
     this.state.clock = { ...worldClock };
 
@@ -86,6 +87,12 @@ export class GameRoom {
     }
 
     this.state = simulateCityTick(this.state);
+
+    // Sync population from PopulationManager (overrides legacy growth)
+    if (populationSummary) {
+      this.state.resources.population = populationSummary.total;
+      this.state.resources.populationSummary = populationSummary;
+    }
 
     // Broadcast resources with clock
     this.broadcast(S2C.RESOURCES_UPDATE, {
