@@ -18,23 +18,24 @@ export function advanceClock(state: CityState): CityState {
   };
 }
 
-export function simulateTick(state: CityState): CityState {
-  // Advance game clock
-  let working = advanceClock(state);
-
-  // If paused, only advance clock but skip simulation
+/**
+ * Simulate one tick without advancing the clock.
+ * Used by WorldTickEngine which owns the shared world clock.
+ */
+export function simulateCityTick(state: CityState): CityState {
+  // If paused, skip simulation
   if (state.clock.speed === 0) {
-    return { ...working, tick: state.tick + 1, updatedAt: Date.now() };
+    return { ...state, tick: state.tick + 1, updatedAt: Date.now() };
   }
 
   // Update demand first
-  const newDemand = calculateDemand(working);
+  const newDemand = calculateDemand(state);
 
   // Create a working copy with updated demand and shallow-copied buildings
-  working = {
-    ...working,
-    resources: { ...working.resources, demand: newDemand },
-    buildings: working.buildings.map(b => ({ ...b })),
+  const working = {
+    ...state,
+    resources: { ...state.resources, demand: newDemand },
+    buildings: state.buildings.map(b => ({ ...b })),
   };
 
   // Process zone growth (mutates building copies in place)
@@ -56,4 +57,11 @@ export function simulateTick(state: CityState): CityState {
     tick: state.tick + 1,
     updatedAt: Date.now(),
   };
+}
+
+/**
+ * Full tick: advance clock + simulate. Legacy entry point.
+ */
+export function simulateTick(state: CityState): CityState {
+  return simulateCityTick(advanceClock(state));
 }

@@ -1,7 +1,7 @@
 import type { BuildingType } from './building.js';
 import type { Position } from './grid.js';
 import type { CityState } from './city.js';
-import type { ResourceState } from './resources.js';
+import type { ResourceState, PopulationSummary } from './resources.js';
 import type { PlacedBuilding } from './building.js';
 import type { Player } from './player.js';
 import type { GameClock } from './time.js';
@@ -35,6 +35,9 @@ export const S2C = {
   ERROR: 'error',
   CITY_LIST: 'city:list',
   SAVE_OK: 'city:saved',
+  POPULATION_UPDATE: 'city:population',
+  MIGRATION_EVENT: 'world:migration',
+  WORLD_TICK: 'world:tick',
 } as const;
 
 // Client -> Server payloads
@@ -124,4 +127,21 @@ export interface CityListItem {
   ownerName: string;
   playerCount: number;
   buildingCount: number;
+}
+
+export interface PopulationUpdatePayload {
+  summary: PopulationSummary;
+}
+
+export interface MigrationEventPayload {
+  personCount: number;
+  fromCityId: string;
+  toCityId: string;
+  reason: string;
+}
+
+export interface WorldTickPayload {
+  clock: GameClock;
+  totalPopulation: number;
+  citySummaries: Array<{ cityId: string; population: number; happiness: number }>;
 }

@@ -7,12 +7,14 @@ import {
   WORLD_MAP_SIZE,
 } from '@cityzen/shared';
 import { RoomManager } from './RoomManager.js';
+import { WorldTickEngine } from './WorldTickEngine.js';
 import { saveWorldState, loadOrCreateDefaultWorld } from '../persistence/worldStore.js';
 import { broadcastToAll } from '../realtime/supabaseBroadcast.js';
 
 export class WorldManager {
   private world!: WorldState;
   private roomManager: RoomManager;
+  private tickEngine!: WorldTickEngine;
 
   constructor(roomManager: RoomManager) {
     this.roomManager = roomManager;
@@ -21,11 +23,27 @@ export class WorldManager {
   async init(): Promise<void> {
     const { state } = await loadOrCreateDefaultWorld();
     this.world = state;
+
+    // Create and start the world-level tick engine
+    this.tickEngine = new WorldTickEngine(
+      this.world,
+      () => this.roomManager.getActiveRooms(),
+    );
+    this.tickEngine.start();
+
     console.log(`World loaded: "${this.world.name}" with ${this.world.cities.length} cities`);
   }
 
   getWorldState(): WorldState {
     return this.world;
+  }
+
+  setGameSpeed(speed: number): { success: boolean; error?: string } {
+    return this.tickEngine.setGameSpeed(speed);
+  }
+
+  getGameSpeed(): number {
+    return this.tickEngine.getGameSpeed();
   }
 
   isPlotAvailable(position: WorldPosition): boolean {
@@ -59,6 +77,7 @@ export class WorldManager {
       name: cityName,
       position,
       population: 0,
+      happiness: 50,
     };
     this.world.cities.push(entry);
     this.world.updatedAt = Date.now();
@@ -102,5 +121,9 @@ export class WorldManager {
     } catch (err) {
       console.error('Failed to save world state:', err);
     }
+  }
+
+  shutdown(): void {
+    this.tickEngine.stop();
   }
 }

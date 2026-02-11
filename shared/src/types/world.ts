@@ -21,6 +21,7 @@ export interface WorldCityEntry {
   name: string;
   position: WorldPosition;
   population: number;
+  happiness: number;
   edgeConnections?: EdgeConnection[]; // Roads at plot edges
 }
 
@@ -28,8 +29,11 @@ export interface WorldState {
   id: string;
   name: string;
   gridSize: number;
+  maxCities: number;
   cities: WorldCityEntry[];
   clock: GameClock;
+  totalPopulation: number;
+  initialPopulation: number;
   createdAt: number;
   updatedAt: number;
 }

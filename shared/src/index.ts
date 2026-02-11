@@ -1,12 +1,31 @@
 // Types
 export type { Position, GridCell, Grid } from './types/grid.js';
-export { BuildingType, isZone, isRoad, ZONE_TYPES, ROAD_TYPES, INFRA_CATEGORIES } from './types/building.js';
-export type { BuildingDef, BuildingEffects, PlacedBuilding, ZoneType, RoadType, InfraCategory } from './types/building.js';
-export type { ResourceState, DemandState } from './types/resources.js';
+export {
+  BuildingType, isZone, isRoad,
+  ZONE_TYPES, ROAD_TYPES,
+  INFRA_CATEGORIES, INFRA_ART_TYPES,
+  INFRA_ENERGY_TYPES, INFRA_WATER_TYPES,
+  INFRA_POLICE_TYPES, INFRA_FIRE_TYPES,
+  INFRA_HEALTH_TYPES, INFRA_EDU_TYPES,
+  INFRA_GOV_TYPES, INFRA_TOUR_TYPES,
+  INFRA_TRANS_TYPES,
+} from './types/building.js';
+export type { BuildingDef, BuildingEffects, MaslowContribution, PlacedBuilding, ZoneType, RoadType, InfraCategory } from './types/building.js';
+export type { ResourceState, DemandState, PopulationSummary } from './types/resources.js';
 export type { CityState } from './types/city.js';
 export type { Player, PlayerProfile } from './types/player.js';
 export type { GameClock } from './types/time.js';
 export type { WorldState, WorldCityEntry, WorldPosition, EdgeDirection, EdgeConnection } from './types/world.js';
+
+// Person & Maslow
+export {
+  LifeStage, LIFE_STAGE_AGE_RANGES, getLifeStage,
+  MaslowNeed, MASLOW_NEEDS_ORDERED,
+  createDefaultMaslow, getPersonHappiness,
+} from './types/person.js';
+export type { MaslowState, Person } from './types/person.js';
+
+// Events
 export {
   C2S, S2C,
   type JoinCityPayload,
@@ -25,6 +44,9 @@ export {
   type SetTaxRatePayload,
   type SetUnlimitedMoneyPayload,
   type SetGameSpeedPayload,
+  type PopulationUpdatePayload,
+  type MigrationEventPayload,
+  type WorldTickPayload,
 } from './types/events.js';
 
 // Constants
@@ -43,7 +65,7 @@ export type { ZoneLevelDef } from './constants/buildings.js';
 // Logic
 export { canPlaceBuilding, createEmptyGrid } from './logic/placement.js';
 export { calculateTaxRevenue, calculateMaintenance, calculateNetIncome, calculatePopulationGrowth, calculateHappiness, clamp, calculateCityScore } from './logic/resources.js';
-export { simulateTick, advanceClock } from './logic/simulation.js';
+export { simulateTick, simulateCityTick, advanceClock } from './logic/simulation.js';
 export { calculateDemand, processZoneGrowth } from './logic/demand.js';
 export {
   calculateEdgeConnections,

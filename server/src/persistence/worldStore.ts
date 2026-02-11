@@ -33,8 +33,11 @@ export async function loadWorldState(worldId: string): Promise<WorldState | null
     id: world.id,
     name: world.name,
     gridSize: world.gridSize,
+    maxCities: (world as Record<string, unknown>).maxCities as number ?? 64,
     cities: world.cities as unknown as WorldState['cities'],
     clock: world.clock as unknown as WorldState['clock'],
+    totalPopulation: (world as Record<string, unknown>).totalPopulation as number ?? 0,
+    initialPopulation: (world as Record<string, unknown>).initialPopulation as number ?? 100,
     createdAt: world.createdAt.getTime(),
     updatedAt: world.updatedAt.getTime(),
   };
@@ -48,8 +51,11 @@ export async function loadOrCreateDefaultWorld(): Promise<{ state: WorldState; i
     id: 'default',
     name: 'World',
     gridSize: 8,
+    maxCities: 64,
     cities: [],
     clock: { gameTimeMs: 0, speed: 1, gameDay: 0, gameYear: 1 },
+    totalPopulation: 100,
+    initialPopulation: 100,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };

@@ -25,3 +25,11 @@ export const MAX_GAME_SPEED = 3;
 export const DEMAND_GROWTH_RATE = 0.05;
 export const ZONE_GROWTH_CHANCE = 0.3;
 export const MIN_DEMAND_TO_GROW = 0.2;
+
+// Population lifecycle
+export const BIRTH_RATE_PER_YEAR = 0.05;       // 5% of fertile (young_adult + adult) population per year
+export const ELDER_MORTALITY_BASE_AGE = 60;     // Mortality starts at this age
+export const ELDER_MORTALITY_RATE_PER_YEAR = 0.01; // 1% increase per year over base age
+export const MAX_PERSON_AGE = 100;              // Guaranteed death at this age
+export const LOW_PHYSIO_DEATH_MULTIPLIER = 3.0; // Death rate multiplier when physiological need is critically low
+export const INITIAL_CITY_SEED = 10;            // People seeded from world pool when a city is claimed

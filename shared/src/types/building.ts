@@ -1,4 +1,5 @@
 import type { Position } from './grid.js';
+import type { MaslowNeed } from './person.js';
 
 export enum BuildingType {
   // Zones (player places these; buildings grow inside them)
@@ -68,6 +69,13 @@ export enum BuildingType {
   HEALTH_CLINIC = 'health_clinic',
   HEALTH_HOSPITAL = 'health_hospital',
   HEALTH_RESEARCH_CENTER = 'health_research_center',
+  HEALTH_CEMETERY = 'health_cemetery',
+
+  // Art & Culture
+  ART_GALLERY = 'art_gallery',
+  ART_THEATER = 'art_theater',
+  ART_CONCERT_HALL = 'art_concert_hall',
+  ART_SCULPTURE_PARK = 'art_sculpture_park',
 }
 
 export const ZONE_TYPES = [
@@ -106,7 +114,7 @@ export const INFRA_FIRE_TYPES = [
 
 export const INFRA_HEALTH_TYPES = [
   BuildingType.HEALTH_CLINIC, BuildingType.HEALTH_HOSPITAL,
-  BuildingType.HEALTH_RESEARCH_CENTER,
+  BuildingType.HEALTH_RESEARCH_CENTER, BuildingType.HEALTH_CEMETERY,
 ] as const;
 
 export const INFRA_EDU_TYPES = [
@@ -129,6 +137,11 @@ export const INFRA_TRANS_TYPES = [
   BuildingType.TRANS_AIRPORT, BuildingType.TRANS_HARBOR,
 ] as const;
 
+export const INFRA_ART_TYPES = [
+  BuildingType.ART_GALLERY, BuildingType.ART_THEATER,
+  BuildingType.ART_CONCERT_HALL, BuildingType.ART_SCULPTURE_PARK,
+] as const;
+
 export interface InfraCategory {
   id: string;
   label: string;
@@ -146,6 +159,7 @@ export const INFRA_CATEGORIES: InfraCategory[] = [
   { id: 'government', label: 'Government', icon: '\uD83C\uDFDB', types: INFRA_GOV_TYPES },
   { id: 'tourism', label: 'Tourism', icon: '\uD83C\uDFA1', types: INFRA_TOUR_TYPES },
   { id: 'transport', label: 'Transport', icon: '\uD83D\uDE8C', types: INFRA_TRANS_TYPES },
+  { id: 'art_culture', label: 'Art & Culture', icon: '\uD83C\uDFA8', types: INFRA_ART_TYPES },
 ];
 
 export type ZoneType = (typeof ZONE_TYPES)[number];
@@ -159,11 +173,18 @@ export function isRoad(type: BuildingType): type is RoadType {
   return (ROAD_TYPES as readonly BuildingType[]).includes(type);
 }
 
+export interface MaslowContribution {
+  need: MaslowNeed;
+  value: number;          // Quality of service (higher = better)
+  capacityServed: number; // How many people this building can serve for this need
+}
+
 export interface BuildingEffects {
   populationCapacity?: number;
   jobs?: number;
   maintenance?: number;
   happiness?: number;
+  maslowContributions?: MaslowContribution[];
 }
 
 export interface BuildingDef {

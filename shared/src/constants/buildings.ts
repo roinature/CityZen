@@ -1,4 +1,5 @@
 import { BuildingType, type BuildingDef, type ZoneType } from '../types/building.js';
+import { MaslowNeed } from '../types/person.js';
 
 export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
   // === ZONES ===
@@ -78,18 +79,29 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     label: 'Park',
     cost: 50,
     size: { w: 1, d: 1 },
-    effects: { happiness: 10, maintenance: 3 },
+    effects: {
+      happiness: 10, maintenance: 3,
+      maslowContributions: [
+        { need: MaslowNeed.AESTHETIC, value: 8, capacityServed: 100 },
+        { need: MaslowNeed.LOVE_BELONGING, value: 5, capacityServed: 80 },
+      ],
+    },
     color: '#8BC34A',
     height: 0.2,
   },
 
-  // === ENERGY ===
+  // === ENERGY → Maslow: PHYSIOLOGICAL ===
   [BuildingType.ENERGY_WIND_TURBINE]: {
     type: BuildingType.ENERGY_WIND_TURBINE,
     label: 'Wind Turbine',
     cost: 500,
     size: { w: 1, d: 1 },
-    effects: { maintenance: 5, happiness: 2 },
+    effects: {
+      maintenance: 5, happiness: 2,
+      maslowContributions: [
+        { need: MaslowNeed.PHYSIOLOGICAL, value: 10, capacityServed: 100 },
+      ],
+    },
     color: '#E0E0E0',
     height: 6,
   },
@@ -98,7 +110,12 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     label: 'Solar Farm',
     cost: 800,
     size: { w: 2, d: 2 },
-    effects: { maintenance: 8, happiness: 1 },
+    effects: {
+      maintenance: 8, happiness: 1,
+      maslowContributions: [
+        { need: MaslowNeed.PHYSIOLOGICAL, value: 12, capacityServed: 250 },
+      ],
+    },
     color: '#1565C0',
     height: 0.5,
   },
@@ -107,7 +124,12 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     label: 'Coal Plant',
     cost: 2000,
     size: { w: 3, d: 3 },
-    effects: { maintenance: 25, happiness: -10 },
+    effects: {
+      maintenance: 25, happiness: -10,
+      maslowContributions: [
+        { need: MaslowNeed.PHYSIOLOGICAL, value: 18, capacityServed: 800 },
+      ],
+    },
     color: '#424242',
     height: 5,
   },
@@ -116,18 +138,28 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     label: 'Nuclear Plant',
     cost: 10000,
     size: { w: 4, d: 4 },
-    effects: { maintenance: 50, happiness: -5 },
+    effects: {
+      maintenance: 50, happiness: -5,
+      maslowContributions: [
+        { need: MaslowNeed.PHYSIOLOGICAL, value: 25, capacityServed: 2000 },
+      ],
+    },
     color: '#7B1FA2',
     height: 7,
   },
 
-  // === WATER & SEWAGE ===
+  // === WATER & SEWAGE → Maslow: PHYSIOLOGICAL ===
   [BuildingType.WATER_TOWER]: {
     type: BuildingType.WATER_TOWER,
     label: 'Water Tower',
     cost: 300,
     size: { w: 1, d: 1 },
-    effects: { maintenance: 3 },
+    effects: {
+      maintenance: 3,
+      maslowContributions: [
+        { need: MaslowNeed.PHYSIOLOGICAL, value: 10, capacityServed: 150 },
+      ],
+    },
     color: '#4FC3F7',
     height: 5,
   },
@@ -136,7 +168,12 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     label: 'Pump Station',
     cost: 600,
     size: { w: 2, d: 2 },
-    effects: { maintenance: 8 },
+    effects: {
+      maintenance: 8,
+      maslowContributions: [
+        { need: MaslowNeed.PHYSIOLOGICAL, value: 14, capacityServed: 400 },
+      ],
+    },
     color: '#0288D1',
     height: 2,
   },
@@ -145,7 +182,12 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     label: 'Treatment Plant',
     cost: 2500,
     size: { w: 3, d: 3 },
-    effects: { maintenance: 20 },
+    effects: {
+      maintenance: 20,
+      maslowContributions: [
+        { need: MaslowNeed.PHYSIOLOGICAL, value: 20, capacityServed: 1000 },
+      ],
+    },
     color: '#00ACC1',
     height: 3,
   },
@@ -154,18 +196,28 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     label: 'Sewage Plant',
     cost: 3000,
     size: { w: 3, d: 3 },
-    effects: { maintenance: 25, happiness: -8 },
+    effects: {
+      maintenance: 25, happiness: -8,
+      maslowContributions: [
+        { need: MaslowNeed.PHYSIOLOGICAL, value: 15, capacityServed: 1200 },
+      ],
+    },
     color: '#5D4037',
     height: 3,
   },
 
-  // === POLICE ===
+  // === POLICE → Maslow: SAFETY ===
   [BuildingType.POLICE_STATION]: {
     type: BuildingType.POLICE_STATION,
     label: 'Police Station',
     cost: 500,
     size: { w: 2, d: 2 },
-    effects: { maintenance: 10, happiness: 5 },
+    effects: {
+      maintenance: 10, happiness: 5,
+      maslowContributions: [
+        { need: MaslowNeed.SAFETY, value: 12, capacityServed: 300 },
+      ],
+    },
     color: '#1E88E5',
     height: 3,
   },
@@ -174,7 +226,12 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     label: 'Police HQ',
     cost: 2000,
     size: { w: 3, d: 3 },
-    effects: { maintenance: 25, happiness: 10 },
+    effects: {
+      maintenance: 25, happiness: 10,
+      maslowContributions: [
+        { need: MaslowNeed.SAFETY, value: 20, capacityServed: 800 },
+      ],
+    },
     color: '#1565C0',
     height: 5,
   },
@@ -183,7 +240,12 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     label: 'Jail',
     cost: 1500,
     size: { w: 2, d: 3 },
-    effects: { maintenance: 20, happiness: -3 },
+    effects: {
+      maintenance: 20, happiness: -3,
+      maslowContributions: [
+        { need: MaslowNeed.SAFETY, value: 8, capacityServed: 500 },
+      ],
+    },
     color: '#546E7A',
     height: 4,
   },
@@ -192,18 +254,28 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     label: 'Police Academy',
     cost: 1200,
     size: { w: 2, d: 2 },
-    effects: { maintenance: 15, happiness: 3 },
+    effects: {
+      maintenance: 15, happiness: 3,
+      maslowContributions: [
+        { need: MaslowNeed.SAFETY, value: 10, capacityServed: 400 },
+      ],
+    },
     color: '#283593',
     height: 3,
   },
 
-  // === FIRE DEPARTMENT ===
+  // === FIRE DEPARTMENT → Maslow: SAFETY ===
   [BuildingType.FIRE_STATION]: {
     type: BuildingType.FIRE_STATION,
     label: 'Fire Station',
     cost: 500,
     size: { w: 2, d: 2 },
-    effects: { maintenance: 10, happiness: 5 },
+    effects: {
+      maintenance: 10, happiness: 5,
+      maslowContributions: [
+        { need: MaslowNeed.SAFETY, value: 12, capacityServed: 300 },
+      ],
+    },
     color: '#E53935',
     height: 3,
   },
@@ -212,7 +284,12 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     label: 'Fire HQ',
     cost: 2000,
     size: { w: 3, d: 3 },
-    effects: { maintenance: 25, happiness: 8 },
+    effects: {
+      maintenance: 25, happiness: 8,
+      maslowContributions: [
+        { need: MaslowNeed.SAFETY, value: 18, capacityServed: 800 },
+      ],
+    },
     color: '#C62828',
     height: 5,
   },
@@ -221,7 +298,12 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     label: 'Helicopter Pad',
     cost: 3000,
     size: { w: 2, d: 2 },
-    effects: { maintenance: 30, happiness: 4 },
+    effects: {
+      maintenance: 30, happiness: 4,
+      maslowContributions: [
+        { need: MaslowNeed.SAFETY, value: 15, capacityServed: 600 },
+      ],
+    },
     color: '#FF7043',
     height: 2,
   },
@@ -230,18 +312,28 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     label: 'Training Center',
     cost: 1000,
     size: { w: 2, d: 2 },
-    effects: { maintenance: 12, happiness: 2 },
+    effects: {
+      maintenance: 12, happiness: 2,
+      maslowContributions: [
+        { need: MaslowNeed.SAFETY, value: 8, capacityServed: 400 },
+      ],
+    },
     color: '#D84315',
     height: 3,
   },
 
-  // === HEALTH ===
+  // === HEALTH → Maslow: LOVE/BELONGING ===
   [BuildingType.HEALTH_CLINIC]: {
     type: BuildingType.HEALTH_CLINIC,
     label: 'Clinic',
     cost: 400,
     size: { w: 2, d: 2 },
-    effects: { maintenance: 8, happiness: 6 },
+    effects: {
+      maintenance: 8, happiness: 6,
+      maslowContributions: [
+        { need: MaslowNeed.LOVE_BELONGING, value: 10, capacityServed: 200 },
+      ],
+    },
     color: '#80CBC4',
     height: 2,
   },
@@ -250,7 +342,12 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     label: 'Hospital',
     cost: 3000,
     size: { w: 3, d: 3 },
-    effects: { maintenance: 25, happiness: 15 },
+    effects: {
+      maintenance: 25, happiness: 15,
+      maslowContributions: [
+        { need: MaslowNeed.LOVE_BELONGING, value: 20, capacityServed: 600 },
+      ],
+    },
     color: '#009688',
     height: 5,
   },
@@ -259,18 +356,42 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     label: 'Research Center',
     cost: 8000,
     size: { w: 4, d: 4 },
-    effects: { maintenance: 50, happiness: 20 },
+    effects: {
+      maintenance: 50, happiness: 20,
+      maslowContributions: [
+        { need: MaslowNeed.LOVE_BELONGING, value: 25, capacityServed: 1500 },
+      ],
+    },
     color: '#004D40',
     height: 6,
   },
+  [BuildingType.HEALTH_CEMETERY]: {
+    type: BuildingType.HEALTH_CEMETERY,
+    label: 'Cemetery',
+    cost: 200,
+    size: { w: 2, d: 2 },
+    effects: {
+      maintenance: 3, happiness: -2,
+      maslowContributions: [
+        { need: MaslowNeed.LOVE_BELONGING, value: 5, capacityServed: 500 },
+      ],
+    },
+    color: '#455A64',
+    height: 0.5,
+  },
 
-  // === EDUCATION ===
+  // === EDUCATION → Maslow: COGNITIVE ===
   [BuildingType.EDU_ELEMENTARY]: {
     type: BuildingType.EDU_ELEMENTARY,
     label: 'Elementary School',
     cost: 400,
     size: { w: 2, d: 2 },
-    effects: { maintenance: 8, happiness: 8 },
+    effects: {
+      maintenance: 8, happiness: 8,
+      maslowContributions: [
+        { need: MaslowNeed.COGNITIVE, value: 15, capacityServed: 150 },
+      ],
+    },
     color: '#FDD835',
     height: 2,
   },
@@ -279,7 +400,12 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     label: 'High School',
     cost: 800,
     size: { w: 3, d: 2 },
-    effects: { maintenance: 15, happiness: 10 },
+    effects: {
+      maintenance: 15, happiness: 10,
+      maslowContributions: [
+        { need: MaslowNeed.COGNITIVE, value: 18, capacityServed: 300 },
+      ],
+    },
     color: '#F9A825',
     height: 3,
   },
@@ -288,7 +414,12 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     label: 'University',
     cost: 5000,
     size: { w: 4, d: 4 },
-    effects: { maintenance: 40, happiness: 20 },
+    effects: {
+      maintenance: 40, happiness: 20,
+      maslowContributions: [
+        { need: MaslowNeed.COGNITIVE, value: 25, capacityServed: 800 },
+      ],
+    },
     color: '#F57F17',
     height: 5,
   },
@@ -297,18 +428,28 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     label: 'Library',
     cost: 300,
     size: { w: 1, d: 1 },
-    effects: { maintenance: 5, happiness: 6 },
+    effects: {
+      maintenance: 5, happiness: 6,
+      maslowContributions: [
+        { need: MaslowNeed.COGNITIVE, value: 10, capacityServed: 200 },
+      ],
+    },
     color: '#FFB300',
     height: 3,
   },
 
-  // === GOVERNMENT ===
+  // === GOVERNMENT → Maslow: SELF_ACTUALIZATION ===
   [BuildingType.GOV_CITY_HALL]: {
     type: BuildingType.GOV_CITY_HALL,
     label: 'City Hall',
     cost: 2000,
     size: { w: 3, d: 3 },
-    effects: { maintenance: 20, happiness: 15 },
+    effects: {
+      maintenance: 20, happiness: 15,
+      maslowContributions: [
+        { need: MaslowNeed.SELF_ACTUALIZATION, value: 15, capacityServed: 500 },
+      ],
+    },
     color: '#ECEFF1',
     height: 5,
   },
@@ -317,7 +458,12 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     label: 'Courthouse',
     cost: 1500,
     size: { w: 2, d: 2 },
-    effects: { maintenance: 15, happiness: 8 },
+    effects: {
+      maintenance: 15, happiness: 8,
+      maslowContributions: [
+        { need: MaslowNeed.SELF_ACTUALIZATION, value: 12, capacityServed: 400 },
+      ],
+    },
     color: '#CFD8DC',
     height: 4,
   },
@@ -326,7 +472,12 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     label: 'Parliament',
     cost: 8000,
     size: { w: 4, d: 4 },
-    effects: { maintenance: 50, happiness: 25 },
+    effects: {
+      maintenance: 50, happiness: 25,
+      maslowContributions: [
+        { need: MaslowNeed.SELF_ACTUALIZATION, value: 25, capacityServed: 2000 },
+      ],
+    },
     color: '#B0BEC5',
     height: 7,
   },
@@ -335,18 +486,28 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     label: 'Monument',
     cost: 1000,
     size: { w: 1, d: 1 },
-    effects: { maintenance: 5, happiness: 12 },
+    effects: {
+      maintenance: 5, happiness: 12,
+      maslowContributions: [
+        { need: MaslowNeed.SELF_ACTUALIZATION, value: 10, capacityServed: 300 },
+      ],
+    },
     color: '#90A4AE',
     height: 8,
   },
 
-  // === TOURISM ===
+  // === TOURISM → Maslow: ESTEEM ===
   [BuildingType.TOUR_LANDMARK]: {
     type: BuildingType.TOUR_LANDMARK,
     label: 'Landmark',
     cost: 3000,
     size: { w: 2, d: 2 },
-    effects: { maintenance: 15, happiness: 20 },
+    effects: {
+      maintenance: 15, happiness: 20,
+      maslowContributions: [
+        { need: MaslowNeed.ESTEEM, value: 18, capacityServed: 400 },
+      ],
+    },
     color: '#FF8A65',
     height: 6,
   },
@@ -355,7 +516,12 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     label: 'Museum',
     cost: 2500,
     size: { w: 3, d: 2 },
-    effects: { maintenance: 20, happiness: 18 },
+    effects: {
+      maintenance: 20, happiness: 18,
+      maslowContributions: [
+        { need: MaslowNeed.ESTEEM, value: 16, capacityServed: 350 },
+      ],
+    },
     color: '#A1887F',
     height: 4,
   },
@@ -364,7 +530,12 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     label: 'Stadium',
     cost: 8000,
     size: { w: 4, d: 4 },
-    effects: { maintenance: 40, happiness: 30 },
+    effects: {
+      maintenance: 40, happiness: 30,
+      maslowContributions: [
+        { need: MaslowNeed.ESTEEM, value: 25, capacityServed: 1500 },
+      ],
+    },
     color: '#4DB6AC',
     height: 4,
   },
@@ -373,18 +544,28 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     label: 'Amusement Park',
     cost: 6000,
     size: { w: 4, d: 3 },
-    effects: { maintenance: 35, happiness: 35 },
+    effects: {
+      maintenance: 35, happiness: 35,
+      maslowContributions: [
+        { need: MaslowNeed.ESTEEM, value: 22, capacityServed: 1200 },
+      ],
+    },
     color: '#FF4081',
     height: 5,
   },
 
-  // === TRANSPORTATION ===
+  // === TRANSPORTATION → Maslow: LOVE/BELONGING ===
   [BuildingType.TRANS_BUS_DEPOT]: {
     type: BuildingType.TRANS_BUS_DEPOT,
     label: 'Bus Depot',
     cost: 400,
     size: { w: 2, d: 2 },
-    effects: { maintenance: 8, happiness: 5 },
+    effects: {
+      maintenance: 8, happiness: 5,
+      maslowContributions: [
+        { need: MaslowNeed.LOVE_BELONGING, value: 8, capacityServed: 200 },
+      ],
+    },
     color: '#66BB6A',
     height: 2,
   },
@@ -393,7 +574,12 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     label: 'Train Station',
     cost: 3000,
     size: { w: 3, d: 2 },
-    effects: { maintenance: 20, happiness: 12 },
+    effects: {
+      maintenance: 20, happiness: 12,
+      maslowContributions: [
+        { need: MaslowNeed.LOVE_BELONGING, value: 15, capacityServed: 600 },
+      ],
+    },
     color: '#78909C',
     height: 4,
   },
@@ -402,7 +588,12 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     label: 'Airport',
     cost: 15000,
     size: { w: 5, d: 5 },
-    effects: { maintenance: 60, happiness: 15 },
+    effects: {
+      maintenance: 60, happiness: 15,
+      maslowContributions: [
+        { need: MaslowNeed.LOVE_BELONGING, value: 20, capacityServed: 2000 },
+      ],
+    },
     color: '#B0BEC5',
     height: 3,
   },
@@ -411,9 +602,72 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     label: 'Harbor',
     cost: 5000,
     size: { w: 4, d: 3 },
-    effects: { maintenance: 25, happiness: 10 },
+    effects: {
+      maintenance: 25, happiness: 10,
+      maslowContributions: [
+        { need: MaslowNeed.LOVE_BELONGING, value: 12, capacityServed: 1000 },
+      ],
+    },
     color: '#0097A7',
     height: 3,
+  },
+
+  // === ART & CULTURE → Maslow: AESTHETIC ===
+  [BuildingType.ART_GALLERY]: {
+    type: BuildingType.ART_GALLERY,
+    label: 'Art Gallery',
+    cost: 1500,
+    size: { w: 2, d: 2 },
+    effects: {
+      maintenance: 12, happiness: 12,
+      maslowContributions: [
+        { need: MaslowNeed.AESTHETIC, value: 15, capacityServed: 200 },
+      ],
+    },
+    color: '#E040FB',
+    height: 3,
+  },
+  [BuildingType.ART_THEATER]: {
+    type: BuildingType.ART_THEATER,
+    label: 'Theater',
+    cost: 2500,
+    size: { w: 3, d: 2 },
+    effects: {
+      maintenance: 18, happiness: 16,
+      maslowContributions: [
+        { need: MaslowNeed.AESTHETIC, value: 20, capacityServed: 400 },
+      ],
+    },
+    color: '#CE93D8',
+    height: 4,
+  },
+  [BuildingType.ART_CONCERT_HALL]: {
+    type: BuildingType.ART_CONCERT_HALL,
+    label: 'Concert Hall',
+    cost: 6000,
+    size: { w: 4, d: 3 },
+    effects: {
+      maintenance: 35, happiness: 25,
+      maslowContributions: [
+        { need: MaslowNeed.AESTHETIC, value: 25, capacityServed: 1000 },
+      ],
+    },
+    color: '#AB47BC',
+    height: 5,
+  },
+  [BuildingType.ART_SCULPTURE_PARK]: {
+    type: BuildingType.ART_SCULPTURE_PARK,
+    label: 'Sculpture Park',
+    cost: 800,
+    size: { w: 2, d: 2 },
+    effects: {
+      maintenance: 5, happiness: 8,
+      maslowContributions: [
+        { need: MaslowNeed.AESTHETIC, value: 10, capacityServed: 150 },
+      ],
+    },
+    color: '#BA68C8',
+    height: 1,
   },
 };
 

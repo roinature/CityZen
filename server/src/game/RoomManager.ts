@@ -39,6 +39,10 @@ export class RoomManager {
     return room;
   }
 
+  getActiveRooms(): GameRoom[] {
+    return Array.from(this.rooms.values());
+  }
+
   removeRoom(cityId: string): void {
     const room = this.rooms.get(cityId);
     if (room) {

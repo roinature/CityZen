@@ -8,17 +8,15 @@ import {
   BuildingType,
   isZone,
   S2C,
-  TICK_INTERVAL_MS,
   AUTO_SAVE_INTERVAL_MS,
   INITIAL_RESOURCES,
   MIN_TAX_RATE,
   MAX_TAX_RATE,
   DEFAULT_GAME_SPEED,
-  MAX_GAME_SPEED,
   BUILDING_DEFS,
   createEmptyGrid,
   canPlaceBuilding,
-  simulateTick,
+  simulateCityTick,
 } from '@cityzen/shared';
 import { saveCityState } from '../persistence/jsonStore.js';
 import { broadcastToChannel } from '../realtime/supabaseBroadcast.js';
@@ -36,7 +34,6 @@ export class GameRoom {
   id: string;
   state: CityState;
   players: Map<string, { player: Player }> = new Map();
-  private tickInterval: ReturnType<typeof setInterval> | null = null;
   private saveInterval: ReturnType<typeof setInterval> | null = null;
   private debouncedSaveTimer: ReturnType<typeof setTimeout> | null = null;
   unlimitedMoney = false;
@@ -67,46 +64,7 @@ export class GameRoom {
   }
 
   start(): void {
-    this.tickInterval = setInterval(() => {
-      // Snapshot development levels before tick
-      const prevLevels = new Map<string, number>();
-      for (const b of this.state.buildings) {
-        if (isZone(b.type)) {
-          prevLevels.set(b.id, b.developmentLevel ?? 0);
-        }
-      }
-
-      this.state = simulateTick(this.state);
-
-      // Broadcast resources with clock
-      this.broadcast(S2C.RESOURCES_UPDATE, {
-        resources: this.state.resources,
-        tick: this.state.tick,
-        clock: this.state.clock,
-      });
-
-      // Detect zone growth and broadcast
-      const grownBuildings: Array<{ id: string; developmentLevel: number; developedAt: number }> = [];
-      for (const b of this.state.buildings) {
-        if (isZone(b.type)) {
-          const prevLevel = prevLevels.get(b.id) ?? 0;
-          const currLevel = b.developmentLevel ?? 0;
-          if (currLevel > prevLevel) {
-            grownBuildings.push({
-              id: b.id,
-              developmentLevel: currLevel,
-              developedAt: b.developedAt!,
-            });
-          }
-        }
-      }
-
-      if (grownBuildings.length > 0) {
-        this.broadcast(S2C.ZONE_GROWTH, { buildings: grownBuildings });
-        this.saveAfterMutation();
-      }
-    }, TICK_INTERVAL_MS);
-
+    // Tick is now driven by WorldTickEngine — only auto-save here
     this.saveInterval = setInterval(() => {
       if (this.players.size > 0) {
         this.save();
@@ -114,8 +72,51 @@ export class GameRoom {
     }, AUTO_SAVE_INTERVAL_MS);
   }
 
+  /** Called by WorldTickEngine each world tick with the shared clock. */
+  worldTick(worldClock: GameClock): void {
+    // Copy world clock to city state
+    this.state.clock = { ...worldClock };
+
+    // Snapshot development levels before tick
+    const prevLevels = new Map<string, number>();
+    for (const b of this.state.buildings) {
+      if (isZone(b.type)) {
+        prevLevels.set(b.id, b.developmentLevel ?? 0);
+      }
+    }
+
+    this.state = simulateCityTick(this.state);
+
+    // Broadcast resources with clock
+    this.broadcast(S2C.RESOURCES_UPDATE, {
+      resources: this.state.resources,
+      tick: this.state.tick,
+      clock: this.state.clock,
+    });
+
+    // Detect zone growth and broadcast
+    const grownBuildings: Array<{ id: string; developmentLevel: number; developedAt: number }> = [];
+    for (const b of this.state.buildings) {
+      if (isZone(b.type)) {
+        const prevLevel = prevLevels.get(b.id) ?? 0;
+        const currLevel = b.developmentLevel ?? 0;
+        if (currLevel > prevLevel) {
+          grownBuildings.push({
+            id: b.id,
+            developmentLevel: currLevel,
+            developedAt: b.developedAt!,
+          });
+        }
+      }
+    }
+
+    if (grownBuildings.length > 0) {
+      this.broadcast(S2C.ZONE_GROWTH, { buildings: grownBuildings });
+      this.saveAfterMutation();
+    }
+  }
+
   stop(): void {
-    if (this.tickInterval) clearInterval(this.tickInterval);
     if (this.saveInterval) clearInterval(this.saveInterval);
     this.save();
   }
@@ -253,23 +254,6 @@ export class GameRoom {
       tick: this.state.tick,
       clock: this.state.clock,
     });
-  }
-
-  setGameSpeed(speed: number): { success: boolean; error?: string } {
-    if (speed < 0 || speed > MAX_GAME_SPEED || !Number.isInteger(speed)) {
-      return { success: false, error: 'Invalid game speed' };
-    }
-
-    this.state.clock.speed = speed;
-    this.state.updatedAt = Date.now();
-
-    this.broadcast(S2C.RESOURCES_UPDATE, {
-      resources: this.state.resources,
-      tick: this.state.tick,
-      clock: this.state.clock,
-    });
-
-    return { success: true };
   }
 
   restart(): void {
