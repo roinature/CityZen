@@ -1,6 +1,5 @@
 import {
   type WorldState,
-  type PopulationSummary,
   S2C,
   TICK_INTERVAL_MS,
   GAME_MS_PER_TICK,
@@ -10,6 +9,8 @@ import {
   MaslowNeed,
   calculateHousingCapacity,
   calculateBirthCount,
+  calculateCityMaslowCapacity,
+  calculateBaseMaslowTargets,
 } from '@cityzen/shared';
 import type { GameRoom } from './GameRoom.js';
 import type { PopulationManager } from './PopulationManager.js';
@@ -66,9 +67,17 @@ export class WorldTickEngine {
       this.processYearBoundary();
     }
 
-    // Tick all active rooms and sync population
+    // Tick all active rooms: update Maslow → compute summary → tick room
     const rooms = this.getRooms();
     for (const room of rooms) {
+      // Update each person's Maslow satisfaction toward city-provided targets
+      if (clock.speed > 0) {
+        const maslowProfile = calculateCityMaslowCapacity(room.state);
+        const popCount = this.populationManager.getCityPopulationCount(room.id);
+        const baseTargets = calculateBaseMaslowTargets(maslowProfile, popCount);
+        this.populationManager.updateCityMaslow(room.id, baseTargets);
+      }
+
       const summary = this.populationManager.getCityPopulationSummary(room.id);
       room.worldTick(clock, summary);
 

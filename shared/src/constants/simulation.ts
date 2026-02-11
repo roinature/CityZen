@@ -33,3 +33,6 @@ export const ELDER_MORTALITY_RATE_PER_YEAR = 0.01; // 1% increase per year over 
 export const MAX_PERSON_AGE = 100;              // Guaranteed death at this age
 export const LOW_PHYSIO_DEATH_MULTIPLIER = 3.0; // Death rate multiplier when physiological need is critically low
 export const INITIAL_CITY_SEED = 10;            // People seeded from world pool when a city is claimed
+
+// Maslow satisfaction
+export const MASLOW_LERP_RATE = 0.1;           // Per-tick lerp speed toward target (0-1). 0.1 ≈ converges in ~20 ticks

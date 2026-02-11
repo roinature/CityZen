@@ -5,10 +5,12 @@ import {
   LifeStage,
   MaslowNeed,
   MASLOW_NEEDS_ORDERED,
+  MASLOW_LERP_RATE,
   getLifeStage,
   getPersonHappiness,
   createDefaultMaslow,
   getDeathProbability,
+  adjustTargetsForLifeStage,
 } from '@cityzen/shared';
 
 // ── Age distribution for generating initial population ──────
@@ -273,6 +275,28 @@ export class PopulationManager {
       total += this.persons.get(pid)!.maslow[need];
     }
     return total / personIds.size;
+  }
+
+  /**
+   * Lerp each person's Maslow satisfaction toward the city-provided targets.
+   * Call once per tick — the lerp rate ensures gradual convergence.
+   */
+  updateCityMaslow(cityId: string, baseTargets: Record<MaslowNeed, number>): void {
+    const personIds = this.cityIndex.get(cityId);
+    if (!personIds) return;
+
+    for (const pid of personIds) {
+      const person = this.persons.get(pid)!;
+      const lifeStage = getLifeStage(person.age);
+      const targets = adjustTargetsForLifeStage(baseTargets, lifeStage);
+
+      for (const need of MASLOW_NEEDS_ORDERED) {
+        const current = person.maslow[need];
+        const target = targets[need];
+        // Lerp toward target
+        person.maslow[need] = current + (target - current) * MASLOW_LERP_RATE;
+      }
+    }
   }
 
   // ── Serialization ──────────────────────────────────────────

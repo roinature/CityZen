@@ -26,6 +26,11 @@ export function calculateNetIncome(state: CityState): number {
 }
 
 export function calculatePopulationGrowth(state: CityState): number {
+  // When population is managed by PopulationManager (person entities exist),
+  // growth is driven by births/deaths/migration — return 0 to avoid double-counting.
+  if (state.resources.populationSummary) return 0;
+
+  // Legacy fallback for cities without person entities
   let capacity = 0;
   let jobs = 0;
 
@@ -49,6 +54,12 @@ export function calculatePopulationGrowth(state: CityState): number {
 }
 
 export function calculateHappiness(state: CityState): number {
+  // When population summary exists, use Maslow-based average happiness
+  if (state.resources.populationSummary) {
+    return state.resources.populationSummary.averageHappiness;
+  }
+
+  // Legacy fallback: building effects + penalties
   const base = 50;
 
   let buildingEffect = 0;
