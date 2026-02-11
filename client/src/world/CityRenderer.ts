@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import type { CityState, PlacedBuilding } from '@cityzen/shared';
-import { isRoad, isZone, BUILDING_DEFS } from '@cityzen/shared';
+import type { CityState, PlacedBuilding, ZoneType } from '@cityzen/shared';
+import { isRoad, isZone, BUILDING_DEFS, getZoneLevelDef } from '@cityzen/shared';
 import { calculateCityScore } from '@cityzen/shared';
 import { BuildingFactory, type RoadNeighbors } from './BuildingFactory.js';
 
@@ -9,6 +9,7 @@ export class CityRenderer {
   private factory: BuildingFactory;
   private meshes: Map<string, THREE.Group> = new Map();
   private buildingLevels: Map<string, number> = new Map();
+  private zonePopRatios: Map<string, number> = new Map();
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -21,8 +22,15 @@ export class CityRenderer {
 
     // Update factory with current city score
     const score = calculateCityScore(state);
-    console.log('[CityRenderer] Current City Score:', score);
     this.factory.setCityScore(score);
+
+    // Compute zone population ratios from state
+    const newZonePopRatios = new Map<string, number>();
+    if (state.resources.zonePopulations) {
+      for (const entry of state.resources.zonePopulations) {
+        newZonePopRatios.set(entry.buildingId, entry.capacity > 0 ? entry.population / entry.capacity : 0);
+      }
+    }
 
     // Build a set of road positions for neighbor detection (all cells of multi-cell roads)
     const roadPositions = new Set<string>();
@@ -78,7 +86,8 @@ export class CityRenderer {
           changedPositions.push({ x: building.position.x, z: building.position.z });
         }
 
-        const mesh = this.factory.createBuilding(building, neighbors);
+        const ratio = newZonePopRatios.get(building.id);
+        const mesh = this.factory.createBuilding(building, neighbors, ratio);
         this.scene.add(mesh);
         this.meshes.set(building.id, mesh);
 
@@ -88,22 +97,38 @@ export class CityRenderer {
       }
     }
 
-    // Check for zone level changes in existing buildings
+    // Check for zone level changes OR population ratio changes in existing buildings
     for (const building of state.buildings) {
       if (isZone(building.type) && currentIds.has(building.id)) {
         const prevLevel = this.buildingLevels.get(building.id) ?? 0;
         const currLevel = building.developmentLevel ?? 0;
-        if (prevLevel !== currLevel && this.meshes.has(building.id)) {
+
+        let needsRebuild = prevLevel !== currLevel;
+
+        // For density-aware zones, check if visible building count changed
+        if (building.density && currLevel > 0) {
+          const prevRatio = this.zonePopRatios.get(building.id) ?? 0;
+          const currRatio = newZonePopRatios.get(building.id) ?? 0;
+          const prevVisible = this.computeVisibleCount(prevRatio, building, prevLevel);
+          const currVisible = this.computeVisibleCount(currRatio, building, currLevel);
+          if (prevVisible !== currVisible) needsRebuild = true;
+        }
+
+        if (needsRebuild && this.meshes.has(building.id)) {
           const existing = this.meshes.get(building.id)!;
           this.scene.remove(existing);
           this.disposeMesh(existing);
-          const mesh = this.factory.createBuilding(building);
+          const ratio = newZonePopRatios.get(building.id);
+          const mesh = this.factory.createBuilding(building, undefined, ratio);
           this.scene.add(mesh);
           this.meshes.set(building.id, mesh);
           this.buildingLevels.set(building.id, currLevel);
         }
       }
     }
+
+    // Update stored zone population ratios
+    this.zonePopRatios = newZonePopRatios;
 
     // Refresh adjacent roads whose neighbor configuration may have changed
     const refreshed = new Set<string>();
@@ -163,6 +188,12 @@ export class CityRenderer {
     return { hasNorth, hasSouth, hasEast, hasWest };
   }
 
+  private computeVisibleCount(ratio: number, building: PlacedBuilding, level: number): number {
+    if (!building.density || level <= 0) return 0;
+    const levelDef = getZoneLevelDef(building.type as ZoneType, building.density, level);
+    return Math.min(Math.max(1, Math.ceil(ratio * levelDef.maxBuildings)), levelDef.maxBuildings);
+  }
+
   clear(): void {
     for (const [, mesh] of this.meshes) {
       this.scene.remove(mesh);
@@ -170,6 +201,7 @@ export class CityRenderer {
     }
     this.meshes.clear();
     this.buildingLevels.clear();
+    this.zonePopRatios.clear();
   }
 
   private disposeMesh(group: THREE.Group): void {

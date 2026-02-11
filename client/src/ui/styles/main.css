@@ -231,6 +231,44 @@ body {
   opacity: 0.7;
 }
 
+/* Density Picker */
+.density-picker {
+  position: fixed;
+  display: none;
+  flex-direction: column;
+  gap: 4px;
+  background: rgba(0, 0, 0, 0.85);
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(4px);
+  z-index: 100;
+}
+
+.density-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 12px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  color: white;
+  cursor: pointer;
+  font-size: 13px;
+  min-width: 120px;
+}
+
+.density-option:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.density-cost {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
 /* Footer Indicator */
 .footer-indicator {
   position: absolute;

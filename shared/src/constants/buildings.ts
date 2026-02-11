@@ -1,4 +1,4 @@
-import { BuildingType, type BuildingDef, type ZoneType } from '../types/building.js';
+import { BuildingType, ZoneDensity, type BuildingDef, type ZoneType } from '../types/building.js';
 import { MaslowNeed } from '../types/person.js';
 
 export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
@@ -679,22 +679,71 @@ export interface ZoneLevelDef {
   height: number;
   color: string;
   ticksRequired: number;
+  maxBuildings: number;
 }
 
-export const ZONE_LEVELS: Record<ZoneType, ZoneLevelDef[]> = {
-  [BuildingType.ZONE_RESIDENTIAL]: [
-    { populationCapacity: 5, jobs: 0, happiness: 0, maintenance: 1, height: 2, color: '#4CAF50', ticksRequired: 5 },
-    { populationCapacity: 15, jobs: 0, happiness: 1, maintenance: 2, height: 4, color: '#388E3C', ticksRequired: 15 },
-    { populationCapacity: 30, jobs: 0, happiness: 2, maintenance: 4, height: 7, color: '#2E7D32', ticksRequired: 30 },
-  ],
-  [BuildingType.ZONE_COMMERCIAL]: [
-    { populationCapacity: 0, jobs: 3, happiness: 2, maintenance: 2, height: 3, color: '#2196F3', ticksRequired: 5 },
-    { populationCapacity: 0, jobs: 8, happiness: 3, maintenance: 4, height: 5, color: '#1976D2', ticksRequired: 15 },
-    { populationCapacity: 0, jobs: 15, happiness: 5, maintenance: 7, height: 8, color: '#1565C0', ticksRequired: 30 },
-  ],
-  [BuildingType.ZONE_INDUSTRIAL]: [
-    { populationCapacity: 0, jobs: 8, happiness: -2, maintenance: 3, height: 3, color: '#FF9800', ticksRequired: 5 },
-    { populationCapacity: 0, jobs: 18, happiness: -4, maintenance: 6, height: 5, color: '#F57C00', ticksRequired: 15 },
-    { populationCapacity: 0, jobs: 30, happiness: -6, maintenance: 10, height: 7, color: '#E65100', ticksRequired: 30 },
-  ],
+export const ZONE_LEVELS: Record<ZoneType, Record<ZoneDensity, ZoneLevelDef[]>> = {
+  [BuildingType.ZONE_RESIDENTIAL]: {
+    [ZoneDensity.LOW]: [
+      { populationCapacity: 4, jobs: 0, happiness: 1, maintenance: 1, height: 1.5, color: '#4CAF50', ticksRequired: 5, maxBuildings: 4 },
+      { populationCapacity: 8, jobs: 0, happiness: 2, maintenance: 1, height: 2, color: '#388E3C', ticksRequired: 10, maxBuildings: 4 },
+      { populationCapacity: 12, jobs: 0, happiness: 3, maintenance: 2, height: 2.5, color: '#2E7D32', ticksRequired: 20, maxBuildings: 4 },
+    ],
+    [ZoneDensity.MEDIUM]: [
+      { populationCapacity: 10, jobs: 0, happiness: 0, maintenance: 2, height: 3, color: '#4CAF50', ticksRequired: 5, maxBuildings: 3 },
+      { populationCapacity: 25, jobs: 0, happiness: 1, maintenance: 3, height: 5, color: '#388E3C', ticksRequired: 15, maxBuildings: 3 },
+      { populationCapacity: 45, jobs: 0, happiness: 2, maintenance: 5, height: 7, color: '#2E7D32', ticksRequired: 30, maxBuildings: 3 },
+    ],
+    [ZoneDensity.HIGH]: [
+      { populationCapacity: 20, jobs: 0, happiness: -1, maintenance: 3, height: 5, color: '#4CAF50', ticksRequired: 8, maxBuildings: 2 },
+      { populationCapacity: 50, jobs: 0, happiness: -1, maintenance: 6, height: 10, color: '#388E3C', ticksRequired: 20, maxBuildings: 2 },
+      { populationCapacity: 100, jobs: 0, happiness: -2, maintenance: 10, height: 15, color: '#2E7D32', ticksRequired: 40, maxBuildings: 2 },
+    ],
+  },
+  [BuildingType.ZONE_COMMERCIAL]: {
+    [ZoneDensity.LOW]: [
+      { populationCapacity: 0, jobs: 2, happiness: 1, maintenance: 1, height: 2, color: '#2196F3', ticksRequired: 5, maxBuildings: 4 },
+      { populationCapacity: 0, jobs: 5, happiness: 2, maintenance: 2, height: 3, color: '#1976D2', ticksRequired: 10, maxBuildings: 4 },
+      { populationCapacity: 0, jobs: 8, happiness: 3, maintenance: 3, height: 3.5, color: '#1565C0', ticksRequired: 20, maxBuildings: 4 },
+    ],
+    [ZoneDensity.MEDIUM]: [
+      { populationCapacity: 0, jobs: 5, happiness: 2, maintenance: 2, height: 3, color: '#2196F3', ticksRequired: 5, maxBuildings: 3 },
+      { populationCapacity: 0, jobs: 12, happiness: 3, maintenance: 4, height: 5, color: '#1976D2', ticksRequired: 15, maxBuildings: 3 },
+      { populationCapacity: 0, jobs: 20, happiness: 5, maintenance: 7, height: 8, color: '#1565C0', ticksRequired: 30, maxBuildings: 3 },
+    ],
+    [ZoneDensity.HIGH]: [
+      { populationCapacity: 0, jobs: 10, happiness: 3, maintenance: 4, height: 6, color: '#2196F3', ticksRequired: 8, maxBuildings: 2 },
+      { populationCapacity: 0, jobs: 25, happiness: 4, maintenance: 8, height: 12, color: '#1976D2', ticksRequired: 20, maxBuildings: 2 },
+      { populationCapacity: 0, jobs: 45, happiness: 6, maintenance: 14, height: 18, color: '#1565C0', ticksRequired: 40, maxBuildings: 2 },
+    ],
+  },
+  [BuildingType.ZONE_INDUSTRIAL]: {
+    [ZoneDensity.LOW]: [
+      { populationCapacity: 0, jobs: 5, happiness: -1, maintenance: 2, height: 2, color: '#FF9800', ticksRequired: 5, maxBuildings: 4 },
+      { populationCapacity: 0, jobs: 10, happiness: -2, maintenance: 3, height: 3, color: '#F57C00', ticksRequired: 10, maxBuildings: 4 },
+      { populationCapacity: 0, jobs: 16, happiness: -3, maintenance: 5, height: 3.5, color: '#E65100', ticksRequired: 20, maxBuildings: 4 },
+    ],
+    [ZoneDensity.MEDIUM]: [
+      { populationCapacity: 0, jobs: 10, happiness: -2, maintenance: 3, height: 3, color: '#FF9800', ticksRequired: 5, maxBuildings: 3 },
+      { populationCapacity: 0, jobs: 22, happiness: -4, maintenance: 6, height: 5, color: '#F57C00', ticksRequired: 15, maxBuildings: 3 },
+      { populationCapacity: 0, jobs: 35, happiness: -6, maintenance: 10, height: 7, color: '#E65100', ticksRequired: 30, maxBuildings: 3 },
+    ],
+    [ZoneDensity.HIGH]: [
+      { populationCapacity: 0, jobs: 18, happiness: -3, maintenance: 5, height: 5, color: '#FF9800', ticksRequired: 8, maxBuildings: 2 },
+      { populationCapacity: 0, jobs: 40, happiness: -5, maintenance: 10, height: 8, color: '#F57C00', ticksRequired: 20, maxBuildings: 2 },
+      { populationCapacity: 0, jobs: 65, happiness: -8, maintenance: 16, height: 12, color: '#E65100', ticksRequired: 40, maxBuildings: 2 },
+    ],
+  },
 };
+
+export const ZONE_DENSITY_COSTS: Record<ZoneDensity, number> = {
+  [ZoneDensity.LOW]: 30,
+  [ZoneDensity.MEDIUM]: 50,
+  [ZoneDensity.HIGH]: 100,
+};
+
+/** Backward-compatible helper: gets zone level def, defaulting density to MEDIUM. */
+export function getZoneLevelDef(type: ZoneType, density: ZoneDensity | undefined, level: number): ZoneLevelDef {
+  const d = density ?? ZoneDensity.MEDIUM;
+  return ZONE_LEVELS[type][d][level - 1];
+}

@@ -1,6 +1,7 @@
 import {
   type WorldState,
   type MigrationEventPayload,
+  type ZonePopulationEntry,
   S2C,
   TICK_INTERVAL_MS,
   GAME_MS_PER_TICK,
@@ -80,7 +81,7 @@ export class WorldTickEngine {
       this.processDailyMigration();
     }
 
-    // Tick all active rooms: update Maslow → compute summary → tick room
+    // Tick all active rooms: update Maslow → assign zones → compute summary → tick room
     const rooms = this.getRooms();
     for (const room of rooms) {
       // Update each person's Maslow satisfaction toward city-provided targets
@@ -98,10 +99,14 @@ export class WorldTickEngine {
         }
 
         this.populationManager.updateCityMaslow(room.id, baseTargets);
+
+        // Assign/reassign people to residential zones
+        this.populationManager.assignPeopleToZones(room.id, room.state.buildings);
       }
 
       const summary = this.populationManager.getCityPopulationSummary(room.id);
-      room.worldTick(clock, summary);
+      const zonePopulations = this.populationManager.getZonePopulations(room.id, room.state.buildings);
+      room.worldTick(clock, summary, zonePopulations);
 
       // Update world city entry with latest population/happiness
       const cityEntry = this.worldState.cities.find(c => c.cityId === room.id);

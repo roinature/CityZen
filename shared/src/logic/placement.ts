@@ -1,8 +1,8 @@
 import type { Grid, Position } from '../types/grid.js';
 import type { ResourceState } from '../types/resources.js';
 import type { PlacedBuilding } from '../types/building.js';
-import { BuildingType } from '../types/building.js';
-import { BUILDING_DEFS } from '../constants/buildings.js';
+import { BuildingType, type ZoneDensity, isZone } from '../types/building.js';
+import { BUILDING_DEFS, ZONE_DENSITY_COSTS } from '../constants/buildings.js';
 import { DEFAULT_GRID_SIZE } from '../constants/grid.js';
 
 export interface PlacementResult {
@@ -17,10 +17,12 @@ export function canPlaceBuilding(
   resources: ResourceState,
   unlimitedMoney = false,
   buildings?: PlacedBuilding[],
+  density?: ZoneDensity,
 ): PlacementResult {
   const def = BUILDING_DEFS[type];
+  const cost = isZone(type) && density ? ZONE_DENSITY_COSTS[density] : def.cost;
 
-  if (!unlimitedMoney && resources.money < def.cost) {
+  if (!unlimitedMoney && resources.money < cost) {
     return { valid: false, reason: 'Not enough money' };
   }
 

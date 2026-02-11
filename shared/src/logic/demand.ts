@@ -1,7 +1,7 @@
 import type { CityState } from '../types/city.js';
 import type { DemandState } from '../types/resources.js';
 import { BuildingType, isZone, type ZoneType } from '../types/building.js';
-import { ZONE_LEVELS } from '../constants/buildings.js';
+import { getZoneLevelDef } from '../constants/buildings.js';
 import { DEMAND_GROWTH_RATE, MIN_DEMAND_TO_GROW, ZONE_GROWTH_CHANCE } from '../constants/simulation.js';
 import { clamp } from './resources.js';
 
@@ -12,7 +12,7 @@ export function calculateDemand(state: CityState): DemandState {
 
   for (const b of state.buildings) {
     if (!isZone(b.type) || !b.developmentLevel || b.developmentLevel === 0) continue;
-    const levelDef = ZONE_LEVELS[b.type as ZoneType][b.developmentLevel - 1];
+    const levelDef = getZoneLevelDef(b.type as ZoneType, b.density, b.developmentLevel!);
     totalPopCapacity += levelDef.populationCapacity;
     totalJobs += levelDef.jobs;
     if (b.type === BuildingType.ZONE_COMMERCIAL) {
@@ -67,9 +67,8 @@ export function processZoneGrowth(state: CityState): ZoneGrowthResult {
     if (zoneDemand < MIN_DEMAND_TO_GROW) continue;
 
     // Check time requirement (now using game ticks instead of Date.now())
-    const levelDefs = ZONE_LEVELS[building.type as ZoneType];
-    const nextLevelIndex = level; // level 0 -> index 0 = level 1 def
-    const ticksRequired = levelDefs[nextLevelIndex].ticksRequired;
+    const nextLevelDef = getZoneLevelDef(building.type as ZoneType, building.density, level + 1);
+    const ticksRequired = nextLevelDef.ticksRequired;
     const referenceTime = building.developedAt ?? building.placedAt;
     const ticksSinceLast = currentTick - referenceTime;
 

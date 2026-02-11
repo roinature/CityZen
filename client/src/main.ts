@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {
   type CityState,
   type BuildingType,
+  type ZoneDensity,
   type WorldState,
   type EdgeDirection,
   type PlacedBuilding,
@@ -90,8 +91,8 @@ const buildMode = new BuildMode(sceneManager.scene, sceneManager.camera);
 // --- UI ---
 const resourceBar = new ResourceBar(uiRoot);
 const footerIndicator = new FooterIndicator(uiRoot);
-const toolbar = new Toolbar(uiRoot, (type: BuildingType) => {
-  if (buildMode.getSelectedType() === type) {
+const toolbar = new Toolbar(uiRoot, (type: BuildingType, density?: ZoneDensity) => {
+  if (buildMode.getSelectedType() === type && !density) {
     buildMode.deselect();
     toolbar.setActive(null);
   } else {
@@ -99,6 +100,7 @@ const toolbar = new Toolbar(uiRoot, (type: BuildingType) => {
     cameraController.setLeftClickPanEnabled(false);
     toolSidebar.setActiveMode('build');
     buildMode.select(type);
+    buildMode.setDensity(density ?? null);
     toolbar.setActive(type);
     infraToolbar.setActive(null);
   }
@@ -286,9 +288,9 @@ resourceBar.onGameSpeedChange = (speed) => {
   gameClient.setGameSpeed(speed, playerId);
 };
 
-buildMode.onPlace = (pos, type) => {
-  console.log('[Client] onPlace called', { pos, type });
-  gameClient.placeBuilding(pos, type, playerId);
+buildMode.onPlace = (pos, type, density) => {
+  console.log('[Client] onPlace called', { pos, type, density });
+  gameClient.placeBuilding(pos, type, playerId, density);
 };
 
 buildMode.onDemolish = (pos) => {

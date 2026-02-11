@@ -66,6 +66,22 @@ export class WorldManager {
       }
     }
 
+    // Pre-load rooms for existing cities so the tick engine can update them.
+    // Also re-seed any cities that lost their population assignments
+    // (e.g. populationData column was added after cities were created).
+    if (!isNew) {
+      for (const city of state.cities) {
+        await this.roomManager.getOrLoadRoom(city.cityId);
+        if (populationManager.getCityPopulationCount(city.cityId) === 0 && populationManager.getUnassignedCount() > 0) {
+          const seeded = populationManager.seedCity(city.cityId, INITIAL_CITY_SEED);
+          city.population = seeded.length;
+          if (seeded.length > 0) {
+            console.log(`Re-seeded city "${city.name}" with ${seeded.length} people`);
+          }
+        }
+      }
+    }
+
     const tickEngine = new WorldTickEngine(
       state,
       () => this.roomManager.getActiveRooms().filter(r => {

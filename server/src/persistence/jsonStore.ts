@@ -73,6 +73,7 @@ export async function saveCityState(cityId: string, state: CityState): Promise<v
           placedAt: b.placedAt,
           developmentLevel: b.developmentLevel ?? null,
           developedAt: b.developedAt ?? null,
+          density: b.density ?? null,
         })),
       });
     }
@@ -99,6 +100,7 @@ export async function loadCityState(cityId: string): Promise<CityState | null> {
     placedAt: b.placedAt,
     ...(b.developmentLevel != null ? { developmentLevel: b.developmentLevel } : {}),
     ...(b.developedAt != null ? { developedAt: b.developedAt } : {}),
+    ...(b.density ? { density: b.density as PlacedBuilding['density'] } : {}),
   }));
 
   // Reconstruct grid from buildings (no empty cells stored)

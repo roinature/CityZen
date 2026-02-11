@@ -13,6 +13,7 @@ import {
   type WorldTickPayload,
   type Position,
   type BuildingType,
+  type ZoneDensity,
   type ResourceState,
   type GameClock,
   type Player,
@@ -180,8 +181,8 @@ export class GameClient {
     }
   }
 
-  async placeBuilding(position: Position, type: BuildingType, playerId?: string): Promise<void> {
-    const result = await this.post('/api/building/place', { position, type, playerId });
+  async placeBuilding(position: Position, type: BuildingType, playerId?: string, density?: ZoneDensity): Promise<void> {
+    const result = await this.post('/api/building/place', { position, type, playerId, density });
     if (!result.success) {
       this.callbacks.onError({ message: result.error || 'Placement failed', code: 'PLACEMENT_FAILED' });
     }

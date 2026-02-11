@@ -5,6 +5,7 @@ import {
   type CityState,
   type EdgeDirection,
   type PlacedBuilding,
+  type ZoneDensity,
   isRoad,
   isZone,
   BUILDING_DEFS,
@@ -67,6 +68,7 @@ export class BuildMode {
   private factory: BuildingFactory;
 
   private selectedType: BuildingType | null = null;
+  private selectedDensity: ZoneDensity | null = null;
   private previewMesh: THREE.Group | null = null;
   private currentHoverPos: Position | null = null;
 
@@ -86,7 +88,7 @@ export class BuildMode {
   private rectDragStart: Position | null = null;
   private rectPreviewGroup: THREE.Group | null = null;
 
-  onPlace: ((pos: Position, type: BuildingType) => void) | null = null;
+  onPlace: ((pos: Position, type: BuildingType, density?: ZoneDensity) => void) | null = null;
   onDemolish: ((pos: Position) => void) | null = null;
   onEdgeRoadClick: ((direction: EdgeDirection, position: number) => void) | null = null;
   onDragCostUpdate: ((cost: number | null) => void) | null = null;
@@ -113,8 +115,13 @@ export class BuildMode {
     this.clearRectPreview();
   }
 
+  setDensity(density: ZoneDensity | null): void {
+    this.selectedDensity = density;
+  }
+
   deselect(): void {
     this.selectedType = null;
+    this.selectedDensity = null;
     this.isDragging = false;
     this.lineDragStart = null;
     this.rectDragStart = null;
@@ -286,7 +293,7 @@ export class BuildMode {
 
       for (let x = minX; x <= maxX; x++) {
         for (let z = minZ; z <= maxZ; z++) {
-          this.onPlace({ x, z }, this.selectedType);
+          this.onPlace({ x, z }, this.selectedType, this.selectedDensity ?? undefined);
         }
       }
     }
@@ -327,7 +334,7 @@ export class BuildMode {
 
     const pos = this.raycaster.getGridPosition(e.clientX, e.clientY, this.camera);
     if (pos) {
-      this.onPlace(pos, this.selectedType);
+      this.onPlace(pos, this.selectedType, this.selectedDensity ?? undefined);
     }
   }
 

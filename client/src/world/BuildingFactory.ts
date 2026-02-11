@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { type PlacedBuilding, BUILDING_DEFS, CELL_SIZE, BuildingType, isZone, isRoad, ZONE_LEVELS, type ZoneType } from '@cityzen/shared';
+import { type PlacedBuilding, BUILDING_DEFS, CELL_SIZE, BuildingType, isZone, isRoad, getZoneLevelDef, type ZoneType, ZoneDensity } from '@cityzen/shared';
 
 export interface RoadNeighbors {
   hasNorth: boolean;
@@ -19,6 +19,25 @@ interface TextureConfig {
     };
   }[];
 }
+
+// Sub-building slot layouts per density (positions/sizes as fraction of CELL_SIZE)
+const ZONE_SLOT_LAYOUTS: Record<string, Array<{ x: number; z: number; w: number; d: number; heightScale: number }>> = {
+  low: [
+    { x: -0.22, z: -0.22, w: 0.35, d: 0.35, heightScale: 1.0 },
+    { x:  0.22, z: -0.22, w: 0.33, d: 0.35, heightScale: 0.9 },
+    { x: -0.22, z:  0.22, w: 0.35, d: 0.33, heightScale: 0.85 },
+    { x:  0.22, z:  0.22, w: 0.33, d: 0.33, heightScale: 0.95 },
+  ],
+  medium: [
+    { x: -0.2, z: 0, w: 0.4, d: 0.55, heightScale: 1.0 },
+    { x:  0.2, z: -0.18, w: 0.38, d: 0.35, heightScale: 0.88 },
+    { x:  0.2, z:  0.22, w: 0.38, d: 0.3, heightScale: 0.82 },
+  ],
+  high: [
+    { x: -0.13, z: 0, w: 0.5, d: 0.6, heightScale: 1.0 },
+    { x:  0.28, z: 0, w: 0.35, d: 0.5, heightScale: 0.85 },
+  ],
+};
 
 export class BuildingFactory {
   private textureLoader = new THREE.TextureLoader();
@@ -63,7 +82,7 @@ export class BuildingFactory {
     return `${parts.join('.')}_night.${ext}`;
   }
 
-  createBuilding(building: PlacedBuilding, neighbors?: RoadNeighbors): THREE.Group {
+  createBuilding(building: PlacedBuilding, neighbors?: RoadNeighbors, populationRatio?: number): THREE.Group {
     const def = BUILDING_DEFS[building.type];
     const group = new THREE.Group();
 
@@ -75,7 +94,7 @@ export class BuildingFactory {
     } else if (isRoad(building.type)) {
       this.createRoad(group, building, neighbors);
     } else if (isZone(building.type)) {
-      this.createZone(group, building);
+      this.createZone(group, building, populationRatio);
     } else {
       this.createInfrastructure(group, building);
     }
@@ -325,7 +344,7 @@ export class BuildingFactory {
     }
   }
 
-  private createZone(group: THREE.Group, building: PlacedBuilding): void {
+  private createZone(group: THREE.Group, building: PlacedBuilding, populationRatio?: number): void {
     const def = BUILDING_DEFS[building.type];
     const w = def.size.w * CELL_SIZE;
     const d = def.size.d * CELL_SIZE;
@@ -384,9 +403,12 @@ export class BuildingFactory {
       indicator.rotation.z = Math.PI / 4;
       indicator.position.y = 0.025;
       group.add(indicator);
+    } else if (building.density) {
+      // Multi-building rendering: multiple sub-buildings based on population
+      this.createMultiZoneBuildings(group, building, level, populationRatio ?? 0);
     } else {
-      // Developed: building geometry with textures
-      const levelDef = ZONE_LEVELS[building.type as ZoneType][level - 1];
+      // Backward compat: single building rendering
+      const levelDef = getZoneLevelDef(building.type as ZoneType, building.density, level);
       // Slightly different logic for width/depth to match original visuals
       const bw = w * (0.8 + level * 0.05); // Make them fill more of the lot
       const bd = d * (0.8 + level * 0.05);
@@ -474,8 +496,6 @@ export class BuildingFactory {
       const facadeNightTex = this.getTexture(facadeNightPath, bd / 2, h / 2);
       const roofNightTex = this.getTexture(roofNightPath, roofRepeatW, roofRepeatD);
 
-      console.log('Night/Day paths:', { facadeTexPath, facadeNightPath, roofTexPath, roofNightPath });
-
       const matRoofNight = new THREE.MeshBasicMaterial({
         map: roofNightTex,
         color: 0xffffff
@@ -528,6 +548,170 @@ export class BuildingFactory {
         group.add(light);
       }
     }
+  }
+
+  private hashString(str: string): number {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      hash = ((hash << 5) - hash) + str.charCodeAt(i);
+      hash |= 0;
+    }
+    return Math.abs(hash);
+  }
+
+  private getZoneTexturePaths(building: PlacedBuilding, hash: number): { facade: string; roof: string } {
+    let facade = '/textures/buildings/residential_facade.png';
+    let roof = '/textures/buildings/residential_roof.png';
+
+    if (this.config) {
+      const validCategories = this.config.categories.filter(c => c.minScore <= this.currentScore);
+      validCategories.sort((a, b) => b.minScore - a.minScore);
+      const category = validCategories[0];
+
+      if (category) {
+        let typeKey: 'residential' | 'commercial' | 'industrial' = 'residential';
+        if (building.type === BuildingType.ZONE_COMMERCIAL) typeKey = 'commercial';
+        if (building.type === BuildingType.ZONE_INDUSTRIAL) typeKey = 'industrial';
+
+        const textures = category.textures[typeKey];
+        const rand = Math.abs(hash);
+
+        if (textures.facades.length > 0) {
+          facade = `/textures/buildings/${textures.facades[rand % textures.facades.length]}`;
+        }
+        if (textures.roofs.length > 0) {
+          roof = `/textures/buildings/${textures.roofs[rand % textures.roofs.length]}`;
+        }
+      }
+    } else {
+      if (building.type === BuildingType.ZONE_COMMERCIAL) {
+        facade = '/textures/buildings/commercial_facade.png';
+        roof = '/textures/buildings/commercial_roof.png';
+      } else if (building.type === BuildingType.ZONE_INDUSTRIAL) {
+        facade = '/textures/buildings/industrial_facade.png';
+        roof = '/textures/buildings/industrial_roof.png';
+      }
+    }
+
+    return { facade, roof };
+  }
+
+  private createMultiZoneBuildings(group: THREE.Group, building: PlacedBuilding, level: number, populationRatio: number): void {
+    const density = building.density ?? ZoneDensity.MEDIUM;
+    const levelDef = getZoneLevelDef(building.type as ZoneType, density, level);
+    const maxBuildings = levelDef.maxBuildings;
+    const slots = ZONE_SLOT_LAYOUTS[density] || ZONE_SLOT_LAYOUTS.medium;
+
+    // Calculate visible count from population ratio
+    const visibleCount = Math.min(Math.max(1, Math.ceil(populationRatio * maxBuildings)), slots.length);
+
+    for (let i = 0; i < visibleCount; i++) {
+      const slot = slots[i];
+      const subSeed = this.hashString(building.id + i.toString());
+
+      // Each sub-building gets a different texture variant
+      const textures = this.getZoneTexturePaths(building, subSeed);
+
+      // Sub-building dimensions with slight random height variation
+      const subW = slot.w * CELL_SIZE;
+      const subD = slot.d * CELL_SIZE;
+      const heightVariation = 0.85 + (subSeed % 30) / 100;
+      const subH = levelDef.height * slot.heightScale * heightVariation;
+
+      // Position within cell
+      const subX = slot.x * CELL_SIZE;
+      const subZ = slot.z * CELL_SIZE;
+
+      // Weathering: older buildings (lower index) are slightly darker
+      const weatherFactor = 0.85 + 0.15 * (i / Math.max(1, maxBuildings - 1));
+
+      this.createTexturedBox(group, subX, subZ, subW, subD, subH, textures.facade, textures.roof, building.type, weatherFactor);
+    }
+  }
+
+  private createTexturedBox(
+    group: THREE.Group,
+    x: number, z: number,
+    width: number, depth: number, height: number,
+    facadeTexPath: string, roofTexPath: string,
+    buildingType: BuildingType,
+    weatherFactor = 1.0,
+  ): void {
+    const geometry = new THREE.BoxGeometry(width, height, depth);
+
+    const roofRepeatW = Math.max(1, width / 2);
+    const roofRepeatD = Math.max(1, depth / 2);
+    const weatherColor = new THREE.Color(weatherFactor, weatherFactor, weatherFactor);
+
+    // --- Day Mesh (Layer 1) ---
+    const matRoofDay = new THREE.MeshLambertMaterial({
+      map: this.getTexture(roofTexPath, roofRepeatW, roofRepeatD),
+      color: weatherColor,
+    });
+    const matSideXDay = new THREE.MeshLambertMaterial({
+      map: this.getTexture(facadeTexPath, depth / 2, height / 2),
+      color: weatherColor,
+    });
+    const matSideZDay = new THREE.MeshLambertMaterial({
+      map: this.getTexture(facadeTexPath, width / 2, height / 2),
+      color: weatherColor,
+    });
+    const matBottom = new THREE.MeshLambertMaterial({ color: 0x333333 });
+
+    const materialsDay = [matSideXDay, matSideXDay, matRoofDay, matBottom, matSideZDay, matSideZDay];
+
+    const meshDay = new THREE.Mesh(geometry, materialsDay);
+    meshDay.position.set(x, height / 2, z);
+    meshDay.castShadow = true;
+    meshDay.receiveShadow = true;
+    meshDay.layers.set(1);
+    group.add(meshDay);
+
+    // --- Night Mesh (Layer 2) ---
+    const facadeNightPath = this.getNightTexturePath(facadeTexPath);
+    const roofNightPath = this.getNightTexturePath(roofTexPath);
+
+    const matRoofNight = new THREE.MeshBasicMaterial({
+      map: this.getTexture(roofNightPath, roofRepeatW, roofRepeatD),
+      color: 0xffffff,
+    });
+    const matSideXNight = new THREE.MeshBasicMaterial({
+      map: this.getTexture(facadeNightPath, depth / 2, height / 2),
+      color: 0xffffff,
+    });
+    const matSideZNight = new THREE.MeshBasicMaterial({
+      map: this.getTexture(facadeNightPath, width / 2, height / 2),
+      color: 0xffffff,
+    });
+
+    const materialsNight = [matSideXNight, matSideXNight, matRoofNight, matBottom, matSideZNight, matSideZNight];
+
+    const meshNight = new THREE.Mesh(geometry, materialsNight);
+    meshNight.position.set(x, height / 2, z);
+    meshNight.castShadow = true;
+    meshNight.receiveShadow = true;
+    meshNight.layers.set(2);
+    group.add(meshNight);
+
+    // --- Point Light (Night, Layer 2) ---
+    let lightColor = 0xffaa00;
+    let intensity = 0.6;
+    let distance = 6;
+
+    if (buildingType === BuildingType.ZONE_COMMERCIAL) {
+      lightColor = 0xaaccff;
+      intensity = 0.8;
+      distance = 8;
+    } else if (buildingType === BuildingType.ZONE_INDUSTRIAL) {
+      lightColor = 0xff8800;
+      intensity = 0.7;
+      distance = 7;
+    }
+
+    const light = new THREE.PointLight(lightColor, intensity, distance);
+    light.position.set(x, height * 0.7, z);
+    light.layers.set(2);
+    group.add(light);
   }
 
   private createRoad(group: THREE.Group, building: PlacedBuilding, neighbors?: RoadNeighbors): void {

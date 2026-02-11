@@ -2,16 +2,22 @@ import { v4 as uuid } from 'uuid';
 import {
   type Person,
   type PopulationSummary,
+  type PlacedBuilding,
+  type ZonePopulationEntry,
   LifeStage,
   MaslowNeed,
   MASLOW_NEEDS_ORDERED,
   MASLOW_LERP_RATE,
+  BuildingType,
+  isZone,
+  getZoneLevelDef,
   getLifeStage,
   getPersonHappiness,
   createDefaultMaslow,
   getDeathProbability,
   adjustTargetsForLifeStage,
 } from '@cityzen/shared';
+import type { ZoneType } from '@cityzen/shared';
 
 // ── Age distribution for generating initial population ──────
 const AGE_DISTRIBUTION: Array<{ min: number; max: number; weight: number }> = [
@@ -35,8 +41,8 @@ function randomAge(): number {
 }
 
 // ── Compact serialization format ────────────────────────────
-// [id, age, cityId, p, s, l, e, c, a, sa, birthTick]
-type SerializedPerson = [string, number, string | null, number, number, number, number, number, number, number, number];
+// [id, age, cityId, p, s, l, e, c, a, sa, birthTick, residenceZoneId?]
+type SerializedPerson = [string, number, string | null, number, number, number, number, number, number, number, number, string | null | undefined];
 
 function serializePerson(p: Person): SerializedPerson {
   return [
@@ -51,6 +57,7 @@ function serializePerson(p: Person): SerializedPerson {
     p.maslow[MaslowNeed.AESTHETIC],
     p.maslow[MaslowNeed.SELF_ACTUALIZATION],
     p.birthTick,
+    p.residenceZoneId ?? null,
   ];
 }
 
@@ -59,6 +66,7 @@ function deserializePerson(t: SerializedPerson): Person {
     id: t[0],
     age: t[1],
     cityId: t[2],
+    residenceZoneId: t[11] ?? null,
     maslow: {
       [MaslowNeed.PHYSIOLOGICAL]: t[3],
       [MaslowNeed.SAFETY]: t[4],
@@ -167,13 +175,14 @@ export class PopulationManager {
     return deceased;
   }
 
-  /** Move a person from one city to another. */
+  /** Move a person from one city to another. Clears zone assignment (re-assigned on next tick). */
   migrate(personId: string, fromCityId: string, toCityId: string): void {
     const person = this.persons.get(personId);
     if (!person || person.cityId !== fromCityId) return;
 
     this.removeFromCityIndex(fromCityId, personId);
     person.cityId = toCityId;
+    person.residenceZoneId = null; // Will be re-assigned in next zone assignment pass
     this.addToCityIndex(toCityId, personId);
   }
 
@@ -297,6 +306,100 @@ export class PopulationManager {
         person.maslow[need] = current + (target - current) * MASLOW_LERP_RATE;
       }
     }
+  }
+
+  // ── Zone Population Tracking ─────────────────────────────────
+
+  /**
+   * Assign city residents to residential zones based on capacity.
+   * Clears invalid assignments (demolished zones) and fills unassigned people
+   * into zones with available capacity.
+   */
+  assignPeopleToZones(cityId: string, buildings: PlacedBuilding[]): void {
+    const personIds = this.cityIndex.get(cityId);
+    if (!personIds || personIds.size === 0) return;
+
+    // Build lookup of residential zones with their capacities
+    const residentialZones: Array<{ id: string; capacity: number }> = [];
+    for (const b of buildings) {
+      if (isZone(b.type) && b.type === BuildingType.ZONE_RESIDENTIAL && b.developmentLevel && b.developmentLevel > 0) {
+        const levelDef = getZoneLevelDef(b.type as ZoneType, b.density, b.developmentLevel);
+        residentialZones.push({ id: b.id, capacity: levelDef.populationCapacity });
+      }
+    }
+
+    const validZoneIds = new Set(residentialZones.map(z => z.id));
+    const zoneCounts = new Map<string, number>();
+
+    // First pass: validate existing assignments and count
+    for (const pid of personIds) {
+      const person = this.persons.get(pid)!;
+      if (person.residenceZoneId && validZoneIds.has(person.residenceZoneId)) {
+        zoneCounts.set(person.residenceZoneId, (zoneCounts.get(person.residenceZoneId) || 0) + 1);
+      } else {
+        person.residenceZoneId = null;
+      }
+    }
+
+    // Second pass: assign unassigned people to zones with available capacity
+    for (const pid of personIds) {
+      const person = this.persons.get(pid)!;
+      if (person.residenceZoneId) continue; // already assigned
+
+      for (const zone of residentialZones) {
+        const current = zoneCounts.get(zone.id) || 0;
+        if (current < zone.capacity) {
+          person.residenceZoneId = zone.id;
+          zoneCounts.set(zone.id, current + 1);
+          break;
+        }
+      }
+    }
+  }
+
+  /**
+   * Get zone population entries for all zones in a city (residential, commercial, industrial).
+   * For residential: actual person count. For commercial/industrial: derived from development level.
+   */
+  getZonePopulations(cityId: string, buildings: PlacedBuilding[]): ZonePopulationEntry[] {
+    const personIds = this.cityIndex.get(cityId);
+    const entries: ZonePopulationEntry[] = [];
+
+    // Count residential zone populations from person assignments
+    const zoneCounts = new Map<string, number>();
+    if (personIds) {
+      for (const pid of personIds) {
+        const person = this.persons.get(pid)!;
+        if (person.residenceZoneId) {
+          zoneCounts.set(person.residenceZoneId, (zoneCounts.get(person.residenceZoneId) || 0) + 1);
+        }
+      }
+    }
+
+    for (const b of buildings) {
+      if (!isZone(b.type) || !b.developmentLevel || b.developmentLevel <= 0) continue;
+
+      const levelDef = getZoneLevelDef(b.type as ZoneType, b.density, b.developmentLevel);
+
+      if (b.type === BuildingType.ZONE_RESIDENTIAL) {
+        entries.push({
+          buildingId: b.id,
+          population: zoneCounts.get(b.id) || 0,
+          capacity: levelDef.populationCapacity,
+        });
+      } else {
+        // Commercial/industrial: derive fill from development ratio
+        const maxLevel = 3;
+        const fillRatio = b.developmentLevel / maxLevel;
+        entries.push({
+          buildingId: b.id,
+          population: Math.round(fillRatio * levelDef.populationCapacity),
+          capacity: levelDef.populationCapacity,
+        });
+      }
+    }
+
+    return entries;
   }
 
   // ── Serialization ──────────────────────────────────────────

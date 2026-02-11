@@ -1,7 +1,7 @@
 // Types
 export type { Position, GridCell, Grid } from './types/grid.js';
 export {
-  BuildingType, isZone, isRoad,
+  BuildingType, ZoneDensity, isZone, isRoad,
   ZONE_TYPES, ROAD_TYPES,
   INFRA_CATEGORIES, INFRA_ART_TYPES,
   INFRA_ENERGY_TYPES, INFRA_WATER_TYPES,
@@ -11,7 +11,7 @@ export {
   INFRA_TRANS_TYPES,
 } from './types/building.js';
 export type { BuildingDef, BuildingEffects, MaslowContribution, PlacedBuilding, ZoneType, RoadType, InfraCategory } from './types/building.js';
-export type { ResourceState, DemandState, PopulationSummary } from './types/resources.js';
+export type { ResourceState, DemandState, PopulationSummary, ZonePopulationEntry } from './types/resources.js';
 export type { CityState } from './types/city.js';
 export type { Player, PlayerProfile } from './types/player.js';
 export type { GameClock } from './types/time.js';
@@ -64,7 +64,7 @@ export {
 } from './constants/simulation.js';
 export { WORLD_MAP_SIZE, DEFAULT_WORLD_NAME } from './constants/world.js';
 export { TAX_PER_PERSON, DEFICIT_MASLOW_PENALTY_RATE, MIN_BUDGET_MULTIPLIER } from './constants/economy.js';
-export { BUILDING_DEFS, ZONE_LEVELS } from './constants/buildings.js';
+export { BUILDING_DEFS, ZONE_LEVELS, ZONE_DENSITY_COSTS, getZoneLevelDef } from './constants/buildings.js';
 export type { ZoneLevelDef } from './constants/buildings.js';
 
 // Logic

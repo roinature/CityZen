@@ -1,4 +1,4 @@
-import type { BuildingType } from './building.js';
+import type { BuildingType, ZoneDensity } from './building.js';
 import type { Position } from './grid.js';
 import type { CityState } from './city.js';
 import type { ResourceState, PopulationSummary } from './resources.js';
@@ -63,6 +63,7 @@ export interface ClaimPlotPayload {
 export interface PlaceBuildingPayload {
   position: Position;
   type: BuildingType;
+  density?: ZoneDensity;
 }
 
 export interface DemolishPayload {

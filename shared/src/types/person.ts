@@ -106,6 +106,7 @@ export interface Person {
   id: string;
   age: number;
   cityId: string | null; // null = in world pool, not assigned to any city
+  residenceZoneId?: string | null; // building ID of the residential zone this person lives in
   maslow: MaslowState;
   birthTick: number;
 }

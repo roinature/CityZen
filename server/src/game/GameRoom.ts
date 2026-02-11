@@ -6,8 +6,10 @@ import {
   type Position,
   type GameClock,
   type PopulationSummary,
+  type ZonePopulationEntry,
   BuildingType,
   isZone,
+  ZoneDensity,
   S2C,
   AUTO_SAVE_INTERVAL_MS,
   INITIAL_RESOURCES,
@@ -15,6 +17,7 @@ import {
   MAX_TAX_RATE,
   DEFAULT_GAME_SPEED,
   BUILDING_DEFS,
+  ZONE_DENSITY_COSTS,
   createEmptyGrid,
   canPlaceBuilding,
   simulateCityTick,
@@ -74,7 +77,7 @@ export class GameRoom {
   }
 
   /** Called by WorldTickEngine each world tick with the shared clock. */
-  worldTick(worldClock: GameClock, populationSummary?: PopulationSummary): void {
+  worldTick(worldClock: GameClock, populationSummary?: PopulationSummary, zonePopulations?: ZonePopulationEntry[]): void {
     // Copy world clock to city state
     this.state.clock = { ...worldClock };
 
@@ -92,6 +95,11 @@ export class GameRoom {
     if (populationSummary) {
       this.state.resources.population = populationSummary.total;
       this.state.resources.populationSummary = populationSummary;
+    }
+
+    // Attach zone populations for client rendering
+    if (zonePopulations) {
+      this.state.resources.zonePopulations = zonePopulations;
     }
 
     // Broadcast resources with clock
@@ -155,23 +163,24 @@ export class GameRoom {
     this.broadcast(S2C.PLAYER_LEFT, { playerId });
   }
 
-  placeBuilding(playerId: string, position: Position, type: BuildingType): { success: boolean; error?: string } {
+  placeBuilding(playerId: string, position: Position, type: BuildingType, density?: ZoneDensity): { success: boolean; error?: string } {
     const result = canPlaceBuilding(
       this.state.grid, position, type, this.state.resources,
-      this.unlimitedMoney, this.state.buildings,
+      this.unlimitedMoney, this.state.buildings, density,
     );
     if (!result.valid) {
       return { success: false, error: result.reason };
     }
 
     const def = BUILDING_DEFS[type];
+    const cost = isZone(type) && density ? ZONE_DENSITY_COSTS[density] : def.cost;
     const building: PlacedBuilding = {
       id: uuid(),
       type,
       position,
       placedBy: playerId,
       placedAt: this.state.tick,
-      ...(isZone(type) ? { developmentLevel: 0 } : {}),
+      ...(isZone(type) ? { developmentLevel: 0, density: density ?? ZoneDensity.MEDIUM } : {}),
     };
 
     // Update grid
@@ -184,7 +193,7 @@ export class GameRoom {
     // Update state
     this.state.buildings.push(building);
     if (!this.unlimitedMoney) {
-      this.state.resources.money -= def.cost;
+      this.state.resources.money -= cost;
     }
     this.state.updatedAt = Date.now();
 

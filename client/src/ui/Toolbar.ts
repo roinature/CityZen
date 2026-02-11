@@ -1,5 +1,6 @@
-import { BuildingType, BUILDING_DEFS, ZONE_TYPES, ROAD_TYPES } from '@cityzen/shared';
+import { BuildingType, BUILDING_DEFS, ZONE_TYPES, ROAD_TYPES, isZone, type ZoneDensity } from '@cityzen/shared';
 import { BuildingFactory } from '../world/BuildingFactory.js';
+import { DensityPicker } from './DensityPicker.js';
 
 interface ToolbarSection {
   label: string;
@@ -15,13 +16,15 @@ const SECTIONS: ToolbarSection[] = [
 export class Toolbar {
   private container: HTMLDivElement;
   private buttons: Map<BuildingType, HTMLButtonElement> = new Map();
-  private onSelect: (type: BuildingType) => void;
+  private onSelect: (type: BuildingType, density?: ZoneDensity) => void;
+  private densityPicker: DensityPicker;
 
-  constructor(parent: HTMLElement, onSelect: (type: BuildingType) => void) {
+  constructor(parent: HTMLElement, onSelect: (type: BuildingType, density?: ZoneDensity) => void) {
     this.onSelect = onSelect;
     this.container = document.createElement('div');
     this.container.className = 'toolbar';
     parent.appendChild(this.container);
+    this.densityPicker = new DensityPicker(parent);
     this.render();
   }
 
@@ -65,8 +68,22 @@ export class Toolbar {
         btn.appendChild(label);
         btn.appendChild(cost);
 
-        btn.addEventListener('click', () => {
-          this.onSelect(type);
+        btn.addEventListener('click', (e) => {
+          if (isZone(type)) {
+            // Toggle off if already active
+            if (btn.classList.contains('active')) {
+              this.densityPicker.hide();
+              this.onSelect(type);
+              return;
+            }
+            // Show density picker for zones
+            e.stopPropagation();
+            this.densityPicker.show(btn, (density) => {
+              this.onSelect(type, density);
+            });
+          } else {
+            this.onSelect(type);
+          }
         });
 
         btnGroup.appendChild(btn);

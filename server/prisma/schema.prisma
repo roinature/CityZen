@@ -87,6 +87,7 @@ model Building {
   placedAt         Int     // Game tick
   developmentLevel Int?    // 0-3 for zones, null for non-zones
   developedAt      Int?    // Game tick of last development
+  density          String? // Zone density: 'low' | 'medium' | 'high'
 
   city City @relation(fields: [cityId], references: [id], onDelete: Cascade)
 

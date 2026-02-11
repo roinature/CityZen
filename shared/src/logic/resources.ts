@@ -1,6 +1,5 @@
 import type { CityState } from '../types/city.js';
-import { BUILDING_DEFS } from '../constants/buildings.js';
-import { ZONE_LEVELS } from '../constants/buildings.js';
+import { BUILDING_DEFS, getZoneLevelDef } from '../constants/buildings.js';
 import { isZone, type ZoneType } from '../types/building.js';
 import { TAX_PER_PERSON, DEFICIT_MASLOW_PENALTY_RATE, MIN_BUDGET_MULTIPLIER } from '../constants/economy.js';
 import { LifeStage } from '../types/person.js';
@@ -40,7 +39,7 @@ export function calculateMaintenance(state: CityState): number {
     let maint = def?.effects?.maintenance ?? 0;
 
     if (isZone(b.type) && b.developmentLevel && b.developmentLevel > 0) {
-      const levelDef = ZONE_LEVELS[b.type as ZoneType][b.developmentLevel - 1];
+      const levelDef = getZoneLevelDef(b.type as ZoneType, b.density, b.developmentLevel!);
       maint += levelDef.maintenance;
     }
 
@@ -67,7 +66,7 @@ export function calculatePopulationGrowth(state: CityState): number {
     jobs += def?.effects?.jobs ?? 0;
 
     if (isZone(b.type) && b.developmentLevel && b.developmentLevel > 0) {
-      const levelDef = ZONE_LEVELS[b.type as ZoneType][b.developmentLevel - 1];
+      const levelDef = getZoneLevelDef(b.type as ZoneType, b.density, b.developmentLevel!);
       capacity += levelDef.populationCapacity;
       jobs += levelDef.jobs;
     }
@@ -98,7 +97,7 @@ export function calculateHappiness(state: CityState): number {
     capacity += def?.effects?.populationCapacity ?? 0;
 
     if (isZone(b.type) && b.developmentLevel && b.developmentLevel > 0) {
-      const levelDef = ZONE_LEVELS[b.type as ZoneType][b.developmentLevel - 1];
+      const levelDef = getZoneLevelDef(b.type as ZoneType, b.density, b.developmentLevel!);
       buildingEffect += levelDef.happiness;
       capacity += levelDef.populationCapacity;
     }
@@ -125,7 +124,7 @@ export function calculateHousingCapacity(state: CityState): number {
     const def = BUILDING_DEFS[b.type];
     capacity += def?.effects?.populationCapacity ?? 0;
     if (isZone(b.type) && b.developmentLevel && b.developmentLevel > 0) {
-      const levelDef = ZONE_LEVELS[b.type as ZoneType][b.developmentLevel - 1];
+      const levelDef = getZoneLevelDef(b.type as ZoneType, b.density, b.developmentLevel!);
       capacity += levelDef.populationCapacity;
     }
   }

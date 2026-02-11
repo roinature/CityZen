@@ -17,6 +17,12 @@ export interface PopulationSummary {
   averageMaslow: MaslowState;
 }
 
+export interface ZonePopulationEntry {
+  buildingId: string;
+  population: number;
+  capacity: number;
+}
+
 export interface ResourceState {
   money: number;
   population: number;
@@ -24,4 +30,5 @@ export interface ResourceState {
   taxRate: number;
   demand: DemandState;
   populationSummary?: PopulationSummary;
+  zonePopulations?: ZonePopulationEntry[];
 }

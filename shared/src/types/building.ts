@@ -163,6 +163,12 @@ export const INFRA_CATEGORIES: InfraCategory[] = [
 ];
 
 export type ZoneType = (typeof ZONE_TYPES)[number];
+
+export enum ZoneDensity {
+  LOW = 'low',
+  MEDIUM = 'medium',
+  HIGH = 'high',
+}
 export type RoadType = (typeof ROAD_TYPES)[number];
 
 export function isZone(type: BuildingType): type is ZoneType {
@@ -206,4 +212,5 @@ export interface PlacedBuilding {
   placedAt: number;
   developmentLevel?: number;
   developedAt?: number;
+  density?: ZoneDensity;
 }
