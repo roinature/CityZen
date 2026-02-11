@@ -54,8 +54,9 @@ export function createGameRoutes(roomManager: RoomManager, worldManager: WorldMa
   }
 
   // GET /api/world/state — get current world state (replaces the on-connect emit)
-  router.get('/world/state', (_req: Request, res: Response) => {
-    res.json({ world: worldManager.getWorldState() });
+  router.get('/world/state', (req: Request, res: Response) => {
+    const worldId = (req.query.worldId as string) || 'default';
+    res.json({ world: worldManager.getWorldState(worldId) });
   });
 
   // POST /api/world/claim

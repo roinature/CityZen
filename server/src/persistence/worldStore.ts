@@ -64,6 +64,18 @@ export async function loadPopulationData(worldId: string): Promise<unknown[] | n
   return world.populationData as unknown as unknown[];
 }
 
+export async function listWorlds(): Promise<Array<{ id: string; name: string; totalPopulation: number; cityCount: number }>> {
+  const worlds = await prisma.world.findMany({
+    select: { id: true, name: true, totalPopulation: true, cities: true },
+  });
+  return worlds.map(w => ({
+    id: w.id,
+    name: w.name,
+    totalPopulation: w.totalPopulation,
+    cityCount: Array.isArray(w.cities) ? (w.cities as unknown[]).length : 0,
+  }));
+}
+
 export async function loadOrCreateDefaultWorld(): Promise<{ state: WorldState; isNew: boolean }> {
   const existing = await loadWorldState('default');
   if (existing) return { state: existing, isNew: false };

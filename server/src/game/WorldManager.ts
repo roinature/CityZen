@@ -1,3 +1,4 @@
+import { v4 as uuid } from 'uuid';
 import {
   type WorldState,
   type WorldPosition,
@@ -10,84 +11,160 @@ import {
 import { RoomManager } from './RoomManager.js';
 import { WorldTickEngine } from './WorldTickEngine.js';
 import { PopulationManager } from './PopulationManager.js';
-import { saveWorldState, loadOrCreateDefaultWorld, loadPopulationData } from '../persistence/worldStore.js';
+import {
+  saveWorldState,
+  loadWorldState,
+  loadOrCreateDefaultWorld,
+  loadPopulationData,
+  listWorlds as listWorldsFromDb,
+} from '../persistence/worldStore.js';
 import { broadcastToAll } from '../realtime/supabaseBroadcast.js';
 
+interface WorldInstance {
+  state: WorldState;
+  tickEngine: WorldTickEngine;
+  populationManager: PopulationManager;
+}
+
 export class WorldManager {
-  private world!: WorldState;
+  private worlds = new Map<string, WorldInstance>();
   private roomManager: RoomManager;
-  private tickEngine!: WorldTickEngine;
-  private populationManager!: PopulationManager;
 
   constructor(roomManager: RoomManager) {
     this.roomManager = roomManager;
   }
 
   async init(): Promise<void> {
+    // Load the default world on startup
     const { state, isNew } = await loadOrCreateDefaultWorld();
-    this.world = state;
+    await this.startWorldInstance(state, isNew);
+  }
 
-    // Initialize population manager
-    this.populationManager = new PopulationManager();
+  private async startWorldInstance(state: WorldState, isNew: boolean): Promise<WorldInstance> {
+    const populationManager = new PopulationManager();
+
     if (isNew) {
-      this.populationManager.initWorldPopulation(
-        this.world.initialPopulation,
-        this.world.clock.gameTimeMs,
+      populationManager.initWorldPopulation(
+        state.initialPopulation,
+        state.clock.gameTimeMs,
       );
-      this.world.totalPopulation = this.populationManager.getTotalPopulation();
+      state.totalPopulation = populationManager.getTotalPopulation();
     } else {
-      // Restore persisted population data
-      const popData = await loadPopulationData(this.world.id);
+      const popData = await loadPopulationData(state.id);
       if (popData && popData.length > 0) {
-        this.populationManager = PopulationManager.deserialize(popData);
-        this.world.totalPopulation = this.populationManager.getTotalPopulation();
-        console.log(`Restored ${this.populationManager.getTotalPopulation()} persons from database`);
+        const restored = PopulationManager.deserialize(popData);
+        // Copy restored data into our instance
+        Object.assign(populationManager, restored);
+        state.totalPopulation = populationManager.getTotalPopulation();
+        console.log(`Restored ${populationManager.getTotalPopulation()} persons for world "${state.name}"`);
       } else {
-        // No saved population — re-seed
-        this.populationManager.initWorldPopulation(
-          this.world.initialPopulation,
-          this.world.clock.gameTimeMs,
+        populationManager.initWorldPopulation(
+          state.initialPopulation,
+          state.clock.gameTimeMs,
         );
-        this.world.totalPopulation = this.populationManager.getTotalPopulation();
+        state.totalPopulation = populationManager.getTotalPopulation();
       }
     }
 
-    // Create and start the world-level tick engine
-    this.tickEngine = new WorldTickEngine(
-      this.world,
-      () => this.roomManager.getActiveRooms(),
-      this.populationManager,
+    const tickEngine = new WorldTickEngine(
+      state,
+      () => this.roomManager.getActiveRooms().filter(r => {
+        // Only return rooms belonging to this world
+        return state.cities.some(c => c.cityId === r.id);
+      }),
+      populationManager,
     );
-    this.tickEngine.start();
+    tickEngine.start();
+
+    const instance: WorldInstance = { state, tickEngine, populationManager };
+    this.worlds.set(state.id, instance);
 
     console.log(
-      `World loaded: "${this.world.name}" with ${this.world.cities.length} cities, ` +
-      `${this.populationManager.getTotalPopulation()} people (${this.populationManager.getUnassignedCount()} unassigned)`,
+      `World loaded: "${state.name}" (${state.id}) with ${state.cities.length} cities, ` +
+      `${populationManager.getTotalPopulation()} people (${populationManager.getUnassignedCount()} unassigned)`,
     );
+
+    return instance;
   }
 
-  getWorldState(): WorldState {
-    return this.world;
+  // ── World CRUD ──────────────────────────────────────────────
+
+  async createWorld(
+    name: string,
+    config?: { gridSize?: number; maxCities?: number; initialPopulation?: number },
+  ): Promise<WorldState> {
+    const state: WorldState = {
+      id: uuid(),
+      name,
+      gridSize: config?.gridSize ?? 8,
+      maxCities: config?.maxCities ?? 64,
+      cities: [],
+      clock: { gameTimeMs: 0, speed: 1, gameDay: 0, gameYear: 1 },
+      totalPopulation: config?.initialPopulation ?? 100,
+      initialPopulation: config?.initialPopulation ?? 100,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    await saveWorldState(state);
+    await this.startWorldInstance(state, true);
+    return state;
   }
 
-  getPopulationManager(): PopulationManager {
-    return this.populationManager;
+  async loadWorld(worldId: string): Promise<WorldState | null> {
+    // Already loaded?
+    const existing = this.worlds.get(worldId);
+    if (existing) return existing.state;
+
+    const state = await loadWorldState(worldId);
+    if (!state) return null;
+
+    const instance = await this.startWorldInstance(state, false);
+    return instance.state;
   }
 
-  setGameSpeed(speed: number): { success: boolean; error?: string } {
-    return this.tickEngine.setGameSpeed(speed);
+  async listWorlds(): Promise<Array<{ id: string; name: string; totalPopulation: number; cityCount: number }>> {
+    return listWorldsFromDb();
   }
 
-  getGameSpeed(): number {
-    return this.tickEngine.getGameSpeed();
+  // ── Accessors (default to 'default' world for backwards compat) ──
+
+  getWorldState(worldId = 'default'): WorldState {
+    return this.worlds.get(worldId)!.state;
   }
 
-  isPlotAvailable(position: WorldPosition): boolean {
+  getPopulationManager(worldId = 'default'): PopulationManager {
+    return this.worlds.get(worldId)!.populationManager;
+  }
+
+  /** Find which world a city belongs to */
+  findWorldForCity(cityId: string): WorldInstance | undefined {
+    for (const instance of this.worlds.values()) {
+      if (instance.state.cities.some(c => c.cityId === cityId)) {
+        return instance;
+      }
+    }
+    return undefined;
+  }
+
+  setGameSpeed(speed: number, worldId = 'default'): { success: boolean; error?: string } {
+    const instance = this.worlds.get(worldId);
+    if (!instance) return { success: false, error: 'World not found' };
+    return instance.tickEngine.setGameSpeed(speed);
+  }
+
+  getGameSpeed(worldId = 'default'): number {
+    return this.worlds.get(worldId)?.tickEngine.getGameSpeed() ?? 1;
+  }
+
+  isPlotAvailable(position: WorldPosition, worldId = 'default'): boolean {
+    const instance = this.worlds.get(worldId);
+    if (!instance) return false;
     if (position.wx < 0 || position.wx >= WORLD_MAP_SIZE ||
       position.wz < 0 || position.wz >= WORLD_MAP_SIZE) {
       return false;
     }
-    return !this.world.cities.some(
+    return !instance.state.cities.some(
       (c: WorldCityEntry) => c.position.wx === position.wx && c.position.wz === position.wz
     );
   }
@@ -96,19 +173,20 @@ export class WorldManager {
     position: WorldPosition,
     cityName: string,
     ownerId: string,
-    ownerName: string
+    ownerName: string,
+    worldId = 'default',
   ): Promise<{ success: boolean; cityId?: string; error?: string }> {
-    if (!this.isPlotAvailable(position)) {
+    const instance = this.worlds.get(worldId);
+    if (!instance) return { success: false, error: 'World not found' };
+
+    if (!this.isPlotAvailable(position, worldId)) {
       return { success: false, error: 'Plot is not available' };
     }
 
-    // Create the city room
     const room = await this.roomManager.createRoom(cityName, ownerId, ownerName);
 
-    // Seed city with people from the world pool
-    const seeded = this.populationManager.seedCity(room.id, INITIAL_CITY_SEED);
+    const seeded = instance.populationManager.seedCity(room.id, INITIAL_CITY_SEED);
 
-    // Add to world state
     const entry: WorldCityEntry = {
       cityId: room.id,
       ownerId,
@@ -118,54 +196,61 @@ export class WorldManager {
       population: seeded.length,
       happiness: 50,
     };
-    this.world.cities.push(entry);
-    this.world.updatedAt = Date.now();
+    instance.state.cities.push(entry);
+    instance.state.updatedAt = Date.now();
 
-    await this.save();
+    await this.save(worldId);
 
-    // Broadcast updated world state to everyone
-    broadcastToAll(S2C.WORLD_STATE, { world: this.world });
+    broadcastToAll(S2C.WORLD_STATE, { world: instance.state });
 
-    console.log(`City "${cityName}" seeded with ${seeded.length} people (${this.populationManager.getUnassignedCount()} remain in world pool)`);
+    console.log(`City "${cityName}" seeded with ${seeded.length} people in world "${instance.state.name}" (${instance.populationManager.getUnassignedCount()} remain in pool)`);
 
     return { success: true, cityId: room.id };
   }
 
   updateCityPopulation(cityId: string, population: number): void {
-    const entry = this.world.cities.find((c: WorldCityEntry) => c.cityId === cityId);
+    const instance = this.findWorldForCity(cityId);
+    if (!instance) return;
+    const entry = instance.state.cities.find((c: WorldCityEntry) => c.cityId === cityId);
     if (entry) {
       entry.population = population;
     }
   }
 
   updateCityEdgeConnections(cityId: string, connections: EdgeConnection[]): void {
-    const entry = this.world.cities.find((c: WorldCityEntry) => c.cityId === cityId);
+    const instance = this.findWorldForCity(cityId);
+    if (!instance) return;
+    const entry = instance.state.cities.find((c: WorldCityEntry) => c.cityId === cityId);
     if (entry) {
       entry.edgeConnections = connections;
-      this.world.updatedAt = Date.now();
+      instance.state.updatedAt = Date.now();
 
-      // Broadcast updated world state so all clients see the new connections
-      broadcastToAll(S2C.WORLD_STATE, { world: this.world });
+      broadcastToAll(S2C.WORLD_STATE, { world: instance.state });
 
-      // Persist to disk
-      this.save();
+      this.save(instance.state.id);
     }
   }
 
   getCityEntry(cityId: string): WorldCityEntry | undefined {
-    return this.world.cities.find((c: WorldCityEntry) => c.cityId === cityId);
+    const instance = this.findWorldForCity(cityId);
+    if (!instance) return undefined;
+    return instance.state.cities.find((c: WorldCityEntry) => c.cityId === cityId);
   }
 
-  async save(): Promise<void> {
+  async save(worldId = 'default'): Promise<void> {
+    const instance = this.worlds.get(worldId);
+    if (!instance) return;
     try {
-      const populationData = this.populationManager.serialize();
-      await saveWorldState(this.world, populationData);
+      const populationData = instance.populationManager.serialize();
+      await saveWorldState(instance.state, populationData);
     } catch (err) {
-      console.error('Failed to save world state:', err);
+      console.error(`Failed to save world state (${worldId}):`, err);
     }
   }
 
   shutdown(): void {
-    this.tickEngine.stop();
+    for (const instance of this.worlds.values()) {
+      instance.tickEngine.stop();
+    }
   }
 }

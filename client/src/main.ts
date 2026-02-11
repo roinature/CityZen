@@ -146,6 +146,12 @@ const toolSidebar = new ToolSidebar(uiRoot, {
     if (cityState) financePanel.update(cityState);
     financePanel.toggle();
   },
+  onMaslowToggle: () => {
+    if (cityState?.resources.populationSummary) {
+      maslowPanel.update(cityState.resources.populationSummary);
+    }
+    maslowPanel.toggle();
+  },
 });
 
 // --- Session ---
@@ -214,6 +220,9 @@ GameClient.create(SERVER_URL, {
     cityState.clock = clock;
     resourceBar.update(resources, cityState);
     resourceBar.updateClock(clock);
+    if (maslowPanel.isVisible() && resources.populationSummary) {
+      maslowPanel.update(resources.populationSummary);
+    }
   },
 
   onZoneGrowth: (payload) => {
@@ -246,6 +255,14 @@ GameClient.create(SERVER_URL, {
 
   onSaved: () => {
     gameMenu.showStatus('Game saved!');
+  },
+
+  onMigrationEvent: (payload) => {
+    if (!cityState) return;
+    const direction = payload.fromCityId === cityState.id ? 'out' : 'in';
+    const otherCityId = direction === 'out' ? payload.toCityId : payload.fromCityId;
+    const otherName = worldState?.cities.find(c => c.cityId === otherCityId)?.name ?? otherCityId;
+    maslowPanel.showMigrationWarning(payload.personCount, direction, otherName);
   },
 }).then((client) => {
   gameClient = client;
@@ -319,12 +336,27 @@ buildMode.onEdgeRoadClick = (direction: EdgeDirection, position: number) => {
   }
 };
 
-// --- Lobby (name entry) ---
+// --- Lobby (name entry + world selection) ---
 const lobby = new Lobby(uiRoot, {
-  onEnterWorld: (playerName) => {
+  onEnterWorld: (playerName, worldId) => {
     currentPlayerName = playerName;
+    console.log(`Entering world: ${worldId}`);
     lobby.hide();
     worldMap.show();
+  },
+  fetchWorlds: async () => {
+    const res = await fetch(`${SERVER_URL}/api/worlds`);
+    return res.json();
+  },
+  onCreateWorld: async (name) => {
+    const res = await fetch(`${SERVER_URL}/api/worlds/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    const data = await res.json();
+    if (data.success) return { worldId: data.worldId };
+    return null;
   },
 });
 
@@ -423,7 +455,11 @@ menuToggle.addEventListener('click', () => {
 window.addEventListener('keydown', (e) => {
   if (e.code !== 'Escape') return;
 
-  if (optionsPanel.isVisible()) {
+  if (maslowPanel.isVisible()) {
+    maslowPanel.hide();
+  } else if (financePanel.isVisible()) {
+    financePanel.hide();
+  } else if (optionsPanel.isVisible()) {
     optionsPanel.hide();
     gameMenu.show();
   } else if (gameMenu.isVisible()) {

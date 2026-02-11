@@ -5,6 +5,7 @@ export interface ToolSidebarCallbacks {
   onBrushSizeChange: (size: number) => void;
   onDayNightToggle: () => void;
   onFinanceToggle: () => void;
+  onMaslowToggle?: () => void;
 }
 
 export class ToolSidebar {
@@ -83,6 +84,11 @@ export class ToolSidebar {
     // Finance toggle
     this.createToolBtn('Finance', '$', () => {
       this.callbacks.onFinanceToggle();
+    });
+
+    // Maslow needs toggle
+    this.createToolBtn('Maslow', 'M', () => {
+      this.callbacks.onMaslowToggle?.();
     });
   }
 

@@ -49,8 +49,28 @@ app.get('/api/cities', async (_req, res) => {
   res.json(cities);
 });
 
-app.get('/api/world', (_req, res) => {
-  res.json(worldManager.getWorldState());
+app.get('/api/world', (req, res) => {
+  const worldId = (req.query.worldId as string) || 'default';
+  res.json(worldManager.getWorldState(worldId));
+});
+
+app.get('/api/worlds', async (_req, res) => {
+  const worlds = await worldManager.listWorlds();
+  res.json(worlds);
+});
+
+app.post('/api/worlds/create', async (req, res) => {
+  try {
+    const { name, gridSize, maxCities, initialPopulation } = req.body;
+    if (!name) {
+      res.json({ success: false, error: 'Name is required' });
+      return;
+    }
+    const state = await worldManager.createWorld(name, { gridSize, maxCities, initialPopulation });
+    res.json({ success: true, worldId: state.id, world: state });
+  } catch (err) {
+    res.json({ success: false, error: 'Failed to create world' });
+  }
 });
 
 app.get('/api/config', (_req, res) => {
