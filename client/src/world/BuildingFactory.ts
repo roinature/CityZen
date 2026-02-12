@@ -24,18 +24,18 @@ interface TextureConfig {
 const ZONE_SLOT_LAYOUTS: Record<string, Array<{ x: number; z: number; w: number; d: number; heightScale: number }>> = {
   low: [
     { x: -0.22, z: -0.22, w: 0.35, d: 0.35, heightScale: 1.0 },
-    { x:  0.22, z: -0.22, w: 0.33, d: 0.35, heightScale: 0.9 },
-    { x: -0.22, z:  0.22, w: 0.35, d: 0.33, heightScale: 0.85 },
-    { x:  0.22, z:  0.22, w: 0.33, d: 0.33, heightScale: 0.95 },
+    { x: 0.22, z: -0.22, w: 0.33, d: 0.35, heightScale: 0.9 },
+    { x: -0.22, z: 0.22, w: 0.35, d: 0.33, heightScale: 0.85 },
+    { x: 0.22, z: 0.22, w: 0.33, d: 0.33, heightScale: 0.95 },
   ],
   medium: [
     { x: -0.2, z: 0, w: 0.4, d: 0.55, heightScale: 1.0 },
-    { x:  0.2, z: -0.18, w: 0.38, d: 0.35, heightScale: 0.88 },
-    { x:  0.2, z:  0.22, w: 0.38, d: 0.3, heightScale: 0.82 },
+    { x: 0.2, z: -0.18, w: 0.38, d: 0.35, heightScale: 0.88 },
+    { x: 0.2, z: 0.22, w: 0.38, d: 0.3, heightScale: 0.82 },
   ],
   high: [
     { x: -0.13, z: 0, w: 0.5, d: 0.6, heightScale: 1.0 },
-    { x:  0.28, z: 0, w: 0.35, d: 0.5, heightScale: 0.85 },
+    { x: 0.28, z: 0, w: 0.35, d: 0.5, heightScale: 0.85 },
   ],
 };
 
@@ -161,6 +161,11 @@ export class BuildingFactory {
     [BuildingType.WATER_SEWAGE_PLANT]: 'sewage_plant_facade.png',
     [BuildingType.EDU_ELEMENTARY]: 'elementary_facade.png',
     [BuildingType.EDU_HIGH_SCHOOL]: 'high_school_facade.png',
+    [BuildingType.EDU_UNIVERSITY]: 'university_facade.png',
+    [BuildingType.EDU_LIBRARY]: 'library_facade.png',
+    [BuildingType.GOV_CITY_HALL]: 'city_hall_facade.png',
+    [BuildingType.GOV_COURTHOUSE]: 'courthouse_facade.png',
+    [BuildingType.GOV_PARLIAMENT]: 'parliament_facade.png',
   };
 
   public static readonly INFRASTRUCTURE_ROOFS: Partial<Record<BuildingType, string>> = {
@@ -177,6 +182,11 @@ export class BuildingFactory {
     [BuildingType.WATER_TREATMENT]: 'water_treatment_roof.png',
     [BuildingType.WATER_SEWAGE_PLANT]: 'sewage_plant_roof.png',
     [BuildingType.EDU_ELEMENTARY]: 'elementary_roof.png',
+    [BuildingType.EDU_HIGH_SCHOOL]: 'high_school_roof.png',
+    [BuildingType.EDU_UNIVERSITY]: 'university_roof.png',
+    [BuildingType.EDU_LIBRARY]: 'library_roof.png',
+    [BuildingType.GOV_CITY_HALL]: 'city_hall_roof.png',
+    [BuildingType.GOV_COURTHOUSE]: 'courthouse_roof.png',
   };
 
   /**

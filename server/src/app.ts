@@ -8,6 +8,7 @@ import { createGameRoutes } from './routes/gameRoutes.js';
 import { initBroadcast } from './realtime/supabaseBroadcast.js';
 import { XService } from './services/XService.js';
 import { GoogleService } from './services/GoogleService.js';
+import { prisma } from './persistence/prismaClient.js';
 
 const app = express();
 
@@ -18,7 +19,7 @@ app.use(express.json());
 // Initialize Supabase broadcast
 initBroadcast();
 
-const roomManager = new RoomManager();
+const roomManager = new RoomManager(prisma);
 export const worldManager = new WorldManager(roomManager);
 
 // Lazy initialization for serverless (runs once on cold start)
@@ -131,9 +132,9 @@ app.get('/api/auth/twitter/callback', async (req, res) => {
 });
 
 // Google Auth Routes
-app.get('/api/auth/google', (req, res) => {
+app.get('/api/auth/google', async (req, res) => {
   try {
-    const authUrl = googleService.generateAuthUrl();
+    const authUrl = await googleService.generateAuthUrl();
     res.redirect(authUrl);
   } catch (err) {
     console.error('Google Auth Error:', err);

@@ -24,8 +24,8 @@ export class GoogleService {
     }
 
     // Generate Google OAuth URL
-    generateAuthUrl(): string {
-        const { data, error } = this.supabase.auth.signInWithOAuth({
+    async generateAuthUrl(): Promise<string> {
+        const { data, error } = await this.supabase.auth.signInWithOAuth({
             provider: 'google',
             options: {
                 redirectTo: this.callbackUrl,

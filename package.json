@@ -15,9 +15,11 @@
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
+    "prisma": "^7.4.0",
     "typescript": "^5.7.0"
   },
   "dependencies": {
+    "@prisma/client": "^7.4.0",
     "@supabase/supabase-js": "^2.95.3",
     "@xdevplatform/xdk": "^0.4.0"
   }

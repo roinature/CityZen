@@ -17,6 +17,9 @@ model Player {
   ownedCityId String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  
+  // Relations
+  messages    GameMessage[]
 }
 
 /// World - the shared game world containing all cities
@@ -92,4 +95,48 @@ model Building {
   city City @relation(fields: [cityId], references: [id], onDelete: Cascade)
 
   @@index([cityId])
+}
+
+/// GameMessage - dynamic messages and notifications for players
+model GameMessage {
+  id           String   @id
+  type         String   // MessageType enum value
+  category     String   // MessageCategory enum value
+  priority     String   // MessagePriority enum value
+  title        String
+  content      String
+  data         Json?    // Additional contextual data
+  cityId       String?  // null = global/system message
+  playerId     String?  // null = message for all players in city
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime?
+  isRead       Boolean  @default(false)
+  displayType  String   // DisplayType enum value
+  
+  // Optional relation to player (if playerId provided)
+  player       Player?  @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  
+  @@index([cityId])
+  @@index([playerId])
+  @@index([createdAt])
+  @@index([isRead])
+  @@index([type])
+}
+
+/// MessageTemplate - configurable templates for dynamic message generation
+model MessageTemplate {
+  id             String   @id
+  type           String   // MessageType enum value (unique)
+  category       String   // MessageCategory enum value
+  priority       String   // MessagePriority enum value
+  displayType    String   // DisplayType enum value
+  titleTemplate  String   // Template with variables
+  contentTemplate String  // Template with variables
+  conditions     Json     // Array of MessageCondition
+  cooldownMs     Int?     // Cooldown period in milliseconds
+  isEnabled      Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  
+  @@unique([type])
 }

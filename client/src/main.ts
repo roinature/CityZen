@@ -9,6 +9,10 @@ import {
   BUILDING_DEFS,
   findAdjacentCity,
   getOppositeDirection,
+  MessageType,
+  MessageCategory,
+  MessagePriority,
+  DisplayType,
 } from '@cityzen/shared';
 import { SceneManager } from './scene/SceneManager.js';
 import { CameraController } from './scene/CameraController.js';
@@ -29,6 +33,7 @@ import { FinancePanel } from './ui/FinancePanel.js';
 import { MaslowPanel } from './ui/MaslowPanel.js';
 import { FooterIndicator } from './ui/FooterIndicator.js';
 import { InfraToolbar } from './ui/InfraToolbar.js';
+import { MessageManager } from './ui/MessageManager.js';
 import { GameClient } from './network/GameClient.js';
 
 const SERVER_URL = window.location.origin;
@@ -91,6 +96,16 @@ const buildMode = new BuildMode(sceneManager.scene, sceneManager.camera);
 // --- UI ---
 const resourceBar = new ResourceBar(uiRoot);
 const footerIndicator = new FooterIndicator(uiRoot);
+
+// --- Message System ---
+const messageManager = new MessageManager(uiRoot, {
+  onMessageRead: (messageId) => {
+    console.log(`Message read: ${messageId}`);
+  },
+  onMessageClick: (message) => {
+    console.log(`Message clicked: ${message.title}`);
+  }
+});
 const toolbar = new Toolbar(uiRoot, (type: BuildingType, density?: ZoneDensity) => {
   if (buildMode.getSelectedType() === type && !density) {
     buildMode.deselect();
@@ -217,6 +232,10 @@ GameClient.create(SERVER_URL, {
 
   onResourcesUpdate: (resources, tick, clock) => {
     if (!cityState) return;
+
+    // Store previous state for change detection
+    const previousState = { ...cityState.resources };
+
     cityState.resources = resources;
     cityState.tick = tick;
     cityState.clock = clock;
@@ -225,6 +244,9 @@ GameClient.create(SERVER_URL, {
     if (maslowPanel.isVisible() && resources.populationSummary) {
       maslowPanel.update(resources.populationSummary);
     }
+
+    // Generate messages based on resource changes
+    generateResourceMessages(previousState, resources, cityState);
   },
 
   onZoneGrowth: (payload) => {
@@ -234,6 +256,22 @@ GameClient.create(SERVER_URL, {
       if (building) {
         building.developmentLevel = update.developmentLevel;
         building.developedAt = update.developedAt;
+
+        // Generate development message
+        const message = {
+          id: `dev_${Date.now()}_${update.id}`,
+          type: MessageType.ZONE_DEVELOPED,
+          category: MessageCategory.DEVELOPMENT,
+          priority: MessagePriority.MEDIUM,
+          title: 'Zone Development',
+          content: `A ${building.type} zone has developed to level ${update.developmentLevel}!`,
+          cityId: cityState.id,
+          playerId,
+          createdAt: Date.now(),
+          isRead: false,
+          displayType: DisplayType.NOTIFICATION,
+        };
+        messageManager.addMessage(message);
       }
     }
     cityRenderer.syncState(cityState);
@@ -500,3 +538,97 @@ function gameLoop(): void {
 }
 
 gameLoop();
+
+// --- Message Generation Functions ---
+function generateResourceMessages(previousState: any, currentResources: any, city: CityState): void {
+  // Check for low funds
+  if (currentResources.money < 1000 && previousState.money >= 1000) {
+    const message = {
+      id: `low_funds_${Date.now()}`,
+      type: MessageType.LOW_FUNDS,
+      category: MessageCategory.ECONOMY,
+      priority: MessagePriority.HIGH,
+      title: 'Low Funds Alert',
+      content: `Your city treasury is critically low at $${Math.floor(currentResources.money)}! Consider adjusting tax rates or cutting expenses.`,
+      cityId: city.id,
+      playerId,
+      createdAt: Date.now(),
+      isRead: false,
+      displayType: DisplayType.NOTIFICATION,
+    };
+    messageManager.addMessage(message);
+  }
+
+  // Check for budget surplus
+  if (currentResources.money > 10000 && previousState.money <= 10000) {
+    const message = {
+      id: `surplus_${Date.now()}`,
+      type: MessageType.BUDGET_SURPLUS,
+      category: MessageCategory.ECONOMY,
+      priority: MessagePriority.MEDIUM,
+      title: 'Budget Surplus!',
+      content: `Excellent! Your city has a budget surplus of $${Math.floor(currentResources.money)}.`,
+      cityId: city.id,
+      playerId,
+      createdAt: Date.now(),
+      isRead: false,
+      displayType: DisplayType.BANNER,
+    };
+    messageManager.addMessage(message);
+  }
+
+  // Check population milestones
+  const popMilestones = [100, 500, 1000, 2500, 5000];
+  for (const milestone of popMilestones) {
+    if (currentResources.population >= milestone && previousState.population < milestone) {
+      const message = {
+        id: `pop_${milestone}_${Date.now()}`,
+        type: MessageType.POPULATION_MILESTONE,
+        category: MessageCategory.POPULATION,
+        priority: MessagePriority.MEDIUM,
+        title: 'Population Milestone!',
+        content: `Congratulations! ${city.name} has reached ${milestone} citizens!`,
+        cityId: city.id,
+        playerId,
+        createdAt: Date.now(),
+        isRead: false,
+        displayType: DisplayType.BANNER,
+      };
+      messageManager.addMessage(message);
+      break;
+    }
+  }
+
+  // Check happiness levels
+  if (currentResources.happiness < 30 && previousState.happiness >= 30) {
+    const message = {
+      id: `happiness_low_${Date.now()}`,
+      type: MessageType.HAPPINESS_LOW,
+      category: MessageCategory.HAPPINESS,
+      priority: MessagePriority.HIGH,
+      title: 'Low Happiness Warning',
+      content: `Citizen happiness is at ${Math.floor(currentResources.happiness)}%. Consider improving services and infrastructure.`,
+      cityId: city.id,
+      playerId,
+      createdAt: Date.now(),
+      isRead: false,
+      displayType: DisplayType.NOTIFICATION,
+    };
+    messageManager.addMessage(message);
+  } else if (currentResources.happiness > 80 && previousState.happiness <= 80) {
+    const message = {
+      id: `happiness_high_${Date.now()}`,
+      type: MessageType.HAPPINESS_HIGH,
+      category: MessageCategory.HAPPINESS,
+      priority: MessagePriority.MEDIUM,
+      title: 'Happy Citizens!',
+      content: `Your citizens are thriving with ${Math.floor(currentResources.happiness)}% happiness in ${city.name}!`,
+      cityId: city.id,
+      playerId,
+      createdAt: Date.now(),
+      isRead: false,
+      displayType: DisplayType.BANNER,
+    };
+    messageManager.addMessage(message);
+  }
+}

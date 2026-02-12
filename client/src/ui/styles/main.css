@@ -1344,3 +1344,314 @@ body {
   font-weight: bold;
   font-variant-numeric: tabular-nums;
 }
+
+/* ==============================
+   Message System Styles
+   ============================== */
+
+/* Message Banner - Top dropdown */
+.message-banner {
+  position: absolute;
+  top: -200px;
+  left: 0;
+  right: 0;
+  height: 200px;
+  background: linear-gradient(135deg, rgba(26, 26, 46, 0.95) 0%, rgba(40, 40, 70, 0.95) 100%);
+  backdrop-filter: blur(10px);
+  border-bottom: 2px solid rgba(76, 175, 80, 0.3);
+  z-index: 200;
+  transition: top 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.message-banner.active {
+  top: 0;
+}
+
+.message-banner-content {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  padding: 0 32px;
+  gap: 20px;
+  position: relative;
+}
+
+.message-banner-icon {
+  font-size: 48px;
+  flex-shrink: 0;
+  opacity: 0.9;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
+}
+
+.message-banner-text {
+  flex: 1;
+  color: white;
+}
+
+.message-banner-title {
+  font-size: 24px;
+  font-weight: bold;
+  margin-bottom: 8px;
+  line-height: 1.2;
+}
+
+.message-banner-message {
+  font-size: 16px;
+  opacity: 0.9;
+  line-height: 1.4;
+  max-width: 800px;
+}
+
+.message-banner-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: white;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.message-banner-close:hover {
+  background: rgba(255, 255, 255, 0.2);
+  transform: scale(1.1);
+}
+
+/* Priority-based banner colors */
+.message-banner.priority-critical {
+  border-bottom-color: rgba(244, 67, 54, 0.5);
+  background: linear-gradient(135deg, rgba(67, 26, 26, 0.95) 0%, rgba(100, 40, 40, 0.95) 100%);
+}
+
+.message-banner.priority-high {
+  border-bottom-color: rgba(255, 152, 0, 0.5);
+  background: linear-gradient(135deg, rgba(46, 26, 26, 0.95) 0%, rgba(80, 50, 20, 0.95) 100%);
+}
+
+.message-banner.priority-medium {
+  border-bottom-color: rgba(76, 175, 80, 0.5);
+}
+
+.message-banner.priority-low {
+  border-bottom-color: rgba(33, 150, 243, 0.5);
+}
+
+/* Category-based icons */
+.message-banner.category-economy .message-banner-icon::before {
+  content: '💰';
+}
+
+.message-banner.category-population .message-banner-icon::before {
+  content: '👥';
+}
+
+.message-banner.category-happiness .message-banner-icon::before {
+  content: '😊';
+}
+
+.message-banner.category-development .message-banner-icon::before {
+  content: '🏗️';
+}
+
+.message-banner.category-achievement .message-banner-icon::before {
+  content: '🏆';
+}
+
+.message-banner.category-system .message-banner-icon::before {
+  content: '⚙️';
+}
+
+/* Message Notifications - Side panel */
+.message-notifications {
+  position: fixed;
+  top: 80px;
+  right: 20px;
+  width: 350px;
+  max-width: 90vw;
+  z-index: 150;
+  pointer-events: none;
+}
+
+.message-notification {
+  background: rgba(26, 26, 46, 0.95);
+  backdrop-filter: blur(8px);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  pointer-events: auto;
+  cursor: pointer;
+  transform: translateX(400px);
+  opacity: 0;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.message-notification.enter {
+  transform: translateX(0);
+  opacity: 1;
+}
+
+.message-notification.exit {
+  transform: translateX(400px);
+  opacity: 0;
+  margin-bottom: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  max-height: 0;
+}
+
+.message-notification:hover {
+  transform: translateX(-5px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+  border-color: rgba(76, 175, 80, 0.3);
+}
+
+.notification-content {
+  flex: 1;
+  color: white;
+}
+
+.notification-title {
+  font-size: 14px;
+  font-weight: bold;
+  margin-bottom: 4px;
+  line-height: 1.3;
+}
+
+.notification-message {
+  font-size: 12px;
+  opacity: 0.8;
+  line-height: 1.4;
+  max-height: 40px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.notification-icon {
+  font-size: 20px;
+  margin-right: 12px;
+  flex-shrink: 0;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.2));
+}
+
+.notification-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border: none;
+  color: rgba(255, 255, 255, 0.6);
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: all 0.2s ease;
+  pointer-events: auto;
+}
+
+.message-notification:hover .notification-close {
+  opacity: 1;
+}
+
+.notification-close:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+}
+
+/* Priority-based notification colors */
+.message-notification.priority-critical {
+  border-color: rgba(244, 67, 54, 0.5);
+  background: rgba(67, 26, 26, 0.95);
+}
+
+.message-notification.priority-high {
+  border-color: rgba(255, 152, 0, 0.5);
+  background: rgba(46, 36, 26, 0.95);
+}
+
+.message-notification.priority-medium {
+  border-color: rgba(76, 175, 80, 0.3);
+}
+
+.message-notification.priority-low {
+  border-color: rgba(33, 150, 243, 0.3);
+}
+
+/* Animation for new notifications */
+@keyframes notificationPulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.02); }
+  100% { transform: scale(1); }
+}
+
+.message-notification.priority-critical.enter {
+  animation: notificationPulse 0.6s ease-in-out;
+}
+
+/* Unread indicator */
+.message-notification:not(.read)::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 4px;
+  height: 100%;
+  background: #4caf50;
+  border-radius: 12px 0 0 12px;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .message-notifications {
+    top: 60px;
+    right: 10px;
+    width: calc(100vw - 20px);
+    max-width: 300px;
+  }
+  
+  .message-notification {
+    padding: 12px;
+  }
+  
+  .notification-title {
+    font-size: 13px;
+  }
+  
+  .notification-message {
+    font-size: 11px;
+  }
+  
+  .message-banner-content {
+    padding: 0 20px;
+  }
+  
+  .message-banner-title {
+    font-size: 20px;
+  }
+  
+  .message-banner-message {
+    font-size: 14px;
+  }
+}

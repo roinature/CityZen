@@ -25,6 +25,12 @@ export {
 } from './types/person.js';
 export type { MaslowState, Person } from './types/person.js';
 
+// Messages
+export {
+  MessageType, MessageCategory, MessagePriority, DisplayType,
+} from './types/messages.js';
+export type { GameMessage, MessageTemplate, MessageCondition, MessageContext, MessageState } from './types/messages.js';
+
 // Events
 export {
   C2S, S2C,

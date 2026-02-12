@@ -24,6 +24,7 @@ import {
 } from '@cityzen/shared';
 import { saveCityState } from '../persistence/jsonStore.js';
 import { broadcastToChannel } from '../realtime/supabaseBroadcast.js';
+import type { MessageManager } from '../services/MessageManager.js';
 
 function createInitialClock(): GameClock {
   return {
@@ -42,6 +43,7 @@ export class GameRoom {
   private debouncedSaveTimer: ReturnType<typeof setTimeout> | null = null;
   unlimitedMoney = false;
   ownerName = 'Unknown';
+  private messageManager: MessageManager | null = null;
 
   constructor(id: string, name: string, ownerId: string, ownerName: string, existingState?: CityState) {
     this.id = id;
@@ -102,6 +104,11 @@ export class GameRoom {
       this.state.resources.zonePopulations = zonePopulations;
     }
 
+    // Generate messages based on state changes
+    if (this.messageManager) {
+      this.messageManager.updateCityState(this.id, this.state);
+    }
+
     // Broadcast resources with clock
     this.broadcast(S2C.RESOURCES_UPDATE, {
       resources: this.state.resources,
@@ -152,6 +159,20 @@ export class GameRoom {
 
     // Notify about new player
     this.broadcast(S2C.PLAYER_JOINED, { player });
+
+    // Generate first city message for new players
+    if (this.messageManager && this.players.size === 1) {
+      this.messageManager.createCustomMessage(
+        'first_city',
+        'achievement',
+        'medium',
+        'Welcome to CityZen!',
+        `Welcome ${playerName}! You've founded ${this.state.name}. Begin your urban adventure!`,
+        this.id,
+        playerId,
+        'banner'
+      );
+    }
 
     return player;
   }
@@ -307,6 +328,11 @@ export class GameRoom {
   private saveAfterMutation(): void {
     if (this.debouncedSaveTimer) clearTimeout(this.debouncedSaveTimer);
     this.debouncedSaveTimer = setTimeout(() => this.save(), 1000);
+  }
+
+  // Set message manager for this room
+  setMessageManager(messageManager: MessageManager): void {
+    this.messageManager = messageManager;
   }
 
   private isSaving = false;

@@ -3,13 +3,20 @@ import type { CityListItem } from '@cityzen/shared';
 import { GameRoom } from './GameRoom.js';
 import { loadCityState, listSavedCities } from '../persistence/jsonStore.js';
 import { loadPlayerProfile } from '../persistence/playerStore.js';
+import { MessageManager } from '../services/MessageManager.js';
 
 export class RoomManager {
   private rooms: Map<string, GameRoom> = new Map();
+  private messageManager: MessageManager;
+
+  constructor(prisma: any) {
+    this.messageManager = new MessageManager(prisma);
+  }
 
   async createRoom(cityName: string, ownerId: string, ownerName: string): Promise<GameRoom> {
     const id = uuid();
     const room = new GameRoom(id, cityName, ownerId, ownerName);
+    room.setMessageManager(this.messageManager);
     room.start();
     this.rooms.set(id, room);
     return room;
@@ -34,6 +41,7 @@ export class RoomManager {
     }
 
     const room = new GameRoom(cityId, state.name, state.ownerId || '', ownerName, state);
+    room.setMessageManager(this.messageManager);
     room.start();
     this.rooms.set(cityId, room);
     return room;
@@ -49,6 +57,11 @@ export class RoomManager {
       room.stop();
       this.rooms.delete(cityId);
     }
+  }
+
+  // Get message manager instance
+  getMessageManager(): MessageManager {
+    return this.messageManager;
   }
 
   listRooms(): CityListItem[] {
