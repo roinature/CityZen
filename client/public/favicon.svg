@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="64" fill="#1a1a2e"/>
+  <!-- City skyline -->
+  <rect x="60" y="220" width="70" height="212" fill="#4caf50"/>
+  <rect x="65" y="230" width="15" height="20" fill="#80cbc4" opacity="0.7"/>
+  <rect x="90" y="230" width="15" height="20" fill="#80cbc4" opacity="0.7"/>
+  <rect x="65" y="265" width="15" height="20" fill="#80cbc4" opacity="0.7"/>
+  <rect x="90" y="265" width="15" height="20" fill="#80cbc4" opacity="0.7"/>
+  <rect x="65" y="300" width="15" height="20" fill="#80cbc4" opacity="0.7"/>
+  <rect x="90" y="300" width="15" height="20" fill="#80cbc4" opacity="0.7"/>
+  <rect x="150" y="140" width="55" height="292" fill="#66bb6a"/>
+  <rect x="157" y="155" width="12" height="18" fill="#80cbc4" opacity="0.7"/>
+  <rect x="180" y="155" width="12" height="18" fill="#80cbc4" opacity="0.7"/>
+  <rect x="157" y="185" width="12" height="18" fill="#80cbc4" opacity="0.7"/>
+  <rect x="180" y="185" width="12" height="18" fill="#80cbc4" opacity="0.7"/>
+  <rect x="157" y="215" width="12" height="18" fill="#80cbc4" opacity="0.7"/>
+  <rect x="180" y="215" width="12" height="18" fill="#80cbc4" opacity="0.7"/>
+  <rect x="157" y="245" width="12" height="18" fill="#80cbc4" opacity="0.7"/>
+  <rect x="180" y="245" width="12" height="18" fill="#80cbc4" opacity="0.7"/>
+  <rect x="225" y="180" width="80" height="252" fill="#4caf50"/>
+  <rect x="235" y="195" width="15" height="20" fill="#80cbc4" opacity="0.7"/>
+  <rect x="260" y="195" width="15" height="20" fill="#80cbc4" opacity="0.7"/>
+  <rect x="285" y="195" width="15" height="20" fill="#80cbc4" opacity="0.7"/>
+  <rect x="235" y="230" width="15" height="20" fill="#80cbc4" opacity="0.7"/>
+  <rect x="260" y="230" width="15" height="20" fill="#80cbc4" opacity="0.7"/>
+  <rect x="285" y="230" width="15" height="20" fill="#80cbc4" opacity="0.7"/>
+  <rect x="235" y="265" width="15" height="20" fill="#80cbc4" opacity="0.7"/>
+  <rect x="260" y="265" width="15" height="20" fill="#80cbc4" opacity="0.7"/>
+  <rect x="285" y="265" width="15" height="20" fill="#80cbc4" opacity="0.7"/>
+  <rect x="325" y="100" width="50" height="332" fill="#43a047"/>
+  <rect x="332" y="115" width="10" height="15" fill="#80cbc4" opacity="0.7"/>
+  <rect x="352" y="115" width="10" height="15" fill="#80cbc4" opacity="0.7"/>
+  <rect x="332" y="145" width="10" height="15" fill="#80cbc4" opacity="0.7"/>
+  <rect x="352" y="145" width="10" height="15" fill="#80cbc4" opacity="0.7"/>
+  <rect x="332" y="175" width="10" height="15" fill="#80cbc4" opacity="0.7"/>
+  <rect x="352" y="175" width="10" height="15" fill="#80cbc4" opacity="0.7"/>
+  <rect x="332" y="205" width="10" height="15" fill="#80cbc4" opacity="0.7"/>
+  <rect x="352" y="205" width="10" height="15" fill="#80cbc4" opacity="0.7"/>
+  <rect x="395" y="250" width="65" height="182" fill="#66bb6a"/>
+  <rect x="402" y="262" width="12" height="18" fill="#80cbc4" opacity="0.7"/>
+  <rect x="425" y="262" width="12" height="18" fill="#80cbc4" opacity="0.7"/>
+  <rect x="402" y="295" width="12" height="18" fill="#80cbc4" opacity="0.7"/>
+  <rect x="425" y="295" width="12" height="18" fill="#80cbc4" opacity="0.7"/>
+  <!-- Ground -->
+  <rect x="30" y="432" width="452" height="40" rx="8" fill="#2e7d32"/>
+</svg>

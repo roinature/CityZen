@@ -15,6 +15,7 @@ import {
  * Renders arrow indicators at edge road cells.
  *  - Green arrows for edges connected to a neighbor city with matching roads.
  *  - Orange arrows for unconnected edge roads (no neighbor or no matching road).
+ *  - Cyan inward arrows for neighbor city roads the current city could connect to.
  */
 export class EdgeRoadIndicator {
     private scene: THREE.Scene;
@@ -22,6 +23,7 @@ export class EdgeRoadIndicator {
 
     private connectedMaterial: THREE.MeshStandardMaterial;
     private unconnectedMaterial: THREE.MeshStandardMaterial;
+    private neighborMaterial: THREE.MeshStandardMaterial;
 
     constructor(scene: THREE.Scene) {
         this.scene = scene;
@@ -45,6 +47,15 @@ export class EdgeRoadIndicator {
             opacity: 0.75,
             side: THREE.DoubleSide,
         });
+
+        this.neighborMaterial = new THREE.MeshStandardMaterial({
+            color: 0x00bcd4,
+            emissive: 0x00bcd4,
+            emissiveIntensity: 0.7,
+            transparent: true,
+            opacity: 0.7,
+            side: THREE.DoubleSide,
+        });
     }
 
     /**
@@ -59,13 +70,12 @@ export class EdgeRoadIndicator {
         this.clearMeshes();
 
         const connections = calculateEdgeConnections(buildings);
-        if (connections.length === 0) return;
 
         // Find current city in world state to determine world position
         const currentCity = worldState?.cities.find(c => c.cityId === cityId) ?? null;
 
+        // Own edge roads: green (connected) / orange (unconnected)
         for (const conn of connections) {
-            // Check if a neighbor exists with matching positions on the opposite edge
             const connected = this.isEdgeConnected(
                 conn.direction,
                 conn.positions,
@@ -79,6 +89,9 @@ export class EdgeRoadIndicator {
                 this.addArrow(conn.direction, pos, material);
             }
         }
+
+        // Neighbor roads: cyan inward arrows where neighbors have roads we don't
+        this.addNeighborIndicators(connections, currentCity, worldState);
     }
 
     /**
@@ -92,6 +105,7 @@ export class EdgeRoadIndicator {
         this.clearMeshes();
         this.connectedMaterial.dispose();
         this.unconnectedMaterial.dispose();
+        this.neighborMaterial.dispose();
         this.scene.remove(this.group);
     }
 
@@ -128,6 +142,84 @@ export class EdgeRoadIndicator {
                 child.geometry.dispose();
             }
         }
+    }
+
+    /**
+     * Show inward-pointing cyan arrows where neighbor cities have edge roads
+     * that the current city does not yet have a road at.
+     */
+    private addNeighborIndicators(
+        ownConnections: { direction: EdgeDirection; positions: number[] }[],
+        currentCity: WorldCityEntry | null,
+        worldState: WorldState | null,
+    ): void {
+        if (!currentCity || !worldState) return;
+
+        const directions: EdgeDirection[] = ['north', 'south', 'east', 'west'];
+
+        for (const dir of directions) {
+            const neighbor = findAdjacentCity(currentCity.position, dir, worldState.cities);
+            if (!neighbor) continue;
+
+            const oppositeDir = getOppositeDirection(dir);
+            const neighborEdge = neighbor.edgeConnections?.find(e => e.direction === oppositeDir);
+            if (!neighborEdge) continue;
+
+            // Positions where the current city already has roads on this edge
+            const ownPositions = ownConnections.find(c => c.direction === dir)?.positions ?? [];
+
+            for (const pos of neighborEdge.positions) {
+                // Only show if the current city does NOT have a road here
+                if (!ownPositions.includes(pos)) {
+                    this.addInwardArrow(dir, pos, this.neighborMaterial);
+                }
+            }
+        }
+    }
+
+    /**
+     * Place a small arrow on the ground at an edge cell, pointing inward (toward city center).
+     */
+    private addInwardArrow(
+        direction: EdgeDirection,
+        positionAlongEdge: number,
+        material: THREE.MeshStandardMaterial,
+    ): void {
+        const gridMax = DEFAULT_GRID_SIZE - 1;
+        let worldX: number;
+        let worldZ: number;
+        let rotY: number;
+
+        // Same positions as addArrow, but rotation is flipped by PI (pointing inward)
+        switch (direction) {
+            case 'north':
+                worldX = positionAlongEdge * CELL_SIZE + CELL_SIZE / 2;
+                worldZ = 0 * CELL_SIZE + CELL_SIZE / 2;
+                rotY = 0; // flipped from Math.PI
+                break;
+            case 'south':
+                worldX = positionAlongEdge * CELL_SIZE + CELL_SIZE / 2;
+                worldZ = gridMax * CELL_SIZE + CELL_SIZE / 2;
+                rotY = Math.PI; // flipped from 0
+                break;
+            case 'west':
+                worldX = 0 * CELL_SIZE + CELL_SIZE / 2;
+                worldZ = positionAlongEdge * CELL_SIZE + CELL_SIZE / 2;
+                rotY = -Math.PI / 2; // flipped from Math.PI / 2
+                break;
+            case 'east':
+                worldX = gridMax * CELL_SIZE + CELL_SIZE / 2;
+                worldZ = positionAlongEdge * CELL_SIZE + CELL_SIZE / 2;
+                rotY = Math.PI / 2; // flipped from -Math.PI / 2
+                break;
+            default:
+                return;
+        }
+
+        const arrow = this.createArrowMesh(material);
+        arrow.position.set(worldX, 0.05, worldZ);
+        arrow.rotation.y = rotY;
+        this.group.add(arrow);
     }
 
     /**
