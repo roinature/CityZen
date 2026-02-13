@@ -175,6 +175,11 @@ export class BuildingFactory {
     [BuildingType.TRANS_TRAIN_STATION]: 'train_station_facade.png',
     [BuildingType.TRANS_AIRPORT]: 'airport_facade.png',
     [BuildingType.TRANS_HARBOR]: 'harbor_facade.png',
+    [BuildingType.HEALTH_CEMETERY]: 'cemetery_facade.png',
+    [BuildingType.ART_GALLERY]: 'art_gallery_facade.png',
+    [BuildingType.ART_THEATER]: 'theater_facade.png',
+    [BuildingType.ART_CONCERT_HALL]: 'concert_hall_facade.png',
+    [BuildingType.ART_SCULPTURE_PARK]: 'sculpture_park_facade.png',
   };
 
   public static readonly INFRASTRUCTURE_ROOFS: Partial<Record<BuildingType, string>> = {
@@ -186,6 +191,9 @@ export class BuildingFactory {
     [BuildingType.HEALTH_HOSPITAL]: 'hospital_roof.png',
     [BuildingType.HEALTH_RESEARCH_CENTER]: 'research_center_roof.png',
     [BuildingType.FIRE_STATION]: 'fire_station_roof.png',
+    [BuildingType.FIRE_HQ]: 'fire_hq_roof.png',
+    [BuildingType.FIRE_HELICOPTER]: 'fire_helicopter_roof.png',
+    [BuildingType.FIRE_TRAINING]: 'fire_training_roof.png',
     [BuildingType.WATER_TOWER]: 'water_tower_roof.png',
     [BuildingType.WATER_PUMP_STATION]: 'water_pump_roof.png',
     [BuildingType.WATER_TREATMENT]: 'water_treatment_roof.png',
@@ -206,6 +214,14 @@ export class BuildingFactory {
     [BuildingType.TRANS_TRAIN_STATION]: 'train_station_roof.png',
     [BuildingType.TRANS_AIRPORT]: 'airport_roof.png',
     [BuildingType.TRANS_HARBOR]: 'harbor_roof.png',
+    [BuildingType.POLICE_HQ]: 'police_hq_roof.png',
+    [BuildingType.POLICE_JAIL]: 'police_jail_roof.png',
+    [BuildingType.POLICE_ACADEMY]: 'police_academy_roof.png',
+    [BuildingType.HEALTH_CEMETERY]: 'cemetery_roof.png',
+    [BuildingType.ART_GALLERY]: 'art_gallery_roof.png',
+    [BuildingType.ART_THEATER]: 'theater_roof.png',
+    [BuildingType.ART_CONCERT_HALL]: 'concert_hall_roof.png',
+    [BuildingType.ART_SCULPTURE_PARK]: 'sculpture_park_roof.png',
   };
 
   /**
