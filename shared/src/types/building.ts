@@ -171,6 +171,8 @@ export enum ZoneDensity {
 }
 export type RoadType = (typeof ROAD_TYPES)[number];
 
+export type RoadOrientation = 'EW' | 'NS';
+
 export function isZone(type: BuildingType): type is ZoneType {
   return (ZONE_TYPES as readonly BuildingType[]).includes(type);
 }
@@ -213,4 +215,5 @@ export interface PlacedBuilding {
   developmentLevel?: number;
   developedAt?: number;
   density?: ZoneDensity;
+  orientation?: RoadOrientation;
 }

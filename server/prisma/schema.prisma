@@ -91,6 +91,7 @@ model Building {
   developmentLevel Int?    // 0-3 for zones, null for non-zones
   developedAt      Int?    // Game tick of last development
   density          String? // Zone density: 'low' | 'medium' | 'high'
+  orientation      String? // Road orientation: 'EW' | 'NS'
 
   city City @relation(fields: [cityId], references: [id], onDelete: Cascade)
 

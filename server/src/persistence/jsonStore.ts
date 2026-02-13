@@ -1,6 +1,6 @@
 import prisma from './prismaClient.js';
-import type { CityState, PlacedBuilding } from '@cityzen/shared';
-import { createEmptyGrid, BUILDING_DEFS, MaslowNeed } from '@cityzen/shared';
+import type { CityState, PlacedBuilding, RoadOrientation } from '@cityzen/shared';
+import { createEmptyGrid, BUILDING_DEFS, MaslowNeed, getEffectiveSize, BuildingType } from '@cityzen/shared';
 
 export async function saveCityState(cityId: string, state: CityState): Promise<void> {
   // Use interactive transaction with increased timeout (15s) to handle large city saves
@@ -74,6 +74,7 @@ export async function saveCityState(cityId: string, state: CityState): Promise<v
           developmentLevel: b.developmentLevel ?? null,
           developedAt: b.developedAt ?? null,
           density: b.density ?? null,
+          orientation: b.orientation ?? null,
         })),
       });
     }
@@ -101,17 +102,16 @@ export async function loadCityState(cityId: string): Promise<CityState | null> {
     ...(b.developmentLevel != null ? { developmentLevel: b.developmentLevel } : {}),
     ...(b.developedAt != null ? { developedAt: b.developedAt } : {}),
     ...(b.density ? { density: b.density as PlacedBuilding['density'] } : {}),
+    ...(b.orientation ? { orientation: b.orientation as RoadOrientation } : {}),
   }));
 
   // Reconstruct grid from buildings (no empty cells stored)
   const grid = createEmptyGrid();
   for (const b of buildings) {
-    const def = BUILDING_DEFS[b.type as keyof typeof BUILDING_DEFS];
-    if (def) {
-      for (let dx = 0; dx < def.size.w; dx++) {
-        for (let dz = 0; dz < def.size.d; dz++) {
-          grid[b.position.x + dx][b.position.z + dz].buildingId = b.id;
-        }
+    const { w, d } = getEffectiveSize(b.type as BuildingType, b.orientation);
+    for (let dx = 0; dx < w; dx++) {
+      for (let dz = 0; dz < d; dz++) {
+        grid[b.position.x + dx][b.position.z + dz].buildingId = b.id;
       }
     }
   }

@@ -6,7 +6,7 @@ import {
   type WorldState,
   type EdgeDirection,
   type PlacedBuilding,
-  BUILDING_DEFS,
+  getEffectiveSize,
   findAdjacentCity,
   getOppositeDirection,
   MessageType,
@@ -97,6 +97,17 @@ const cityRenderer = new CityRenderer(sceneManager.scene);
 const carManager = new CarManager(sceneManager.scene);
 const buildMode = new BuildMode(sceneManager.scene, sceneManager.camera);
 const soundManager = new SoundManager();
+
+// --- Notification Cooldowns ---
+// Prevents the same notification type from firing more than once per cooldown period
+const notificationCooldowns = new Map<string, number>();
+function canNotify(key: string, cooldownMs: number): boolean {
+  const now = Date.now();
+  const last = notificationCooldowns.get(key) ?? 0;
+  if (now - last < cooldownMs) return false;
+  notificationCooldowns.set(key, now);
+  return true;
+}
 
 // Resume AudioContext on first user interaction (browser autoplay policy)
 const resumeAudio = () => {
@@ -196,6 +207,11 @@ GameClient.create(SERVER_URL, {
   onWorldState: (world) => {
     worldState = world;
     worldMap.updateWorld(world);
+    // Refresh edge road indicators so connection status stays current
+    // (e.g. neighbor placed/demolished a road, or worldState arrived after cityState)
+    if (cityState) {
+      edgeRoadIndicator.update(cityState.buildings, worldState, cityState.id);
+    }
   },
 
   onCityState: (city, players) => {
@@ -217,9 +233,9 @@ GameClient.create(SERVER_URL, {
     if (!cityState) return;
     cityState.buildings.push(payload.building);
 
-    const def = BUILDING_DEFS[payload.building.type];
-    for (let dx = 0; dx < def.size.w; dx++) {
-      for (let dz = 0; dz < def.size.d; dz++) {
+    const { w, d } = getEffectiveSize(payload.building.type, payload.building.orientation);
+    for (let dx = 0; dx < w; dx++) {
+      for (let dz = 0; dz < d; dz++) {
         cityState.grid[payload.building.position.x + dx][payload.building.position.z + dz].buildingId = payload.building.id;
       }
     }
@@ -235,9 +251,9 @@ GameClient.create(SERVER_URL, {
     if (!cityState) return;
     const building = cityState.buildings.find((b: PlacedBuilding) => b.id === payload.buildingId);
     if (building) {
-      const def = BUILDING_DEFS[building.type];
-      for (let dx = 0; dx < def.size.w; dx++) {
-        for (let dz = 0; dz < def.size.d; dz++) {
+      const { w, d } = getEffectiveSize(building.type, building.orientation);
+      for (let dx = 0; dx < w; dx++) {
+        for (let dz = 0; dz < d; dz++) {
           cityState.grid[building.position.x + dx][building.position.z + dz].buildingId = null;
         }
       }
@@ -271,30 +287,41 @@ GameClient.create(SERVER_URL, {
 
   onZoneGrowth: (payload) => {
     if (!cityState) return;
+
+    // Collect zone type breakdown while updating state
+    const typeCounts = new Map<string, number>();
     for (const update of payload.buildings) {
       const building = cityState.buildings.find((b: PlacedBuilding) => b.id === update.id);
       if (building) {
         building.developmentLevel = update.developmentLevel;
         building.developedAt = update.developedAt;
-
-        // Generate development message
-        const message = {
-          id: `dev_${Date.now()}_${update.id}`,
-          type: MessageType.ZONE_DEVELOPED,
-          category: MessageCategory.DEVELOPMENT,
-          priority: MessagePriority.MEDIUM,
-          title: 'Zone Development',
-          content: `A ${building.type} zone has developed to level ${update.developmentLevel}!`,
-          cityId: cityState.id,
-          playerId,
-          createdAt: Date.now(),
-          isRead: false,
-          displayType: DisplayType.NOTIFICATION,
-        };
-        messageManager.addMessage(message);
-        soundManager.triggerNotification();
+        const label = building.type.replace(/_/g, ' ').replace(/^zone /i, '');
+        typeCounts.set(label, (typeCounts.get(label) || 0) + 1);
       }
     }
+
+    // Throttled aggregated notification (at most once per 30 s)
+    if (payload.buildings.length > 0 && canNotify('zone_development', 30_000)) {
+      const parts = Array.from(typeCounts.entries()).map(
+        ([type, n]) => `${n} ${type.charAt(0).toUpperCase() + type.slice(1)}`
+      );
+      const message = {
+        id: `dev_${Date.now()}`,
+        type: MessageType.ZONE_DEVELOPED,
+        category: MessageCategory.DEVELOPMENT,
+        priority: MessagePriority.LOW,
+        title: 'Zone Development',
+        content: `${parts.join(', ')} zone${payload.buildings.length === 1 ? '' : 's'} developed!`,
+        cityId: cityState.id,
+        playerId,
+        createdAt: Date.now(),
+        isRead: false,
+        displayType: DisplayType.NOTIFICATION,
+      };
+      messageManager.addMessage(message);
+      soundManager.triggerNotification();
+    }
+
     cityRenderer.syncState(cityState);
     soundManager.triggerConstruction();
   },
@@ -356,9 +383,9 @@ resourceBar.onGameSpeedChange = (speed) => {
   gameClient.setGameSpeed(speed, playerId);
 };
 
-buildMode.onPlace = (pos, type, density) => {
-  console.log('[Client] onPlace called', { pos, type, density });
-  gameClient.placeBuilding(pos, type, playerId, density);
+buildMode.onPlace = (pos, type, density, orientation) => {
+  console.log('[Client] onPlace called', { pos, type, density, orientation });
+  gameClient.placeBuilding(pos, type, playerId, density, orientation);
 };
 
 buildMode.onDemolish = (pos) => {
@@ -594,8 +621,8 @@ gameLoop();
 
 // --- Message Generation Functions ---
 function generateResourceMessages(previousState: any, currentResources: any, city: CityState): void {
-  // Check for low funds
-  if (currentResources.money < 1000 && previousState.money >= 1000) {
+  // Check for low funds (cooldown: 60 s to avoid oscillation spam)
+  if (currentResources.money < 1000 && previousState.money >= 1000 && canNotify('low_funds', 60_000)) {
     const message = {
       id: `low_funds_${Date.now()}`,
       type: MessageType.LOW_FUNDS,
@@ -613,8 +640,8 @@ function generateResourceMessages(previousState: any, currentResources: any, cit
     soundManager.triggerNotification();
   }
 
-  // Check for budget surplus
-  if (currentResources.money > 10000 && previousState.money <= 10000) {
+  // Check for budget surplus (cooldown: 60 s)
+  if (currentResources.money > 10000 && previousState.money <= 10000 && canNotify('budget_surplus', 60_000)) {
     const message = {
       id: `surplus_${Date.now()}`,
       type: MessageType.BUDGET_SURPLUS,
@@ -632,7 +659,7 @@ function generateResourceMessages(previousState: any, currentResources: any, cit
     soundManager.triggerNotification();
   }
 
-  // Check population milestones
+  // Check population milestones (no cooldown — these are one-time crossings)
   const popMilestones = [100, 500, 1000, 2500, 5000];
   for (const milestone of popMilestones) {
     if (currentResources.population >= milestone && previousState.population < milestone) {
@@ -655,8 +682,8 @@ function generateResourceMessages(previousState: any, currentResources: any, cit
     }
   }
 
-  // Check happiness levels
-  if (currentResources.happiness < 30 && previousState.happiness >= 30) {
+  // Check happiness levels (cooldown: 60 s to avoid oscillation spam)
+  if (currentResources.happiness < 30 && previousState.happiness >= 30 && canNotify('happiness_low', 60_000)) {
     const message = {
       id: `happiness_low_${Date.now()}`,
       type: MessageType.HAPPINESS_LOW,
@@ -672,7 +699,7 @@ function generateResourceMessages(previousState: any, currentResources: any, cit
     };
     messageManager.addMessage(message);
     soundManager.triggerNotification();
-  } else if (currentResources.happiness > 80 && previousState.happiness <= 80) {
+  } else if (currentResources.happiness > 80 && previousState.happiness <= 80 && canNotify('happiness_high', 60_000)) {
     const message = {
       id: `happiness_high_${Date.now()}`,
       type: MessageType.HAPPINESS_HIGH,

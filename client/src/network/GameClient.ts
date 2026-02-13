@@ -14,6 +14,7 @@ import {
   type Position,
   type BuildingType,
   type ZoneDensity,
+  type RoadOrientation,
   type ResourceState,
   type GameClock,
   type Player,
@@ -181,8 +182,8 @@ export class GameClient {
     }
   }
 
-  async placeBuilding(position: Position, type: BuildingType, playerId?: string, density?: ZoneDensity): Promise<void> {
-    const result = await this.post('/api/building/place', { position, type, playerId, density });
+  async placeBuilding(position: Position, type: BuildingType, playerId?: string, density?: ZoneDensity, orientation?: RoadOrientation): Promise<void> {
+    const result = await this.post('/api/building/place', { position, type, playerId, density, orientation });
     if (!result.success) {
       this.callbacks.onError({ message: result.error || 'Placement failed', code: 'PLACEMENT_FAILED' });
     }

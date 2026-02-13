@@ -10,7 +10,7 @@ export {
   INFRA_GOV_TYPES, INFRA_TOUR_TYPES,
   INFRA_TRANS_TYPES,
 } from './types/building.js';
-export type { BuildingDef, BuildingEffects, MaslowContribution, PlacedBuilding, ZoneType, RoadType, InfraCategory } from './types/building.js';
+export type { BuildingDef, BuildingEffects, MaslowContribution, PlacedBuilding, ZoneType, RoadType, RoadOrientation, InfraCategory } from './types/building.js';
 export type { ResourceState, DemandState, PopulationSummary, ZonePopulationEntry } from './types/resources.js';
 export type { CityState } from './types/city.js';
 export type { Player, PlayerProfile } from './types/player.js';
@@ -74,7 +74,7 @@ export { BUILDING_DEFS, ZONE_LEVELS, ZONE_DENSITY_COSTS, getZoneLevelDef } from 
 export type { ZoneLevelDef } from './constants/buildings.js';
 
 // Logic
-export { canPlaceBuilding, createEmptyGrid } from './logic/placement.js';
+export { canPlaceBuilding, createEmptyGrid, getEffectiveSize } from './logic/placement.js';
 export { calculateTaxRevenue, calculateMaintenance, calculateNetIncome, calculatePopulationGrowth, calculateHappiness, calculateHousingCapacity, calculateBudgetPenalty, clamp, calculateCityScore } from './logic/resources.js';
 export { simulateTick, simulateCityTick, advanceClock } from './logic/simulation.js';
 export { calculateDemand, processZoneGrowth } from './logic/demand.js';

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { CityState, PlacedBuilding, ZoneType } from '@cityzen/shared';
-import { isRoad, isZone, BUILDING_DEFS, getZoneLevelDef } from '@cityzen/shared';
+import { isRoad, isZone, getZoneLevelDef, getEffectiveSize } from '@cityzen/shared';
 import { calculateCityScore } from '@cityzen/shared';
 import { BuildingFactory, type RoadNeighbors } from './BuildingFactory.js';
 
@@ -36,9 +36,9 @@ export class CityRenderer {
     const roadPositions = new Set<string>();
     for (const b of state.buildings) {
       if (isRoad(b.type)) {
-        const def = BUILDING_DEFS[b.type];
-        for (let dx = 0; dx < def.size.w; dx++) {
-          for (let dz = 0; dz < def.size.d; dz++) {
+        const { w, d } = getEffectiveSize(b.type, b.orientation);
+        for (let dx = 0; dx < w; dx++) {
+          for (let dz = 0; dz < d; dz++) {
             roadPositions.add(`${b.position.x + dx},${b.position.z + dz}`);
           }
         }
@@ -48,9 +48,9 @@ export class CityRenderer {
     // Build a lookup from position key to building for quick neighbor refresh (all cells)
     const buildingByPos = new Map<string, PlacedBuilding>();
     for (const b of state.buildings) {
-      const def = BUILDING_DEFS[b.type];
-      for (let dx = 0; dx < def.size.w; dx++) {
-        for (let dz = 0; dz < def.size.d; dz++) {
+      const { w, d } = getEffectiveSize(b.type, b.orientation);
+      for (let dx = 0; dx < w; dx++) {
+        for (let dz = 0; dz < d; dz++) {
           buildingByPos.set(`${b.position.x + dx},${b.position.z + dz}`, b);
         }
       }
@@ -162,9 +162,7 @@ export class CityRenderer {
 
   private getRoadNeighbors(building: PlacedBuilding, roadPositions: Set<string>): RoadNeighbors {
     const { x, z } = building.position;
-    const def = BUILDING_DEFS[building.type];
-    const w = def.size.w;
-    const d = def.size.d;
+    const { w, d } = getEffectiveSize(building.type, building.orientation);
 
     // Build a set of this building's own cells to exclude from neighbor checks
     const ownCells = new Set<string>();

@@ -191,7 +191,7 @@ export function createGameRoutes(roomManager: RoomManager, worldManager: WorldMa
 
   // POST /api/building/place
   router.post('/building/place', (req: Request, res: Response) => {
-    const { playerId, position, type, density } = req.body as PlaceBuildingPayload & { playerId: string };
+    const { playerId, position, type, density, orientation } = req.body as PlaceBuildingPayload & { playerId: string };
     if (!playerId) {
       res.json({ success: false, error: 'Missing playerId' });
       return;
@@ -203,7 +203,7 @@ export function createGameRoutes(roomManager: RoomManager, worldManager: WorldMa
       return;
     }
 
-    const result = room.placeBuilding(playerId, position, type, density);
+    const result = room.placeBuilding(playerId, position, type, density, orientation);
     if (!result.success) {
       res.json({ success: false, error: result.error, code: 'PLACEMENT_FAILED' });
     } else {

@@ -6,6 +6,7 @@ import {
   isRoad,
   CELL_SIZE,
   DEFAULT_GRID_SIZE,
+  getEffectiveSize,
 } from '@cityzen/shared';
 
 const CAR_COLORS = [0xe53935, 0x1e88e5, 0xfdd835, 0x43a047, 0xff8f00, 0x8e24aa];
@@ -396,12 +397,13 @@ export class CarManager {
       if (isRoad(b.type)) {
         const def = BUILDING_DEFS[b.type];
         const speed = def.speedMultiplier ?? 1.0;
+        const { w, d } = getEffectiveSize(b.type, b.orientation);
         this.roadBuildingData.set(b.id, {
           x: b.position.x, z: b.position.z,
-          w: def.size.w, d: def.size.d,
+          w, d,
         });
-        for (let dx = 0; dx < def.size.w; dx++) {
-          for (let dz = 0; dz < def.size.d; dz++) {
+        for (let dx = 0; dx < w; dx++) {
+          for (let dz = 0; dz < d; dz++) {
             const key = `${b.position.x + dx},${b.position.z + dz}`;
             this.roadSet.add(key);
             this.roadSpeedMap.set(key, speed);

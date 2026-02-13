@@ -1,4 +1,5 @@
-import { PlacedBuilding, isRoad, BUILDING_DEFS } from '../index.js';
+import { PlacedBuilding, isRoad } from '../index.js';
+import { getEffectiveSize } from './placement.js';
 import { DEFAULT_GRID_SIZE } from '../constants/grid.js';
 import type { EdgeConnection, EdgeDirection, WorldCityEntry, WorldPosition } from '../types/world.js';
 
@@ -19,10 +20,8 @@ export function calculateEdgeConnections(
     for (const building of buildings) {
         if (!isRoad(building.type)) continue;
 
-        const def = BUILDING_DEFS[building.type];
         const { x, z } = building.position;
-        const w = def.size.w;
-        const d = def.size.d;
+        const { w, d } = getEffectiveSize(building.type, building.orientation);
 
         // Check all cells of the road for edge placement
         for (let dx = 0; dx < w; dx++) {

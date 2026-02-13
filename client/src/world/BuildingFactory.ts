@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { type PlacedBuilding, BUILDING_DEFS, CELL_SIZE, BuildingType, isZone, isRoad, getZoneLevelDef, type ZoneType, ZoneDensity } from '@cityzen/shared';
+import { type PlacedBuilding, BUILDING_DEFS, CELL_SIZE, BuildingType, isZone, isRoad, getZoneLevelDef, getEffectiveSize, type ZoneType, ZoneDensity } from '@cityzen/shared';
 
 export interface RoadNeighbors {
   hasNorth: boolean;
@@ -83,11 +83,11 @@ export class BuildingFactory {
   }
 
   createBuilding(building: PlacedBuilding, neighbors?: RoadNeighbors, populationRatio?: number): THREE.Group {
-    const def = BUILDING_DEFS[building.type];
     const group = new THREE.Group();
 
-    const w = def.size.w * CELL_SIZE;
-    const d = def.size.d * CELL_SIZE;
+    const { w: effW, d: effD } = getEffectiveSize(building.type, building.orientation);
+    const w = effW * CELL_SIZE;
+    const d = effD * CELL_SIZE;
 
     if (building.type === BuildingType.PARK) {
       this.createPark(group, w, d);
@@ -960,10 +960,11 @@ export class BuildingFactory {
     const roadMaterial = new THREE.MeshLambertMaterial({ color: def.color });
     const n = neighbors ?? { hasNorth: false, hasSouth: false, hasEast: false, hasWest: false };
     const count = [n.hasNorth, n.hasSouth, n.hasEast, n.hasWest].filter(Boolean).length;
-    const w = def.size.w * CELL_SIZE;
-    const d = def.size.d * CELL_SIZE;
+    const { w: effW, d: effD } = getEffectiveSize(building.type, building.orientation);
+    const w = effW * CELL_SIZE;
+    const d = effD * CELL_SIZE;
 
-    const isMultiCell = def.size.w > 1 || def.size.d > 1;
+    const isMultiCell = effW > 1 || effD > 1;
 
     if (count <= 1 && !isMultiCell) {
       this.addRoundedRoad(group, roadMaterial, w, d, n, count);
@@ -1008,12 +1009,12 @@ export class BuildingFactory {
     }
 
     if (building.type === BuildingType.ROAD_HIGHWAY) {
-      this.addHighwayMarkings(group, n, count);
+      this.addHighwayMarkings(group, building, n, count);
       return;
     }
 
     if (building.type === BuildingType.ROAD_AVENUE) {
-      this.addAvenueMarkings(group, n, count);
+      this.addAvenueMarkings(group, building, n, count);
       return;
     }
 
@@ -1056,154 +1057,143 @@ export class BuildingFactory {
     }
   }
 
-  private addAvenueMarkings(group: THREE.Group, n: RoadNeighbors, count: number): void {
+  private addAvenueMarkings(group: THREE.Group, building: PlacedBuilding, _n: RoadNeighbors, count: number): void {
     const yellowMat = new THREE.MeshBasicMaterial({ color: 0xffcc00 });
     const whiteMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
     if (count < 2) return;
 
-    const def = BUILDING_DEFS[BuildingType.ROAD_AVENUE];
-    const surfaceW = def.size.w * CELL_SIZE;
-    const surfaceD = def.size.d * CELL_SIZE;
+    const orientation = building.orientation ?? 'EW';
+    const { w: effW, d: effD } = getEffectiveSize(building.type, orientation);
+    const surfaceW = effW * CELL_SIZE;
+    const surfaceD = effD * CELL_SIZE;
     const lineWidth = CELL_SIZE * 0.02;
 
-    let axis: 'x' | 'z' | null = null;
-    if (count === 2 && n.hasNorth && n.hasSouth) axis = 'z';
-    else if (count === 2 && n.hasEast && n.hasWest) axis = 'x';
+    // Axis is determined by orientation
+    const axis: 'x' | 'z' = orientation === 'EW' ? 'x' : 'z';
+    const travelLen = (axis === 'x' ? surfaceW : surfaceD);
+    const crossSize = (axis === 'x' ? surfaceD : surfaceW);
+    const len = travelLen * 0.95;
+    const separation = CELL_SIZE * 0.04;
 
-    if (axis) {
-      const len = (axis === 'x' ? surfaceW : surfaceD) * 0.95;
-      const crossSize = axis === 'x' ? surfaceD : surfaceW;
-      const separation = CELL_SIZE * 0.04;
-
-      // Double yellow center line
-      for (const offset of [-separation, separation]) {
-        const w = axis === 'x' ? len : lineWidth;
-        const h = axis === 'x' ? lineWidth : len;
-        const line = new THREE.Mesh(new THREE.PlaneGeometry(w, h), yellowMat);
-        line.rotation.x = -Math.PI / 2;
-        if (axis === 'x') {
-          line.position.set(0, 0.025, offset);
-        } else {
-          line.position.set(offset, 0.025, 0);
-        }
-        group.add(line);
+    // Double yellow center line
+    for (const offset of [-separation, separation]) {
+      const w = axis === 'x' ? len : lineWidth;
+      const h = axis === 'x' ? lineWidth : len;
+      const line = new THREE.Mesh(new THREE.PlaneGeometry(w, h), yellowMat);
+      line.rotation.x = -Math.PI / 2;
+      if (axis === 'x') {
+        line.position.set(0, 0.025, offset);
+      } else {
+        line.position.set(offset, 0.025, 0);
       }
+      group.add(line);
+    }
 
-      // White lane dividers (one per side, halfway between center and edge)
+    // White lane dividers (dashed, phase-aligned by grid position)
+    const gridPos = axis === 'x' ? building.position.x : building.position.z;
+    const showDash = (gridPos % 3) < 1;
+    if (showDash) {
       const laneOffset = crossSize * 0.25;
       for (const side of [-1, 1]) {
-        const dashSpacing = CELL_SIZE * 0.35;
-        const dashLen = CELL_SIZE * 0.2;
-        const numDashes = Math.floor(len / dashSpacing);
-        const startOffset = -(numDashes - 1) * dashSpacing / 2;
+        const dashLen = travelLen * 0.6;
+        const across = side * laneOffset;
+        const w = axis === 'x' ? dashLen : lineWidth;
+        const h = axis === 'x' ? lineWidth : dashLen;
+        const dash = new THREE.Mesh(new THREE.PlaneGeometry(w, h), whiteMat);
+        dash.rotation.x = -Math.PI / 2;
+        if (axis === 'x') {
+          dash.position.set(0, 0.025, across);
+        } else {
+          dash.position.set(across, 0.025, 0);
+        }
+        group.add(dash);
+      }
+    }
 
-        for (let i = 0; i < numDashes; i++) {
-          const along = startOffset + i * dashSpacing;
-          const across = side * laneOffset;
+    // White edge lines (solid)
+    const edgeOffset = crossSize * 0.47;
+    for (const side of [-1, 1]) {
+      const w = axis === 'x' ? len : lineWidth;
+      const h = axis === 'x' ? lineWidth : len;
+      const line = new THREE.Mesh(new THREE.PlaneGeometry(w, h), whiteMat);
+      line.rotation.x = -Math.PI / 2;
+      if (axis === 'x') {
+        line.position.set(0, 0.025, side * edgeOffset);
+      } else {
+        line.position.set(side * edgeOffset, 0.025, 0);
+      }
+      group.add(line);
+    }
+  }
+
+  private addHighwayMarkings(group: THREE.Group, building: PlacedBuilding, _n: RoadNeighbors, count: number): void {
+    const whiteMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const yellowMat = new THREE.MeshBasicMaterial({ color: 0xffcc00 });
+    if (count < 2) return;
+
+    const orientation = building.orientation ?? 'EW';
+    const { w: effW, d: effD } = getEffectiveSize(building.type, orientation);
+    const surfaceW = effW * CELL_SIZE;
+    const surfaceD = effD * CELL_SIZE;
+    const lineWidth = CELL_SIZE * 0.025;
+
+    // Axis is determined by orientation
+    const axis: 'x' | 'z' = orientation === 'EW' ? 'x' : 'z';
+    const travelLen = (axis === 'x' ? surfaceW : surfaceD);
+    const crossSize = (axis === 'x' ? surfaceD : surfaceW);
+    const len = travelLen * 0.95;
+
+    // Solid white edge lines
+    const edgeOffset = crossSize * 0.47;
+    for (const side of [-1, 1]) {
+      const w = axis === 'x' ? len : lineWidth;
+      const h = axis === 'x' ? lineWidth : len;
+      const line = new THREE.Mesh(new THREE.PlaneGeometry(w, h), whiteMat);
+      line.rotation.x = -Math.PI / 2;
+      if (axis === 'x') {
+        line.position.set(0, 0.025, side * edgeOffset);
+      } else {
+        line.position.set(side * edgeOffset, 0.025, 0);
+      }
+      group.add(line);
+    }
+
+    // Double yellow center divider
+    const separation = CELL_SIZE * 0.04;
+    for (const offset of [-separation, separation]) {
+      const w = axis === 'x' ? len : lineWidth;
+      const h = axis === 'x' ? lineWidth : len;
+      const line = new THREE.Mesh(new THREE.PlaneGeometry(w, h), yellowMat);
+      line.rotation.x = -Math.PI / 2;
+      if (axis === 'x') {
+        line.position.set(0, 0.025, offset);
+      } else {
+        line.position.set(offset, 0.025, 0);
+      }
+      group.add(line);
+    }
+
+    // Dashed white lane dividers — 3 lanes per side means 2 dividers per side
+    // Phase-aligned by grid position for seamless dashes across blocks
+    const gridPos = axis === 'x' ? building.position.x : building.position.z;
+    const showDash = (gridPos % 3) < 1;
+    if (showDash) {
+      const halfCross = crossSize / 2;
+      const laneWidth = halfCross / 3;
+      for (const side of [-1, 1]) {
+        for (let lane = 1; lane <= 2; lane++) {
+          const across = side * (lane * laneWidth);
+          const dashLen = travelLen * 0.6;
           const w = axis === 'x' ? dashLen : lineWidth;
           const h = axis === 'x' ? lineWidth : dashLen;
           const dash = new THREE.Mesh(new THREE.PlaneGeometry(w, h), whiteMat);
           dash.rotation.x = -Math.PI / 2;
           if (axis === 'x') {
-            dash.position.set(along, 0.025, across);
+            dash.position.set(0, 0.025, across);
           } else {
-            dash.position.set(across, 0.025, along);
+            dash.position.set(across, 0.025, 0);
           }
           group.add(dash);
-        }
-      }
-
-      // White edge lines (solid)
-      const edgeOffset = crossSize * 0.47;
-      for (const side of [-1, 1]) {
-        const w = axis === 'x' ? len : lineWidth;
-        const h = axis === 'x' ? lineWidth : len;
-        const line = new THREE.Mesh(new THREE.PlaneGeometry(w, h), whiteMat);
-        line.rotation.x = -Math.PI / 2;
-        if (axis === 'x') {
-          line.position.set(0, 0.025, side * edgeOffset);
-        } else {
-          line.position.set(side * edgeOffset, 0.025, 0);
-        }
-        group.add(line);
-      }
-    }
-  }
-
-  private addHighwayMarkings(group: THREE.Group, n: RoadNeighbors, count: number): void {
-    const whiteMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-    const yellowMat = new THREE.MeshBasicMaterial({ color: 0xffcc00 });
-    if (count < 2) return;
-
-    const def = BUILDING_DEFS[BuildingType.ROAD_HIGHWAY];
-    const surfaceW = def.size.w * CELL_SIZE;
-    const surfaceD = def.size.d * CELL_SIZE;
-    const lineWidth = CELL_SIZE * 0.025;
-
-    let axis: 'x' | 'z' | null = null;
-    if (count === 2 && n.hasNorth && n.hasSouth) axis = 'z';
-    else if (count === 2 && n.hasEast && n.hasWest) axis = 'x';
-
-    if (axis) {
-      const len = (axis === 'x' ? surfaceW : surfaceD) * 0.95;
-      const crossSize = axis === 'x' ? surfaceD : surfaceW;
-
-      // Solid white edge lines
-      const edgeOffset = crossSize * 0.47;
-      for (const side of [-1, 1]) {
-        const w = axis === 'x' ? len : lineWidth;
-        const h = axis === 'x' ? lineWidth : len;
-        const line = new THREE.Mesh(new THREE.PlaneGeometry(w, h), whiteMat);
-        line.rotation.x = -Math.PI / 2;
-        if (axis === 'x') {
-          line.position.set(0, 0.025, side * edgeOffset);
-        } else {
-          line.position.set(side * edgeOffset, 0.025, 0);
-        }
-        group.add(line);
-      }
-
-      // Double yellow center divider
-      const separation = CELL_SIZE * 0.04;
-      for (const offset of [-separation, separation]) {
-        const w = axis === 'x' ? len : lineWidth;
-        const h = axis === 'x' ? lineWidth : len;
-        const line = new THREE.Mesh(new THREE.PlaneGeometry(w, h), yellowMat);
-        line.rotation.x = -Math.PI / 2;
-        if (axis === 'x') {
-          line.position.set(0, 0.025, offset);
-        } else {
-          line.position.set(offset, 0.025, 0);
-        }
-        group.add(line);
-      }
-
-      // Dashed white lane dividers — 3 lanes per side means 2 dividers per side
-      // Each side spans crossSize/2; lanes are evenly divided within that
-      const halfCross = crossSize / 2;
-      const laneWidth = halfCross / 3;
-      for (const side of [-1, 1]) {
-        // Dividers at 1/3 and 2/3 of each half
-        for (let lane = 1; lane <= 2; lane++) {
-          const across = side * (lane * laneWidth);
-          const dashSpacing = CELL_SIZE * 0.4;
-          const dashLen = CELL_SIZE * 0.25;
-          const numDashes = Math.floor(len / dashSpacing);
-          const startOffset = -(numDashes - 1) * dashSpacing / 2;
-
-          for (let i = 0; i < numDashes; i++) {
-            const along = startOffset + i * dashSpacing;
-            const w = axis === 'x' ? dashLen : lineWidth;
-            const h = axis === 'x' ? lineWidth : dashLen;
-            const dash = new THREE.Mesh(new THREE.PlaneGeometry(w, h), whiteMat);
-            dash.rotation.x = -Math.PI / 2;
-            if (axis === 'x') {
-              dash.position.set(along, 0.025, across);
-            } else {
-              dash.position.set(across, 0.025, along);
-            }
-            group.add(dash);
-          }
         }
       }
     }
@@ -1453,12 +1443,13 @@ export class BuildingFactory {
     return group;
   }
 
-  createGhostPreview(type: BuildingType): THREE.Group {
+  createGhostPreview(type: BuildingType, orientation?: import('@cityzen/shared').RoadOrientation): THREE.Group {
     const def = BUILDING_DEFS[type];
     const group = new THREE.Group();
 
-    const w = def.size.w * CELL_SIZE;
-    const d = def.size.d * CELL_SIZE;
+    const { w: effW, d: effD } = getEffectiveSize(type, orientation);
+    const w = effW * CELL_SIZE;
+    const d = effD * CELL_SIZE;
     const h = def.height || 0.1;
 
     const geometry = new THREE.BoxGeometry(w * 0.85, h, d * 0.85);

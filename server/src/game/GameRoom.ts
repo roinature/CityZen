@@ -7,6 +7,7 @@ import {
   type GameClock,
   type PopulationSummary,
   type ZonePopulationEntry,
+  type RoadOrientation,
   BuildingType,
   isZone,
   ZoneDensity,
@@ -20,6 +21,7 @@ import {
   ZONE_DENSITY_COSTS,
   createEmptyGrid,
   canPlaceBuilding,
+  getEffectiveSize,
   simulateCityTick,
 } from '@cityzen/shared';
 import { saveCityState } from '../persistence/jsonStore.js';
@@ -184,10 +186,10 @@ export class GameRoom {
     this.broadcast(S2C.PLAYER_LEFT, { playerId });
   }
 
-  placeBuilding(playerId: string, position: Position, type: BuildingType, density?: ZoneDensity): { success: boolean; error?: string } {
+  placeBuilding(playerId: string, position: Position, type: BuildingType, density?: ZoneDensity, orientation?: RoadOrientation): { success: boolean; error?: string } {
     const result = canPlaceBuilding(
       this.state.grid, position, type, this.state.resources,
-      this.unlimitedMoney, this.state.buildings, density,
+      this.unlimitedMoney, this.state.buildings, density, orientation,
     );
     if (!result.valid) {
       return { success: false, error: result.reason };
@@ -202,11 +204,13 @@ export class GameRoom {
       placedBy: playerId,
       placedAt: this.state.tick,
       ...(isZone(type) ? { developmentLevel: 0, density: density ?? ZoneDensity.MEDIUM } : {}),
+      ...(orientation ? { orientation } : {}),
     };
 
     // Update grid
-    for (let dx = 0; dx < def.size.w; dx++) {
-      for (let dz = 0; dz < def.size.d; dz++) {
+    const { w, d } = getEffectiveSize(type, orientation);
+    for (let dx = 0; dx < w; dx++) {
+      for (let dz = 0; dz < d; dz++) {
         this.state.grid[position.x + dx][position.z + dz].buildingId = building.id;
       }
     }
@@ -241,10 +245,11 @@ export class GameRoom {
     }
 
     const def = BUILDING_DEFS[building.type];
+    const { w, d } = getEffectiveSize(building.type, building.orientation);
 
     // Clear grid cells
-    for (let dx = 0; dx < def.size.w; dx++) {
-      for (let dz = 0; dz < def.size.d; dz++) {
+    for (let dx = 0; dx < w; dx++) {
+      for (let dz = 0; dz < d; dz++) {
         this.state.grid[building.position.x + dx][building.position.z + dz].buildingId = null;
       }
     }

@@ -5,6 +5,7 @@ import {
   type CityState,
   type EdgeDirection,
   type PlacedBuilding,
+  type RoadOrientation,
   type ZoneDensity,
   isRoad,
   isZone,
@@ -12,6 +13,7 @@ import {
   CELL_SIZE,
   DEFAULT_GRID_SIZE,
   canPlaceBuilding,
+  getEffectiveSize,
 } from '@cityzen/shared';
 import { BuildingFactory } from '../world/BuildingFactory.js';
 import { GridRaycaster } from './Raycaster.js';
@@ -23,6 +25,12 @@ function isLineDragType(type: BuildingType): boolean {
 
 function isRectDragType(type: BuildingType): boolean {
   return isZone(type);
+}
+
+function computeLineDragOrientation(start: Position, end: Position): RoadOrientation {
+  const dx = end.x - start.x;
+  const dz = end.z - start.z;
+  return Math.abs(dx) >= Math.abs(dz) ? 'EW' : 'NS';
 }
 
 function computeStraightLine(start: Position, end: Position, stepW: number, stepD: number): Position[] {
@@ -91,7 +99,7 @@ export class BuildMode {
   // Bulldoze preview
   private bulldozePreviewGroup: THREE.Group | null = null;
 
-  onPlace: ((pos: Position, type: BuildingType, density?: ZoneDensity) => void) | null = null;
+  onPlace: ((pos: Position, type: BuildingType, density?: ZoneDensity, orientation?: RoadOrientation) => void) | null = null;
   onDemolish: ((pos: Position) => void) | null = null;
   onEdgeRoadClick: ((direction: EdgeDirection, position: number) => void) | null = null;
   onDragCostUpdate: ((cost: number | null) => void) | null = null;
@@ -290,11 +298,12 @@ export class BuildMode {
 
     // Line drag release — place all roads along the straight line
     if (this.isDragging && this.lineDragStart && this.selectedType && isLineDragType(this.selectedType) && this.onPlace && this.currentHoverPos) {
-      const def = BUILDING_DEFS[this.selectedType];
-      const positions = computeStraightLine(this.lineDragStart, this.currentHoverPos, def.size.w, def.size.d);
-      console.log('[BuildMode] placing roads', { count: positions.length, positions });
+      const orientation = computeLineDragOrientation(this.lineDragStart, this.currentHoverPos);
+      const { w, d } = getEffectiveSize(this.selectedType, orientation);
+      const positions = computeStraightLine(this.lineDragStart, this.currentHoverPos, w, d);
+      console.log('[BuildMode] placing roads', { count: positions.length, positions, orientation });
       for (const pos of positions) {
-        this.onPlace(pos, this.selectedType);
+        this.onPlace(pos, this.selectedType, undefined, orientation);
       }
     }
 
@@ -418,15 +427,16 @@ export class BuildMode {
     this.clearLineDragPreview();
     if (!this.lineDragStart || !this.currentHoverPos || !this.selectedType) return;
 
-    const def = BUILDING_DEFS[this.selectedType];
-    const positions = computeStraightLine(this.lineDragStart, this.currentHoverPos, def.size.w, def.size.d);
+    const orientation = computeLineDragOrientation(this.lineDragStart, this.currentHoverPos);
+    const { w: effW, d: effD } = getEffectiveSize(this.selectedType, orientation);
+    const positions = computeStraightLine(this.lineDragStart, this.currentHoverPos, effW, effD);
 
     this.lineDragPreviewGroup = new THREE.Group();
-    const w = def.size.w * CELL_SIZE;
-    const d = def.size.d * CELL_SIZE;
+    const w = effW * CELL_SIZE;
+    const d = effD * CELL_SIZE;
 
     for (const pos of positions) {
-      const ghost = this.factory.createGhostPreview(this.selectedType);
+      const ghost = this.factory.createGhostPreview(this.selectedType, orientation);
       ghost.position.set(
         pos.x * CELL_SIZE + w / 2,
         0,
@@ -438,6 +448,7 @@ export class BuildMode {
     this.scene.add(this.lineDragPreviewGroup);
 
     // Update cost indicator
+    const def = BUILDING_DEFS[this.selectedType];
     const totalCost = positions.length * def.cost;
     this.onDragCostUpdate?.(totalCost);
   }
@@ -493,9 +504,9 @@ export class BuildMode {
         const building = state.buildings.find((b: PlacedBuilding) => b.id === cell.buildingId);
         if (!building) continue;
 
-        const def = BUILDING_DEFS[building.type];
-        const w = def.size.w * CELL_SIZE;
-        const d = def.size.d * CELL_SIZE;
+        const { w: effW, d: effD } = getEffectiveSize(building.type, building.orientation);
+        const w = effW * CELL_SIZE;
+        const d = effD * CELL_SIZE;
 
         const preview = this.factory.createBulldozePreview(building.type);
         preview.position.set(

@@ -1,9 +1,20 @@
 import type { Grid, Position } from '../types/grid.js';
 import type { ResourceState } from '../types/resources.js';
 import type { PlacedBuilding } from '../types/building.js';
-import { BuildingType, type ZoneDensity, isZone } from '../types/building.js';
+import { BuildingType, type RoadOrientation, type ZoneDensity, isZone } from '../types/building.js';
 import { BUILDING_DEFS, ZONE_DENSITY_COSTS } from '../constants/buildings.js';
 import { DEFAULT_GRID_SIZE } from '../constants/grid.js';
+
+export function getEffectiveSize(
+  type: BuildingType,
+  orientation?: RoadOrientation,
+): { w: number; d: number } {
+  const def = BUILDING_DEFS[type];
+  if (!orientation || orientation === 'EW') {
+    return { w: def.size.w, d: def.size.d };
+  }
+  return { w: def.size.d, d: def.size.w };
+}
 
 export interface PlacementResult {
   valid: boolean;
@@ -18,6 +29,7 @@ export function canPlaceBuilding(
   unlimitedMoney = false,
   buildings?: PlacedBuilding[],
   density?: ZoneDensity,
+  orientation?: RoadOrientation,
 ): PlacementResult {
   const def = BUILDING_DEFS[type];
   const cost = isZone(type) && density ? ZONE_DENSITY_COSTS[density] : def.cost;
@@ -26,8 +38,9 @@ export function canPlaceBuilding(
     return { valid: false, reason: 'Not enough money' };
   }
 
-  for (let dx = 0; dx < def.size.w; dx++) {
-    for (let dz = 0; dz < def.size.d; dz++) {
+  const { w, d } = getEffectiveSize(type, orientation);
+  for (let dx = 0; dx < w; dx++) {
+    for (let dz = 0; dz < d; dz++) {
       const cx = pos.x + dx;
       const cz = pos.z + dz;
 
