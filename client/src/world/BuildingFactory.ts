@@ -166,6 +166,15 @@ export class BuildingFactory {
     [BuildingType.GOV_CITY_HALL]: 'city_hall_facade.png',
     [BuildingType.GOV_COURTHOUSE]: 'courthouse_facade.png',
     [BuildingType.GOV_PARLIAMENT]: 'parliament_facade.png',
+    [BuildingType.GOV_MONUMENT]: 'monument_facade.png',
+    [BuildingType.TOUR_LANDMARK]: 'landmark_facade.png',
+    [BuildingType.TOUR_MUSEUM]: 'museum_facade.png',
+    [BuildingType.TOUR_STADIUM]: 'stadium_facade.png',
+    [BuildingType.TOUR_AMUSEMENT]: 'amusement_park_facade.png',
+    [BuildingType.TRANS_BUS_DEPOT]: 'bus_depot_facade.png',
+    [BuildingType.TRANS_TRAIN_STATION]: 'train_station_facade.png',
+    [BuildingType.TRANS_AIRPORT]: 'airport_facade.png',
+    [BuildingType.TRANS_HARBOR]: 'harbor_facade.png',
   };
 
   public static readonly INFRASTRUCTURE_ROOFS: Partial<Record<BuildingType, string>> = {
@@ -187,6 +196,16 @@ export class BuildingFactory {
     [BuildingType.EDU_LIBRARY]: 'library_roof.png',
     [BuildingType.GOV_CITY_HALL]: 'city_hall_roof.png',
     [BuildingType.GOV_COURTHOUSE]: 'courthouse_roof.png',
+    [BuildingType.GOV_PARLIAMENT]: 'parliament_roof.png',
+    [BuildingType.GOV_MONUMENT]: 'monument_roof.png',
+    [BuildingType.TOUR_LANDMARK]: 'landmark_roof.png',
+    [BuildingType.TOUR_MUSEUM]: 'museum_roof.png',
+    [BuildingType.TOUR_STADIUM]: 'stadium_roof.png',
+    [BuildingType.TOUR_AMUSEMENT]: 'amusement_park_roof.png',
+    [BuildingType.TRANS_BUS_DEPOT]: 'bus_depot_roof.png',
+    [BuildingType.TRANS_TRAIN_STATION]: 'train_station_roof.png',
+    [BuildingType.TRANS_AIRPORT]: 'airport_roof.png',
+    [BuildingType.TRANS_HARBOR]: 'harbor_roof.png',
   };
 
   /**
@@ -363,6 +382,44 @@ export class BuildingFactory {
       door.position.set(0, doorH / 2, bodyD / 2 + 0.01);
       group.add(door);
     }
+
+    // --- Base plinth (foundation strip) ---
+    const plinthH = Math.min(h * 0.05, 0.12);
+    const concreteColor = color.clone().multiplyScalar(0.4);
+    const matPlinthDay = new THREE.MeshLambertMaterial({ color: concreteColor });
+    const matPlinthNight = new THREE.MeshBasicMaterial({ color: concreteColor.clone().multiplyScalar(0.5) });
+    const plinthGeo = new THREE.BoxGeometry(bodyW + 0.08, plinthH, bodyD + 0.08);
+
+    const plinthDay = new THREE.Mesh(plinthGeo, matPlinthDay);
+    plinthDay.position.y = plinthH / 2;
+    plinthDay.receiveShadow = true;
+    plinthDay.layers.set(1);
+    group.add(plinthDay);
+    const plinthNight = new THREE.Mesh(plinthGeo, matPlinthNight);
+    plinthNight.position.y = plinthH / 2;
+    plinthNight.layers.set(2);
+    group.add(plinthNight);
+
+    // --- Entrance canopy (front awning) ---
+    const canopyW = bodyW * 0.4;
+    const canopyD = Math.min(bodyD * 0.15, 0.3);
+    const canopyH = 0.04;
+    const canopyY = Math.min(bodyH * 0.55, bodyH - 0.1);
+    const canopyGeo = new THREE.BoxGeometry(canopyW, canopyH, canopyD);
+
+    const matCanopyDay = new THREE.MeshLambertMaterial({ color: color.clone().multiplyScalar(0.55) });
+    const canopyDay = new THREE.Mesh(canopyGeo, matCanopyDay);
+    canopyDay.position.set(0, canopyY, bodyD / 2 + canopyD / 2);
+    canopyDay.castShadow = true;
+    canopyDay.receiveShadow = true;
+    canopyDay.layers.set(1);
+    group.add(canopyDay);
+
+    const matCanopyNight = new THREE.MeshBasicMaterial({ color: color.clone().multiplyScalar(0.3) });
+    const canopyNight = new THREE.Mesh(canopyGeo, matCanopyNight);
+    canopyNight.position.set(0, canopyY, bodyD / 2 + canopyD / 2);
+    canopyNight.layers.set(2);
+    group.add(canopyNight);
   }
 
   private createZone(group: THREE.Group, building: PlacedBuilding, populationRatio?: number): void {
@@ -658,11 +715,24 @@ export class BuildingFactory {
     buildingType: BuildingType,
     weatherFactor = 1.0,
   ): void {
-    const geometry = new THREE.BoxGeometry(width, height, depth);
+    // --- Setback: tall buildings get a stepped upper portion ---
+    const setbackThreshold = 4.0;
+    const hasSetback = height > setbackThreshold;
+    const mainHeight = hasSetback ? height * 0.65 : height;
+    const upperHeight = hasSetback ? height * 0.35 : 0;
+    const upperInset = 0.85; // upper portion is 85% of main width/depth
+
+    const geometry = new THREE.BoxGeometry(width, mainHeight, depth);
 
     const roofRepeatW = Math.max(1, width / 2);
     const roofRepeatD = Math.max(1, depth / 2);
     const weatherColor = new THREE.Color(weatherFactor, weatherFactor, weatherFactor);
+    const concreteDayColor = new THREE.Color(0.55 * weatherFactor, 0.53 * weatherFactor, 0.51 * weatherFactor);
+    const concreteNightColor = new THREE.Color(0.25, 0.24, 0.23);
+
+    // Shared materials
+    const matConcreteDayLambert = new THREE.MeshLambertMaterial({ color: concreteDayColor });
+    const matConcreteNightBasic = new THREE.MeshBasicMaterial({ color: concreteNightColor });
 
     // --- Day Mesh (Layer 1) ---
     const matRoofDay = new THREE.MeshLambertMaterial({
@@ -670,19 +740,21 @@ export class BuildingFactory {
       color: weatherColor,
     });
     const matSideXDay = new THREE.MeshLambertMaterial({
-      map: this.getTexture(facadeTexPath, depth / 2, height / 2),
+      map: this.getTexture(facadeTexPath, depth / 2, mainHeight / 2),
       color: weatherColor,
     });
     const matSideZDay = new THREE.MeshLambertMaterial({
-      map: this.getTexture(facadeTexPath, width / 2, height / 2),
+      map: this.getTexture(facadeTexPath, width / 2, mainHeight / 2),
       color: weatherColor,
     });
     const matBottom = new THREE.MeshLambertMaterial({ color: 0x333333 });
 
-    const materialsDay = [matSideXDay, matSideXDay, matRoofDay, matBottom, matSideZDay, matSideZDay];
+    // For main body with setback, roof is the setback ledge (concrete), not the textured roof
+    const matMainTop = hasSetback ? matConcreteDayLambert : matRoofDay;
+    const materialsDay = [matSideXDay, matSideXDay, matMainTop, matBottom, matSideZDay, matSideZDay];
 
     const meshDay = new THREE.Mesh(geometry, materialsDay);
-    meshDay.position.set(x, height / 2, z);
+    meshDay.position.set(x, mainHeight / 2, z);
     meshDay.castShadow = true;
     meshDay.receiveShadow = true;
     meshDay.layers.set(1);
@@ -697,22 +769,154 @@ export class BuildingFactory {
       color: 0xffffff,
     });
     const matSideXNight = new THREE.MeshBasicMaterial({
-      map: this.getTexture(facadeNightPath, depth / 2, height / 2),
+      map: this.getTexture(facadeNightPath, depth / 2, mainHeight / 2),
       color: 0xffffff,
     });
     const matSideZNight = new THREE.MeshBasicMaterial({
-      map: this.getTexture(facadeNightPath, width / 2, height / 2),
+      map: this.getTexture(facadeNightPath, width / 2, mainHeight / 2),
       color: 0xffffff,
     });
 
-    const materialsNight = [matSideXNight, matSideXNight, matRoofNight, matBottom, matSideZNight, matSideZNight];
+    const matMainTopNight = hasSetback ? matConcreteNightBasic : matRoofNight;
+    const materialsNight = [matSideXNight, matSideXNight, matMainTopNight, matBottom, matSideZNight, matSideZNight];
 
     const meshNight = new THREE.Mesh(geometry, materialsNight);
-    meshNight.position.set(x, height / 2, z);
+    meshNight.position.set(x, mainHeight / 2, z);
     meshNight.castShadow = true;
     meshNight.receiveShadow = true;
     meshNight.layers.set(2);
     group.add(meshNight);
+
+    // --- Setback upper portion ---
+    if (hasSetback) {
+      const uw = width * upperInset;
+      const ud = depth * upperInset;
+      const upperGeo = new THREE.BoxGeometry(uw, upperHeight, ud);
+
+      const matUpperSideXDay = new THREE.MeshLambertMaterial({
+        map: this.getTexture(facadeTexPath, ud / 2, upperHeight / 2),
+        color: weatherColor,
+      });
+      const matUpperSideZDay = new THREE.MeshLambertMaterial({
+        map: this.getTexture(facadeTexPath, uw / 2, upperHeight / 2),
+        color: weatherColor,
+      });
+      const upperMatDay = [matUpperSideXDay, matUpperSideXDay, matRoofDay, matConcreteDayLambert, matUpperSideZDay, matUpperSideZDay];
+      const upperDay = new THREE.Mesh(upperGeo, upperMatDay);
+      upperDay.position.set(x, mainHeight + upperHeight / 2, z);
+      upperDay.castShadow = true;
+      upperDay.receiveShadow = true;
+      upperDay.layers.set(1);
+      group.add(upperDay);
+
+      const matUpperSideXNight = new THREE.MeshBasicMaterial({
+        map: this.getTexture(facadeNightPath, ud / 2, upperHeight / 2),
+        color: 0xffffff,
+      });
+      const matUpperSideZNight = new THREE.MeshBasicMaterial({
+        map: this.getTexture(facadeNightPath, uw / 2, upperHeight / 2),
+        color: 0xffffff,
+      });
+      const upperMatNight = [matUpperSideXNight, matUpperSideXNight, matRoofNight, matConcreteNightBasic, matUpperSideZNight, matUpperSideZNight];
+      const upperNight = new THREE.Mesh(upperGeo, upperMatNight);
+      upperNight.position.set(x, mainHeight + upperHeight / 2, z);
+      upperNight.castShadow = true;
+      upperNight.receiveShadow = true;
+      upperNight.layers.set(2);
+      group.add(upperNight);
+    }
+
+    // --- Ground plinth (foundation strip) ---
+    const plinthH = Math.min(height * 0.06, 0.15);
+    const plinthGeo = new THREE.BoxGeometry(width + 0.06, plinthH, depth + 0.06);
+    const plinthDay = new THREE.Mesh(plinthGeo, matConcreteDayLambert);
+    plinthDay.position.set(x, plinthH / 2, z);
+    plinthDay.receiveShadow = true;
+    plinthDay.layers.set(1);
+    group.add(plinthDay);
+    const plinthNight = new THREE.Mesh(plinthGeo, matConcreteNightBasic);
+    plinthNight.position.set(x, plinthH / 2, z);
+    plinthNight.layers.set(2);
+    group.add(plinthNight);
+
+    // --- Floor ledges / cornices ---
+    const floorInterval = 2.0; // ledge every ~2 units of height
+    const ledgeH = 0.04;
+    const ledgeOverhang = 0.04;
+    if (height > floorInterval * 1.5) {
+      const ledgeGeo = new THREE.BoxGeometry(width + ledgeOverhang, ledgeH, depth + ledgeOverhang);
+      const numLedges = Math.floor(height / floorInterval);
+      for (let i = 1; i < numLedges; i++) {
+        const ledgeY = i * floorInterval;
+        if (hasSetback && ledgeY > mainHeight) {
+          // Skip ledges inside the setback transition zone
+          continue;
+        }
+        const ledgeDay = new THREE.Mesh(ledgeGeo, matConcreteDayLambert);
+        ledgeDay.position.set(x, ledgeY, z);
+        ledgeDay.layers.set(1);
+        group.add(ledgeDay);
+        const ledgeNight = new THREE.Mesh(ledgeGeo, matConcreteNightBasic);
+        ledgeNight.position.set(x, ledgeY, z);
+        ledgeNight.layers.set(2);
+        group.add(ledgeNight);
+      }
+    }
+
+    // --- Roof parapet ---
+    const roofY = hasSetback ? mainHeight + upperHeight : height;
+    const parapetH = Math.min(height * 0.04, 0.12);
+    const parapetThickness = 0.04;
+    const parapetW = hasSetback ? width * upperInset : width;
+    const parapetD = hasSetback ? depth * upperInset : depth;
+
+    const addParapetSegment = (pw: number, pd: number, px: number, pz: number) => {
+      const geo = new THREE.BoxGeometry(pw, parapetH, pd);
+      const dayMesh = new THREE.Mesh(geo, matConcreteDayLambert);
+      dayMesh.position.set(x + px, roofY + parapetH / 2, z + pz);
+      dayMesh.castShadow = true;
+      dayMesh.layers.set(1);
+      group.add(dayMesh);
+      const nightMesh = new THREE.Mesh(geo, matConcreteNightBasic);
+      nightMesh.position.set(x + px, roofY + parapetH / 2, z + pz);
+      nightMesh.layers.set(2);
+      group.add(nightMesh);
+    };
+    // Front and back parapet walls
+    addParapetSegment(parapetW, parapetThickness, 0, parapetD / 2);
+    addParapetSegment(parapetW, parapetThickness, 0, -parapetD / 2);
+    // Left and right parapet walls
+    addParapetSegment(parapetThickness, parapetD, parapetW / 2, 0);
+    addParapetSegment(parapetThickness, parapetD, -parapetW / 2, 0);
+
+    // --- Rooftop equipment (AC units, water tanks) — only for taller buildings ---
+    if (height > 2.5) {
+      const seed = this.hashString(facadeTexPath + width.toFixed(2) + depth.toFixed(2));
+      const numEquip = 1 + (seed % 3); // 1–3 pieces of equipment
+      const equipColor = new THREE.Color(0.50 * weatherFactor, 0.50 * weatherFactor, 0.52 * weatherFactor);
+      const matEquipDay = new THREE.MeshLambertMaterial({ color: equipColor });
+      const matEquipNight = new THREE.MeshBasicMaterial({ color: 0x1a1a1c });
+
+      for (let i = 0; i < numEquip; i++) {
+        const eSeed = this.hashString(facadeTexPath + i.toString());
+        const ew = 0.08 + (eSeed % 10) / 100;
+        const ed = 0.08 + ((eSeed >> 4) % 10) / 100;
+        const eh = 0.06 + ((eSeed >> 8) % 8) / 100;
+        // Spread equipment within inner 60% of roof area
+        const ex = ((eSeed % 100) / 100 - 0.5) * parapetW * 0.6;
+        const ez = (((eSeed >> 3) % 100) / 100 - 0.5) * parapetD * 0.6;
+        const eGeo = new THREE.BoxGeometry(ew, eh, ed);
+        const eDay = new THREE.Mesh(eGeo, matEquipDay);
+        eDay.position.set(x + ex, roofY + eh / 2, z + ez);
+        eDay.castShadow = true;
+        eDay.layers.set(1);
+        group.add(eDay);
+        const eNight = new THREE.Mesh(eGeo, matEquipNight);
+        eNight.position.set(x + ex, roofY + eh / 2, z + ez);
+        eNight.layers.set(2);
+        group.add(eNight);
+      }
+    }
 
     // --- Point Light (Night, Layer 2) ---
     let lightColor = 0xffaa00;

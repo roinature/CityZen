@@ -109,6 +109,10 @@ export class CameraController {
     this.panSpeed = speed;
   }
 
+  getRotationAngle(): number {
+    return this.rotationAngle;
+  }
+
   setLeftClickPanEnabled(enabled: boolean): void {
     this.leftClickPanEnabled = enabled;
   }

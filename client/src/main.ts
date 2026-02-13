@@ -18,6 +18,7 @@ import { SceneManager } from './scene/SceneManager.js';
 import { CameraController } from './scene/CameraController.js';
 import { setupLighting } from './scene/LightingSetup.js';
 import { createGridOverlay } from './scene/GridOverlay.js';
+import { EdgeRoadIndicator } from './scene/EdgeRoadIndicator.js';
 import { createTerrain } from './world/Terrain.js';
 import { CityRenderer } from './world/CityRenderer.js';
 import { BuildMode } from './input/BuildMode.js';
@@ -32,6 +33,7 @@ import { ToolSidebar, type ToolMode } from './ui/ToolSidebar.js';
 import { FinancePanel } from './ui/FinancePanel.js';
 import { MaslowPanel } from './ui/MaslowPanel.js';
 import { FooterIndicator } from './ui/FooterIndicator.js';
+import { CompassIndicator } from './ui/CompassIndicator.js';
 import { InfraToolbar } from './ui/InfraToolbar.js';
 import { MessageManager } from './ui/MessageManager.js';
 import { GameClient } from './network/GameClient.js';
@@ -88,6 +90,7 @@ const cameraController = new CameraController(sceneManager);
 const lighting = setupLighting(sceneManager.scene);
 createTerrain(sceneManager.scene);
 const gridHelper = createGridOverlay(sceneManager.scene);
+const edgeRoadIndicator = new EdgeRoadIndicator(sceneManager.scene);
 
 const cityRenderer = new CityRenderer(sceneManager.scene);
 const carManager = new CarManager(sceneManager.scene);
@@ -96,6 +99,7 @@ const buildMode = new BuildMode(sceneManager.scene, sceneManager.camera);
 // --- UI ---
 const resourceBar = new ResourceBar(uiRoot);
 const footerIndicator = new FooterIndicator(uiRoot);
+const compassIndicator = new CompassIndicator(uiRoot);
 
 // --- Message System ---
 const messageManager = new MessageManager(uiRoot, {
@@ -187,6 +191,7 @@ GameClient.create(SERVER_URL, {
     cityState = city;
     buildMode.setCityState(city);
     cityRenderer.syncState(city);
+    edgeRoadIndicator.update(city.buildings, worldState, city.id);
     carManager.clear();
     resourceBar.update(city.resources, cityState);
     lobby.hide();
@@ -210,6 +215,7 @@ GameClient.create(SERVER_URL, {
 
     cityState.resources = payload.resources;
     cityRenderer.syncState(cityState);
+    edgeRoadIndicator.update(cityState.buildings, worldState, cityState.id);
     resourceBar.update(cityState.resources, cityState);
   },
 
@@ -227,6 +233,7 @@ GameClient.create(SERVER_URL, {
     cityState.buildings = cityState.buildings.filter((b: PlacedBuilding) => b.id !== payload.buildingId);
     cityState.resources = payload.resources;
     cityRenderer.syncState(cityState);
+    edgeRoadIndicator.update(cityState.buildings, worldState, cityState.id);
     resourceBar.update(cityState.resources, cityState);
   },
 
@@ -369,6 +376,7 @@ buildMode.onEdgeRoadClick = (direction: EdgeDirection, position: number) => {
     gameClient.leave(playerId);
     cityState = null;
     cityRenderer.clear();
+    edgeRoadIndicator.clear();
     carManager.clear();
     gameClient.joinCity(adjacentCity.cityId, currentPlayerName, playerId);
   } else {
@@ -420,6 +428,7 @@ const gameMenu = new GameMenu(uiRoot, {
     gameClient.leave(playerId);
     cityState = null;
     cityRenderer.clear();
+    edgeRoadIndicator.clear();
     carManager.clear();
     clearSession();
     gameClient.joinCity(cityId, currentPlayerName, playerId);
@@ -430,6 +439,7 @@ const gameMenu = new GameMenu(uiRoot, {
   },
   onRestart: () => {
     cityRenderer.clear();
+    edgeRoadIndicator.clear();
     carManager.clear();
     gameClient.restart(playerId);
   },
@@ -438,6 +448,7 @@ const gameMenu = new GameMenu(uiRoot, {
     gameClient.leave(playerId);
     cityState = null;
     cityRenderer.clear();
+    edgeRoadIndicator.clear();
     carManager.clear();
     clearSession();
     showWorldMap();
@@ -534,6 +545,7 @@ function gameLoop(): void {
   cameraController.update(deltaTime);
   carManager.update(deltaTime, cityState);
   buildMode.updatePreview(cityState);
+  compassIndicator.update(cameraController.getRotationAngle());
   sceneManager.render();
 }
 
