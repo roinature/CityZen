@@ -88,6 +88,9 @@ export class BuildMode {
   private rectDragStart: Position | null = null;
   private rectPreviewGroup: THREE.Group | null = null;
 
+  // Bulldoze preview
+  private bulldozePreviewGroup: THREE.Group | null = null;
+
   onPlace: ((pos: Position, type: BuildingType, density?: ZoneDensity) => void) | null = null;
   onDemolish: ((pos: Position) => void) | null = null;
   onEdgeRoadClick: ((direction: EdgeDirection, position: number) => void) | null = null;
@@ -128,6 +131,7 @@ export class BuildMode {
     this.clearPreview();
     this.clearLineDragPreview();
     this.clearRectPreview();
+    this.clearBulldozePreview();
     this.onDragCostUpdate?.(null);
   }
 
@@ -155,6 +159,16 @@ export class BuildMode {
   }
 
   updatePreview(state: CityState | null): void {
+    // Bulldoze preview
+    if (this.toolMode === 'bulldoze' && this.currentHoverPos && state) {
+      this.clearPreview();
+      this.clearLineDragPreview();
+      this.clearRectPreview();
+      this.updateBulldozePreview(state);
+      return;
+    }
+    this.clearBulldozePreview();
+
     if (!this.selectedType || !this.currentHoverPos || !state) {
       this.clearPreview();
       this.clearLineDragPreview();
@@ -455,6 +469,59 @@ export class BuildMode {
         }
       });
       this.previewMesh = null;
+    }
+  }
+
+  private updateBulldozePreview(state: CityState): void {
+    this.clearBulldozePreview();
+    if (!this.currentHoverPos) return;
+
+    this.bulldozePreviewGroup = new THREE.Group();
+    const half = Math.floor(this.brushSize / 2);
+    const seen = new Set<string>();
+
+    for (let dx = -half; dx < this.brushSize - half; dx++) {
+      for (let dz = -half; dz < this.brushSize - half; dz++) {
+        const x = this.currentHoverPos.x + dx;
+        const z = this.currentHoverPos.z + dz;
+        if (x < 0 || z < 0 || x >= DEFAULT_GRID_SIZE || z >= DEFAULT_GRID_SIZE) continue;
+
+        const cell = state.grid[x]?.[z];
+        if (!cell?.buildingId || seen.has(cell.buildingId)) continue;
+        seen.add(cell.buildingId);
+
+        const building = state.buildings.find((b: PlacedBuilding) => b.id === cell.buildingId);
+        if (!building) continue;
+
+        const def = BUILDING_DEFS[building.type];
+        const w = def.size.w * CELL_SIZE;
+        const d = def.size.d * CELL_SIZE;
+
+        const preview = this.factory.createBulldozePreview(building.type);
+        preview.position.set(
+          building.position.x * CELL_SIZE + w / 2,
+          0,
+          building.position.z * CELL_SIZE + d / 2,
+        );
+        this.bulldozePreviewGroup.add(preview);
+      }
+    }
+
+    this.scene.add(this.bulldozePreviewGroup);
+  }
+
+  private clearBulldozePreview(): void {
+    if (this.bulldozePreviewGroup) {
+      this.scene.remove(this.bulldozePreviewGroup);
+      this.bulldozePreviewGroup.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          child.geometry.dispose();
+          if (child.material instanceof THREE.Material) {
+            child.material.dispose();
+          }
+        }
+      });
+      this.bulldozePreviewGroup = null;
     }
   }
 

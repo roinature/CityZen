@@ -37,6 +37,7 @@ import { CompassIndicator } from './ui/CompassIndicator.js';
 import { InfraToolbar } from './ui/InfraToolbar.js';
 import { MessageManager } from './ui/MessageManager.js';
 import { GameClient } from './network/GameClient.js';
+import { SoundManager } from './audio/SoundManager.js';
 
 const SERVER_URL = window.location.origin;
 const SESSION_KEY = 'cityzen_session';
@@ -95,6 +96,16 @@ const edgeRoadIndicator = new EdgeRoadIndicator(sceneManager.scene);
 const cityRenderer = new CityRenderer(sceneManager.scene);
 const carManager = new CarManager(sceneManager.scene);
 const buildMode = new BuildMode(sceneManager.scene, sceneManager.camera);
+const soundManager = new SoundManager();
+
+// Resume AudioContext on first user interaction (browser autoplay policy)
+const resumeAudio = () => {
+  soundManager.resume();
+  window.removeEventListener('click', resumeAudio);
+  window.removeEventListener('keydown', resumeAudio);
+};
+window.addEventListener('click', resumeAudio);
+window.addEventListener('keydown', resumeAudio);
 
 // --- UI ---
 const resourceBar = new ResourceBar(uiRoot);
@@ -217,6 +228,7 @@ GameClient.create(SERVER_URL, {
     cityRenderer.syncState(cityState);
     edgeRoadIndicator.update(cityState.buildings, worldState, cityState.id);
     resourceBar.update(cityState.resources, cityState);
+    soundManager.triggerConstruction();
   },
 
   onBuildingDemolished: (payload) => {
@@ -235,6 +247,7 @@ GameClient.create(SERVER_URL, {
     cityRenderer.syncState(cityState);
     edgeRoadIndicator.update(cityState.buildings, worldState, cityState.id);
     resourceBar.update(cityState.resources, cityState);
+    soundManager.triggerBulldoze();
   },
 
   onResourcesUpdate: (resources, tick, clock) => {
@@ -279,9 +292,11 @@ GameClient.create(SERVER_URL, {
           displayType: DisplayType.NOTIFICATION,
         };
         messageManager.addMessage(message);
+        soundManager.triggerNotification();
       }
     }
     cityRenderer.syncState(cityState);
+    soundManager.triggerConstruction();
   },
 
   onPlayerJoined: (player) => {
@@ -314,11 +329,19 @@ GameClient.create(SERVER_URL, {
 }).then((client) => {
   gameClient = client;
 
-  // Auto-rejoin saved session or show lobby
-  const savedSession = loadSession();
-  if (savedSession) {
-    currentPlayerName = savedSession.playerName;
-    gameClient.joinCity(savedSession.cityId, savedSession.playerName, playerId);
+  // Check for deep-link: ?cityId=xxx
+  const urlCityId = new URLSearchParams(window.location.search).get('cityId');
+  if (urlCityId) {
+    // Clear the query param from URL so refreshes don't re-trigger
+    window.history.replaceState({}, '', window.location.pathname);
+    gameClient.joinCity(urlCityId, currentPlayerName, playerId);
+  } else {
+    // Auto-rejoin saved session or show lobby
+    const savedSession = loadSession();
+    if (savedSession) {
+      currentPlayerName = savedSession.playerName;
+      gameClient.joinCity(savedSession.cityId, savedSession.playerName, playerId);
+    }
   }
 });
 
@@ -373,12 +396,14 @@ buildMode.onEdgeRoadClick = (direction: EdgeDirection, position: number) => {
 
   if (hasMatchingRoad) {
     console.log(`Traveling ${direction} to ${adjacentCity.name}`);
-    gameClient.leave(playerId);
-    cityState = null;
-    cityRenderer.clear();
-    edgeRoadIndicator.clear();
-    carManager.clear();
-    gameClient.joinCity(adjacentCity.cityId, currentPlayerName, playerId);
+    (async () => {
+      await gameClient.leave(playerId);
+      cityState = null;
+      cityRenderer.clear();
+      edgeRoadIndicator.clear();
+      carManager.clear();
+      gameClient.joinCity(adjacentCity.cityId, currentPlayerName, playerId);
+    })();
   } else {
     console.log(`Road not connected to ${adjacentCity.name}`);
   }
@@ -424,8 +449,8 @@ const gameMenu = new GameMenu(uiRoot, {
     gameClient.save(playerId);
     gameMenu.showStatus('Saving...');
   },
-  onLoadCity: (cityId: string) => {
-    gameClient.leave(playerId);
+  onLoadCity: async (cityId: string) => {
+    await gameClient.leave(playerId);
     cityState = null;
     cityRenderer.clear();
     edgeRoadIndicator.clear();
@@ -443,9 +468,9 @@ const gameMenu = new GameMenu(uiRoot, {
     carManager.clear();
     gameClient.restart(playerId);
   },
-  onEndGame: () => {
-    gameClient.save(playerId);
-    gameClient.leave(playerId);
+  onEndGame: async () => {
+    await gameClient.save(playerId);
+    await gameClient.leave(playerId);
     cityState = null;
     cityRenderer.clear();
     edgeRoadIndicator.clear();
@@ -489,6 +514,12 @@ function applyOptions(options: GameOptions): void {
       obj.castShadow = options.shadowsEnabled;
     }
   });
+
+  // Sound
+  soundManager.setEnabled(options.soundEnabled);
+  soundManager.setMasterVolume(options.masterVolume / 100);
+  soundManager.setMusicVolume(options.musicVolume / 100);
+  soundManager.setSfxVolume(options.sfxVolume / 100);
 }
 
 const optionsPanel = new OptionsPanel(uiRoot, applyOptions);
@@ -546,6 +577,16 @@ function gameLoop(): void {
   carManager.update(deltaTime, cityState);
   buildMode.updatePreview(cityState);
   compassIndicator.update(cameraController.getRotationAngle());
+
+  // Update sound system
+  soundManager.updateZoom(sceneManager.getFrustumSize());
+  if (cityState) {
+    const roadCount = cityState.buildings.filter(b =>
+      b.type.startsWith('road_')
+    ).length;
+    soundManager.updateTrafficLevel(roadCount);
+  }
+
   sceneManager.render();
 }
 
@@ -569,6 +610,7 @@ function generateResourceMessages(previousState: any, currentResources: any, cit
       displayType: DisplayType.NOTIFICATION,
     };
     messageManager.addMessage(message);
+    soundManager.triggerNotification();
   }
 
   // Check for budget surplus
@@ -587,6 +629,7 @@ function generateResourceMessages(previousState: any, currentResources: any, cit
       displayType: DisplayType.BANNER,
     };
     messageManager.addMessage(message);
+    soundManager.triggerNotification();
   }
 
   // Check population milestones
@@ -607,6 +650,7 @@ function generateResourceMessages(previousState: any, currentResources: any, cit
         displayType: DisplayType.BANNER,
       };
       messageManager.addMessage(message);
+      soundManager.triggerNotification();
       break;
     }
   }
@@ -627,6 +671,7 @@ function generateResourceMessages(previousState: any, currentResources: any, cit
       displayType: DisplayType.NOTIFICATION,
     };
     messageManager.addMessage(message);
+    soundManager.triggerNotification();
   } else if (currentResources.happiness > 80 && previousState.happiness <= 80) {
     const message = {
       id: `happiness_high_${Date.now()}`,
@@ -642,5 +687,6 @@ function generateResourceMessages(previousState: any, currentResources: any, cit
       displayType: DisplayType.BANNER,
     };
     messageManager.addMessage(message);
+    soundManager.triggerNotification();
   }
 }

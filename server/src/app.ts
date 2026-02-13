@@ -5,6 +5,8 @@ import { CLIENT_ORIGIN, SESSION_SECRET, TWITTER_CLIENT_ID, TWITTER_CLIENT_SECRET
 import { RoomManager } from './game/RoomManager.js';
 import { WorldManager } from './game/WorldManager.js';
 import { createGameRoutes } from './routes/gameRoutes.js';
+import { createAdminRoutes } from './routes/adminRoutes.js';
+import { getAdminPageHtml } from './admin/adminPage.js';
 import { initBroadcast } from './realtime/supabaseBroadcast.js';
 import { XService } from './services/XService.js';
 import { GoogleService } from './services/GoogleService.js';
@@ -88,6 +90,12 @@ app.use(session({
   saveUninitialized: false,
   cookie: { secure: false }
 }));
+
+// Admin panel
+app.get('/admin', (_req, res) => {
+  res.type('html').send(getAdminPageHtml());
+});
+app.use('/api/admin', createAdminRoutes(roomManager, worldManager, prisma));
 
 const xService = new XService({
   clientId: TWITTER_CLIENT_ID,

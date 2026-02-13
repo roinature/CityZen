@@ -5,6 +5,10 @@ export interface GameOptions {
   cameraSpeed: number;
   shadowsEnabled: boolean;
   unlimitedMoney: boolean;
+  soundEnabled: boolean;
+  masterVolume: number;
+  musicVolume: number;
+  sfxVolume: number;
 }
 
 const OPTIONS_KEY = 'cityzen_options';
@@ -16,6 +20,10 @@ const DEFAULT_OPTIONS: GameOptions = {
   cameraSpeed: 30,
   shadowsEnabled: true,
   unlimitedMoney: false,
+  soundEnabled: true,
+  masterVolume: 50,
+  musicVolume: 70,
+  sfxVolume: 80,
 };
 
 export type OptionsChangeCallback = (options: GameOptions) => void;
@@ -62,6 +70,26 @@ export class OptionsPanel {
             <label for="opt-unlimited">Unlimited Money</label>
             <input type="checkbox" id="opt-unlimited" />
           </div>
+          <hr style="border:none;border-top:1px solid rgba(255,255,255,0.15);margin:8px 0" />
+          <div class="option-row">
+            <label for="opt-sound">Sound</label>
+            <input type="checkbox" id="opt-sound" />
+          </div>
+          <div class="option-row">
+            <label for="opt-master-vol">Master Volume</label>
+            <input type="range" id="opt-master-vol" min="0" max="100" step="5" />
+            <span class="option-value" id="opt-master-vol-val"></span>
+          </div>
+          <div class="option-row">
+            <label for="opt-music-vol">Music Volume</label>
+            <input type="range" id="opt-music-vol" min="0" max="100" step="5" />
+            <span class="option-value" id="opt-music-vol-val"></span>
+          </div>
+          <div class="option-row">
+            <label for="opt-sfx-vol">SFX Volume</label>
+            <input type="range" id="opt-sfx-vol" min="0" max="100" step="5" />
+            <span class="option-value" id="opt-sfx-vol-val"></span>
+          </div>
         </div>
         <div class="options-buttons">
           <button class="menu-btn" id="opt-back">Back</button>
@@ -88,8 +116,12 @@ export class OptionsPanel {
     this.bindCheckbox('opt-cars', 'showCars');
     this.bindCheckbox('opt-shadows', 'shadowsEnabled');
     this.bindCheckbox('opt-unlimited', 'unlimitedMoney');
+    this.bindCheckbox('opt-sound', 'soundEnabled');
     this.bindRange('opt-max-cars', 'maxCars', 'opt-max-cars-val');
     this.bindRange('opt-cam-speed', 'cameraSpeed', 'opt-cam-speed-val');
+    this.bindRange('opt-master-vol', 'masterVolume', 'opt-master-vol-val');
+    this.bindRange('opt-music-vol', 'musicVolume', 'opt-music-vol-val');
+    this.bindRange('opt-sfx-vol', 'sfxVolume', 'opt-sfx-vol-val');
 
     this.syncUI();
     // Emit initial options
@@ -118,6 +150,7 @@ export class OptionsPanel {
     (this.overlay.querySelector('#opt-cars') as HTMLInputElement).checked = this.options.showCars;
     (this.overlay.querySelector('#opt-shadows') as HTMLInputElement).checked = this.options.shadowsEnabled;
     (this.overlay.querySelector('#opt-unlimited') as HTMLInputElement).checked = this.options.unlimitedMoney;
+    (this.overlay.querySelector('#opt-sound') as HTMLInputElement).checked = this.options.soundEnabled;
 
     const maxCarsEl = this.overlay.querySelector('#opt-max-cars') as HTMLInputElement;
     maxCarsEl.value = String(this.options.maxCars);
@@ -126,13 +159,25 @@ export class OptionsPanel {
     const camSpeedEl = this.overlay.querySelector('#opt-cam-speed') as HTMLInputElement;
     camSpeedEl.value = String(this.options.cameraSpeed);
     this.overlay.querySelector('#opt-cam-speed-val')!.textContent = String(this.options.cameraSpeed);
+
+    const masterVolEl = this.overlay.querySelector('#opt-master-vol') as HTMLInputElement;
+    masterVolEl.value = String(this.options.masterVolume);
+    this.overlay.querySelector('#opt-master-vol-val')!.textContent = String(this.options.masterVolume);
+
+    const musicVolEl = this.overlay.querySelector('#opt-music-vol') as HTMLInputElement;
+    musicVolEl.value = String(this.options.musicVolume);
+    this.overlay.querySelector('#opt-music-vol-val')!.textContent = String(this.options.musicVolume);
+
+    const sfxVolEl = this.overlay.querySelector('#opt-sfx-vol') as HTMLInputElement;
+    sfxVolEl.value = String(this.options.sfxVolume);
+    this.overlay.querySelector('#opt-sfx-vol-val')!.textContent = String(this.options.sfxVolume);
   }
 
   private bindCheckbox(id: string, key: keyof GameOptions): void {
     const el = this.overlay.querySelector(`#${id}`) as HTMLInputElement;
     el.addEventListener('change', () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (this.options as any)[key] = el.checked;
+      (this.options as any)[key] = el.checked;
       this.saveAndNotify();
     });
   }
@@ -141,7 +186,7 @@ export class OptionsPanel {
     const el = this.overlay.querySelector(`#${id}`) as HTMLInputElement;
     el.addEventListener('input', () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (this.options as any)[key] = Number(el.value);
+      (this.options as any)[key] = Number(el.value);
       this.overlay.querySelector(`#${valueId}`)!.textContent = el.value;
       this.saveAndNotify();
     });

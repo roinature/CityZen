@@ -19,7 +19,9 @@
       "Bash(node:*)",
       "Bash(curl:*)",
       "Bash(npx prisma migrate:*)",
-      "Bash(npx prisma db push:*)"
+      "Bash(npx prisma db push:*)",
+      "Bash(npx -w server prisma db execute:*)",
+      "Bash(find:*)"
     ]
   }
 }
