@@ -1771,7 +1771,7 @@ body {
   position: absolute;
   top: 108px;
   left: 50%;
-  z-index: 40;
+  z-index: 300; /* above the lobby / world-map overlays, which also report errors here */
   transform: translate(-50%, -8px);
   background: rgba(183, 28, 28, 0.92);
   color: white;
@@ -1808,4 +1808,36 @@ body {
 .money-flash-gain {
   display: inline-block;
   animation: money-flash-gain 0.6s ease-out;
+}
+
+/* --- Lobby feedback --- */
+.lobby-status {
+  min-height: 18px;
+  margin-top: 10px;
+  font-size: 12px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.lobby-status.error {
+  color: #ff8a80;
+}
+
+.lobby-panel button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+/* --- Game HUD is only shown while a city is on screen (body.in-city) --- */
+body:not(.in-city) .resource-bar,
+body:not(.in-city) .toolbar,
+body:not(.in-city) .tool-sidebar,
+body:not(.in-city) .infra-toolbar,
+body:not(.in-city) .menu-toggle,
+body:not(.in-city) .compass-indicator,
+body:not(.in-city) .footer-indicator,
+body:not(.in-city) .density-picker,
+body:not(.in-city) .message-notifications,
+body:not(.in-city) .message-banner {
+  display: none !important;
 }

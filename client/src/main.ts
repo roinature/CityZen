@@ -101,6 +101,13 @@ const carManager = new CarManager(sceneManager.scene);
 const buildMode = new BuildMode(sceneManager.scene, sceneManager.camera);
 const soundManager = new SoundManager();
 
+// --- HUD visibility ---
+// The build toolbars, resource bar etc. only make sense with a city on screen.
+// CSS hides them unless <body> has the "in-city" class.
+function setInCity(inCity: boolean): void {
+  document.body.classList.toggle('in-city', inCity);
+}
+
 // --- Notification Cooldowns ---
 // Prevents the same notification type from firing more than once per cooldown period
 const notificationCooldowns = new Map<string, number>();
@@ -226,6 +233,8 @@ GameClient.create(SERVER_URL, {
     resourceBar.update(city.resources, cityState);
     lobby.hide();
     worldMap.hide();
+    setInCity(true);
+    footerIndicator.hideToast();
     saveSession(city.id, currentPlayerName);
     // Re-apply options to the new server room (unlimited money, etc.)
     applyOptions(optionsPanel.getOptions());
@@ -345,8 +354,12 @@ GameClient.create(SERVER_URL, {
     if (error.code === 'PLACEMENT_FAILED' && error.message !== 'Cell occupied' && canNotify('placement_error', 1500)) {
       footerIndicator.toast(error.message);
     }
+    if (error.code === 'CLAIM_FAILED' || error.code === 'JOIN_FAILED') {
+      footerIndicator.toast(error.message, 4000);
+    }
     if (error.code === 'NOT_FOUND') {
       clearSession();
+      cityState = null;
       showWorldMap();
     }
   },
@@ -449,9 +462,16 @@ buildMode.onEdgeRoadClick = (direction: EdgeDirection, position: number) => {
 
 // --- Lobby (name entry + world selection) ---
 const lobby = new Lobby(uiRoot, {
-  onEnterWorld: (playerName, worldId) => {
+  onEnterWorld: async (playerName, worldId) => {
     currentPlayerName = playerName;
-    console.log(`Entering world: ${worldId}`);
+    if (!gameClient) {
+      throw new Error('Game client is not connected yet');
+    }
+    // Load the map of the world that was actually selected
+    const loaded = await gameClient.setWorld(worldId);
+    if (!loaded) {
+      throw new Error(`Could not load world ${worldId}`);
+    }
     lobby.hide();
     worldMap.show();
   },
@@ -467,14 +487,21 @@ const lobby = new Lobby(uiRoot, {
     });
     const data = await res.json();
     if (data.success) return { worldId: data.worldId };
+    console.error('Create world failed:', data.error);
     return null;
   },
 });
 
+lobby.refreshWorlds();
+
 // --- World Map ---
 const worldMap = new WorldMap(uiRoot, {
   onClaimPlot: (position, cityName) => {
-    gameClient.claimPlot(position, cityName, currentPlayerName, playerId);
+    footerIndicator.toast(`Founding ${cityName}…`, 8000);
+    gameClient.claimPlot(position, cityName, currentPlayerName, playerId).catch((err) => {
+      console.error('Claim failed:', err);
+      footerIndicator.toast('Could not reach the server');
+    });
   },
   onEnterCity: (cityId) => {
     gameClient.joinCity(cityId, currentPlayerName, playerId);
@@ -627,6 +654,12 @@ window.addEventListener('keydown', (e) => {
 
 // --- Show world map helper ---
 function showWorldMap(): void {
+  // No city on screen any more: drop the active tool and hide the HUD
+  buildMode.setToolMode('pointer');
+  toolSidebar.setActiveMode('pointer');
+  toolbar.setActive(null);
+  infraToolbar.setActive(null);
+  setInCity(false);
   worldMap.show();
 }
 

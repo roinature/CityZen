@@ -54,9 +54,19 @@ export function createGameRoutes(roomManager: RoomManager, worldManager: WorldMa
   }
 
   // GET /api/world/state — get current world state (replaces the on-connect emit)
-  router.get('/world/state', (req: Request, res: Response) => {
+  router.get('/world/state', async (req: Request, res: Response) => {
     const worldId = (req.query.worldId as string) || 'default';
-    res.json({ world: worldManager.getWorldState(worldId) });
+    try {
+      // Worlds other than the default are loaded on first use
+      const world = await worldManager.loadWorld(worldId);
+      if (!world) {
+        res.status(404).json({ error: 'World not found' });
+        return;
+      }
+      res.json({ world });
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to load world' });
+    }
   });
 
   // POST /api/world/claim
@@ -78,11 +88,18 @@ export function createGameRoutes(roomManager: RoomManager, worldManager: WorldMa
         });
       }
 
+      const worldId = payload.worldId || 'default';
+      if (!(await worldManager.loadWorld(worldId))) {
+        res.json({ success: false, error: 'World not found' });
+        return;
+      }
+
       const result = await worldManager.claimPlot(
         payload.position,
         payload.cityName,
         playerId,
-        payload.playerName
+        payload.playerName,
+        worldId,
       );
 
       if (!result.success) {

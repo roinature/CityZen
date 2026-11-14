@@ -58,6 +58,8 @@ export interface ClaimPlotPayload {
   cityName: string;
   playerName: string;
   playerId?: string;
+  /** World to claim the plot in (defaults to the default world). */
+  worldId?: string;
 }
 
 export interface PlaceBuildingPayload {

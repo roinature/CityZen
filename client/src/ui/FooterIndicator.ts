@@ -30,6 +30,11 @@ export class FooterIndicator {
     this.container.style.display = 'none';
   }
 
+  hideToast(): void {
+    if (this.toastTimer) clearTimeout(this.toastTimer);
+    this.toastEl.classList.remove('visible');
+  }
+
   /** Briefly show feedback for a failed action (e.g. "Not enough money"). */
   toast(text: string, durationMs = 2200): void {
     this.toastEl.textContent = text;

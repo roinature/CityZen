@@ -46,6 +46,7 @@ export class GameClient {
   private worldChannel!: RealtimeChannel;
   private cityChannel: RealtimeChannel | null = null;
   private currentCityId: string | null = null;
+  private currentWorldId = 'default';
 
   static async create(serverUrl: string, callbacks: GameCallbacks): Promise<GameClient> {
     const client = new GameClient(serverUrl, callbacks);
@@ -69,6 +70,8 @@ export class GameClient {
     this.worldChannel
       .on('broadcast', { event: S2C.WORLD_STATE }, (msg) => {
         const payload = msg.payload as WorldStatePayload;
+        // The channel carries every world's updates; only show the one we're in
+        if (payload.world.id !== this.currentWorldId) return;
         this.callbacks.onWorldState(payload.world);
       })
       .on('broadcast', { event: S2C.WORLD_TICK }, (msg) => {
@@ -80,14 +83,23 @@ export class GameClient {
     await this.fetchWorldState();
   }
 
-  private async fetchWorldState(): Promise<void> {
+  private async fetchWorldState(): Promise<boolean> {
     try {
-      const res = await fetch(`${this.serverUrl}/api/world/state`);
+      const res = await fetch(`${this.serverUrl}/api/world/state?worldId=${encodeURIComponent(this.currentWorldId)}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json() as WorldStatePayload;
       this.callbacks.onWorldState(data.world);
+      return true;
     } catch (err) {
       console.error('Failed to fetch world state:', err);
+      return false;
     }
+  }
+
+  /** Switch to the world picked in the lobby and load its map. */
+  async setWorld(worldId: string): Promise<boolean> {
+    this.currentWorldId = worldId;
+    return this.fetchWorldState();
   }
 
   private async subscribeToCityChannel(cityId: string): Promise<void> {
@@ -155,9 +167,14 @@ export class GameClient {
   }
 
   async claimPlot(position: WorldPosition, cityName: string, playerName: string, playerId?: string): Promise<void> {
-    const result = await this.post('/api/world/claim', { position, cityName, playerName, playerId });
+    const result = await this.post('/api/world/claim', {
+      position, cityName, playerName, playerId, worldId: this.currentWorldId,
+    });
     if (result.success && result.cityId) {
-      await this.subscribeToCityChannel(result.cityId);
+      // The server broadcasts the new city's state before we can subscribe to
+      // its channel, so that message is lost. Join explicitly (subscribe first,
+      // then ask for the state again) or the player is left on the world map.
+      await this.joinCity(result.cityId, playerName, playerId);
     } else if (!result.success) {
       this.callbacks.onError({ message: result.error || 'Failed to claim plot', code: 'CLAIM_FAILED' });
     }
