@@ -10,6 +10,7 @@ import {
   isRoad,
   isZone,
   BUILDING_DEFS,
+  ZONE_DENSITY_COSTS,
   CELL_SIZE,
   DEFAULT_GRID_SIZE,
   canPlaceBuilding,
@@ -99,10 +100,14 @@ export class BuildMode {
   // Bulldoze preview
   private bulldozePreviewGroup: THREE.Group | null = null;
 
+  // Previews are only rebuilt when something relevant changes (see previewKey)
+  private lastPreviewKey: string | null = null;
+
   onPlace: ((pos: Position, type: BuildingType, density?: ZoneDensity, orientation?: RoadOrientation) => void) | null = null;
   onDemolish: ((pos: Position) => void) | null = null;
   onEdgeRoadClick: ((direction: EdgeDirection, position: number) => void) | null = null;
-  onDragCostUpdate: ((cost: number | null) => void) | null = null;
+  /** Reports the cost of what is about to be placed (null = nothing), and whether the city can afford it. */
+  onDragCostUpdate: ((cost: number | null, affordable?: boolean) => void) | null = null;
 
   constructor(scene: THREE.Scene, camera: THREE.Camera) {
     this.scene = scene;
@@ -122,12 +127,14 @@ export class BuildMode {
 
   select(type: BuildingType): void {
     this.selectedType = type;
+    this.lastPreviewKey = null;
     this.clearPreview();
     this.clearRectPreview();
   }
 
   setDensity(density: ZoneDensity | null): void {
     this.selectedDensity = density;
+    this.lastPreviewKey = null;
   }
 
   deselect(): void {
@@ -136,6 +143,7 @@ export class BuildMode {
     this.isDragging = false;
     this.lineDragStart = null;
     this.rectDragStart = null;
+    this.lastPreviewKey = null;
     this.clearPreview();
     this.clearLineDragPreview();
     this.clearRectPreview();
@@ -166,7 +174,36 @@ export class BuildMode {
     this.brushSize = Math.max(1, Math.min(3, size));
   }
 
+  /** Cost of one unit of the selected type (zones are priced by density). */
+  private getUnitCost(): number {
+    if (!this.selectedType) return 0;
+    if (isZone(this.selectedType) && this.selectedDensity) {
+      return ZONE_DENSITY_COSTS[this.selectedDensity];
+    }
+    return BUILDING_DEFS[this.selectedType].cost;
+  }
+
+  /** Everything the preview depends on. Unchanged key → keep the existing preview meshes. */
+  private previewKey(state: CityState | null): string {
+    const pos = (p: Position | null) => (p ? `${p.x},${p.z}` : '-');
+    return [
+      this.toolMode, this.selectedType, this.selectedDensity, this.brushSize,
+      pos(this.currentHoverPos), this.isDragging, pos(this.lineDragStart), pos(this.rectDragStart),
+      state?.id, state?.buildings.length, state?.resources.money, this.unlimitedMoney,
+    ].join('|');
+  }
+
+  private canAfford(state: CityState, cost: number): boolean {
+    return this.unlimitedMoney || state.resources.money >= cost;
+  }
+
   updatePreview(state: CityState | null): void {
+    // Rebuilding preview meshes every frame is wasteful (a zone drag can be
+    // hundreds of cells) — only do it when the inputs actually changed.
+    const key = this.previewKey(state);
+    if (key === this.lastPreviewKey) return;
+    this.lastPreviewKey = key;
+
     // Bulldoze preview
     if (this.toolMode === 'bulldoze' && this.currentHoverPos && state) {
       this.clearPreview();
@@ -181,13 +218,14 @@ export class BuildMode {
       this.clearPreview();
       this.clearLineDragPreview();
       this.clearRectPreview();
+      this.onDragCostUpdate?.(null);
       return;
     }
 
     // Line drag preview for roads
     if (this.isDragging && this.lineDragStart && isLineDragType(this.selectedType)) {
       this.clearPreview();
-      this.updateLineDragPreview();
+      this.updateLineDragPreview(state);
       return;
     }
 
@@ -205,6 +243,7 @@ export class BuildMode {
     const result = canPlaceBuilding(
       state.grid, this.currentHoverPos, this.selectedType,
       state.resources, this.unlimitedMoney, state.buildings,
+      this.selectedDensity ?? undefined,
     );
 
     this.clearPreview();
@@ -218,39 +257,74 @@ export class BuildMode {
       this.currentHoverPos.z * CELL_SIZE + d / 2,
     );
     this.scene.add(this.previewMesh);
+
+    const unitCost = this.getUnitCost();
+    this.onDragCostUpdate?.(unitCost, this.canAfford(state, unitCost));
+  }
+
+  /**
+   * Split the dragged rectangle into cells that will be zoned and cells that
+   * won't (occupied, or beyond what the treasury can pay for).
+   */
+  private computeRectPlacements(state: CityState | null): { placeable: Position[]; blocked: Position[]; cost: number } {
+    const placeable: Position[] = [];
+    const blocked: Position[] = [];
+    let cost = 0;
+    if (!this.rectDragStart || !this.currentHoverPos || !this.selectedType) {
+      return { placeable, blocked, cost };
+    }
+
+    const minX = Math.min(this.rectDragStart.x, this.currentHoverPos.x);
+    const maxX = Math.max(this.rectDragStart.x, this.currentHoverPos.x);
+    const minZ = Math.min(this.rectDragStart.z, this.currentHoverPos.z);
+    const maxZ = Math.max(this.rectDragStart.z, this.currentHoverPos.z);
+    const unitCost = this.getUnitCost();
+
+    for (let x = minX; x <= maxX; x++) {
+      for (let z = minZ; z <= maxZ; z++) {
+        const pos: Position = { x, z };
+        if (!state) {
+          placeable.push(pos);
+          continue;
+        }
+        // Occupancy/bounds only here; the budget is tracked cumulatively below
+        const free = canPlaceBuilding(
+          state.grid, pos, this.selectedType, state.resources, true, state.buildings,
+        ).valid;
+        if (free && this.canAfford(state, cost + unitCost)) {
+          placeable.push(pos);
+          cost += unitCost;
+        } else {
+          blocked.push(pos);
+        }
+      }
+    }
+
+    return { placeable, blocked, cost };
   }
 
   private updateRectPreview(state: CityState): void {
     this.clearRectPreview();
     if (!this.rectDragStart || !this.currentHoverPos || !this.selectedType) return;
 
-    const minX = Math.min(this.rectDragStart.x, this.currentHoverPos.x);
-    const maxX = Math.max(this.rectDragStart.x, this.currentHoverPos.x);
-    const minZ = Math.min(this.rectDragStart.z, this.currentHoverPos.z);
-    const maxZ = Math.max(this.rectDragStart.z, this.currentHoverPos.z);
-
+    const { placeable, blocked, cost } = this.computeRectPlacements(state);
     this.rectPreviewGroup = new THREE.Group();
+    const half = CELL_SIZE / 2;
 
-    for (let x = minX; x <= maxX; x++) {
-      for (let z = minZ; z <= maxZ; z++) {
-        const pos: Position = { x, z };
-        const result = canPlaceBuilding(
-          state.grid, pos, this.selectedType,
-          state.resources, this.unlimitedMoney, state.buildings,
-        );
-
-        const cellPreview = this.factory.createPreview(this.selectedType, result.valid);
-        const half = CELL_SIZE / 2;
-        cellPreview.position.set(
-          x * CELL_SIZE + half,
-          0,
-          z * CELL_SIZE + half,
-        );
-        this.rectPreviewGroup.add(cellPreview);
-      }
-    }
+    const addCell = (pos: Position, valid: boolean) => {
+      const cellPreview = this.factory.createPreview(this.selectedType!, valid);
+      cellPreview.position.set(pos.x * CELL_SIZE + half, 0, pos.z * CELL_SIZE + half);
+      this.rectPreviewGroup!.add(cellPreview);
+    };
+    for (const pos of placeable) addCell(pos, true);
+    for (const pos of blocked) addCell(pos, false);
 
     this.scene.add(this.rectPreviewGroup);
+
+    // Warn when part of the area was dropped because the money ran out
+    const unitCost = this.getUnitCost();
+    const outOfMoney = blocked.length > 0 && !this.canAfford(state, cost + unitCost);
+    this.onDragCostUpdate?.(cost, !outOfMoney);
   }
 
   private onMouseMove(e: MouseEvent): void {
@@ -265,7 +339,6 @@ export class BuildMode {
     if ((e.target as HTMLElement).closest('#ui-root')) return;
 
     const pos = this.raycaster.getGridPosition(e.clientX, e.clientY, this.camera);
-    console.log('[BuildMode] mousedown', { pos, selectedType: this.selectedType, toolMode: this.toolMode });
 
     // Rectangle drag for zones
     if (isRectDragType(this.selectedType)) {
@@ -287,21 +360,11 @@ export class BuildMode {
   }
 
   private onMouseUp(): void {
-    console.log('[BuildMode] mouseup', {
-      isDragging: this.isDragging,
-      lineDragStart: this.lineDragStart,
-      selectedType: this.selectedType,
-      isLineDrag: this.selectedType ? isLineDragType(this.selectedType) : null,
-      hasOnPlace: !!this.onPlace,
-      currentHoverPos: this.currentHoverPos,
-    });
-
     // Line drag release — place all roads along the straight line
     if (this.isDragging && this.lineDragStart && this.selectedType && isLineDragType(this.selectedType) && this.onPlace && this.currentHoverPos) {
       const orientation = computeLineDragOrientation(this.lineDragStart, this.currentHoverPos);
       const { w, d } = getEffectiveSize(this.selectedType, orientation);
       const positions = computeStraightLine(this.lineDragStart, this.currentHoverPos, w, d);
-      console.log('[BuildMode] placing roads', { count: positions.length, positions, orientation });
       for (const pos of positions) {
         this.onPlace(pos, this.selectedType, undefined, orientation);
       }
@@ -309,24 +372,20 @@ export class BuildMode {
 
     // Rectangle drag release — place all zones in the rectangle
     if (this.isDragging && this.rectDragStart && this.selectedType && isRectDragType(this.selectedType) && this.onPlace && this.currentHoverPos) {
-      const minX = Math.min(this.rectDragStart.x, this.currentHoverPos.x);
-      const maxX = Math.max(this.rectDragStart.x, this.currentHoverPos.x);
-      const minZ = Math.min(this.rectDragStart.z, this.currentHoverPos.z);
-      const maxZ = Math.max(this.rectDragStart.z, this.currentHoverPos.z);
-
-      for (let x = minX; x <= maxX; x++) {
-        for (let z = minZ; z <= maxZ; z++) {
-          this.onPlace({ x, z }, this.selectedType, this.selectedDensity ?? undefined);
-        }
+      // Only send cells that are free and affordable, instead of spamming the
+      // server with requests it will reject
+      const { placeable } = this.computeRectPlacements(this.currentCityState);
+      for (const pos of placeable) {
+        this.onPlace(pos, this.selectedType, this.selectedDensity ?? undefined);
       }
     }
 
     this.isDragging = false;
     this.lineDragStart = null;
     this.rectDragStart = null;
+    this.lastPreviewKey = null;
     this.clearLineDragPreview();
     this.clearRectPreview();
-    this.onDragCostUpdate?.(null);
   }
 
   private onClick(e: MouseEvent): void {
@@ -423,7 +482,7 @@ export class BuildMode {
     this.currentCityState = state;
   }
 
-  private updateLineDragPreview(): void {
+  private updateLineDragPreview(state: CityState): void {
     this.clearLineDragPreview();
     if (!this.lineDragStart || !this.currentHoverPos || !this.selectedType) return;
 
@@ -450,7 +509,7 @@ export class BuildMode {
     // Update cost indicator
     const def = BUILDING_DEFS[this.selectedType];
     const totalCost = positions.length * def.cost;
-    this.onDragCostUpdate?.(totalCost);
+    this.onDragCostUpdate?.(totalCost, this.canAfford(state, totalCost));
   }
 
   private clearLineDragPreview(): void {

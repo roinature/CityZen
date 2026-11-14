@@ -39,13 +39,17 @@ export class SceneManager {
   }
 
   private onResize(): void {
+    this.updateProjection();
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+  }
+
+  private updateProjection(): void {
     const aspect = window.innerWidth / window.innerHeight;
     this.camera.left = (-this.frustumSize * aspect) / 2;
     this.camera.right = (this.frustumSize * aspect) / 2;
     this.camera.top = this.frustumSize / 2;
     this.camera.bottom = -this.frustumSize / 2;
     this.camera.updateProjectionMatrix();
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
   }
 
   getFrustumSize(): number {
@@ -54,7 +58,7 @@ export class SceneManager {
 
   setFrustumSize(size: number): void {
     this.frustumSize = size;
-    this.onResize();
+    this.updateProjection();
   }
 
   setDayNight(isNight: boolean): void {

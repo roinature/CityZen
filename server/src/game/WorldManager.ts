@@ -7,10 +7,13 @@ import {
   S2C,
   WORLD_MAP_SIZE,
   INITIAL_CITY_SEED,
+  DEFAULT_GRID_SIZE,
+  INITIAL_RESOURCES,
 } from '@cityzen/shared';
 import { RoomManager } from './RoomManager.js';
 import { WorldTickEngine } from './WorldTickEngine.js';
 import { PopulationManager } from './PopulationManager.js';
+import { CityGenerator, type CitySize } from './CityGenerator.js';
 import {
   saveWorldState,
   loadWorldState,
@@ -18,6 +21,7 @@ import {
   loadPopulationData,
   listWorlds as listWorldsFromDb,
 } from '../persistence/worldStore.js';
+import { deleteCityState } from '../persistence/jsonStore.js';
 import { broadcastToAll } from '../realtime/supabaseBroadcast.js';
 
 interface WorldInstance {
@@ -153,6 +157,13 @@ export class WorldManager {
     return this.worlds.get(worldId)!.populationManager;
   }
 
+  /** Get city IDs belonging to a world */
+  getCityIdsForWorld(worldId: string): string[] {
+    const instance = this.worlds.get(worldId);
+    if (!instance) return [];
+    return instance.state.cities.map(c => c.cityId);
+  }
+
   /** Find which world a city belongs to */
   findWorldForCity(cityId: string): WorldInstance | undefined {
     for (const instance of this.worlds.values()) {
@@ -262,6 +273,124 @@ export class WorldManager {
     } catch (err) {
       console.error(`Failed to save world state (${worldId}):`, err);
     }
+  }
+
+  // ── World Generation ─────────────────────────────────────
+
+  async generateWorld(
+    worldId: string,
+    cityConfigs: Array<{ position: WorldPosition; name: string; citySize?: CitySize }>,
+    onProgress?: (completed: number, total: number, cityName: string) => void,
+  ): Promise<{ success: boolean; citiesGenerated: number; error?: string }> {
+    const instance = this.worlds.get(worldId);
+    if (!instance) return { success: false, citiesGenerated: 0, error: 'World not found' };
+
+    const generator = new CityGenerator();
+    let generated = 0;
+
+    for (const cityConfig of cityConfigs) {
+      if (!this.isPlotAvailable(cityConfig.position, worldId)) {
+        continue;
+      }
+
+      // Get neighbor cities for edge matching
+      const neighborCities = this.getAdjacentCities(cityConfig.position, worldId);
+
+      // Generate city layout with size parameters
+      const result = generator.generateCityLayout({
+        gridSize: DEFAULT_GRID_SIZE,
+        neighborCities,
+        worldPosition: cityConfig.position,
+        citySize: cityConfig.citySize,
+      });
+
+      // Create room and apply generated layout
+      const systemOwnerId = 'system';
+      const systemOwnerName = 'CityZen AI';
+      const room = await this.roomManager.createRoom(
+        cityConfig.name, systemOwnerId, systemOwnerName,
+      );
+
+      room.state.grid = result.grid;
+      room.state.buildings = result.buildings;
+      room.state.resources = {
+        ...INITIAL_RESOURCES,
+        money: result.startingMoney,
+      };
+
+      // Seed population based on city size
+      const seeded = instance.populationManager.seedCity(room.id, result.populationSeed);
+
+      // Add world city entry with edge connections
+      const entry: WorldCityEntry = {
+        cityId: room.id,
+        ownerId: systemOwnerId,
+        ownerName: systemOwnerName,
+        name: cityConfig.name,
+        position: cityConfig.position,
+        population: seeded.length,
+        happiness: 50,
+        edgeConnections: result.edgeConnections,
+      };
+      instance.state.cities.push(entry);
+
+      // Persist
+      await room.forceSave();
+
+      generated++;
+      onProgress?.(generated, cityConfigs.length, cityConfig.name);
+
+      console.log(
+        `Generated ${cityConfig.citySize ?? 'medium'} city "${cityConfig.name}" at (${cityConfig.position.wx},${cityConfig.position.wz}) ` +
+        `with ${result.buildings.length} buildings, ${seeded.length} people, $${result.startingMoney}`,
+      );
+    }
+
+    instance.state.updatedAt = Date.now();
+    await this.save(worldId);
+
+    broadcastToAll(S2C.WORLD_STATE, { world: instance.state });
+
+    return { success: true, citiesGenerated: generated };
+  }
+
+  async clearWorldCities(worldId = 'default'): Promise<{ success: boolean; removed: number; error?: string }> {
+    const instance = this.worlds.get(worldId);
+    if (!instance) return { success: false, removed: 0, error: 'World not found' };
+
+    const cityIds = instance.state.cities.map(c => c.cityId);
+    let removed = 0;
+
+    for (const cityId of cityIds) {
+      this.roomManager.removeRoom(cityId);
+      await deleteCityState(cityId);
+      removed++;
+    }
+
+    instance.state.cities = [];
+    instance.state.updatedAt = Date.now();
+    await this.save(worldId);
+
+    broadcastToAll(S2C.WORLD_STATE, { world: instance.state });
+
+    console.log(`Cleared ${removed} cities from world "${instance.state.name}"`);
+    return { success: true, removed };
+  }
+
+  private getAdjacentCities(position: WorldPosition, worldId: string): WorldCityEntry[] {
+    const instance = this.worlds.get(worldId);
+    if (!instance) return [];
+
+    const deltas = [
+      { dx: -1, dz: 0 }, { dx: 1, dz: 0 },
+      { dx: 0, dz: -1 }, { dx: 0, dz: 1 },
+    ];
+
+    return deltas
+      .map(d => instance.state.cities.find(
+        c => c.position.wx === position.wx + d.dx && c.position.wz === position.wz + d.dz,
+      ))
+      .filter((c): c is WorldCityEntry => c !== undefined);
   }
 
   shutdown(): void {

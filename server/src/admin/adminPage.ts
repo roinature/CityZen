@@ -122,13 +122,75 @@ export function getAdminPageHtml(): string {
 
     <!-- Cities -->
     <div class="tab-content" id="tab-cities">
+      <div class="toolbar">
+        <select id="cityWorldFilter" onchange="currentCitiesPage=1; loadCities();" style="padding:8px 12px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#e1e4e8; font-size:14px;">
+          <option value="">All Worlds</option>
+        </select>
+      </div>
       <div id="citiesTable"></div>
       <div class="pagination" id="citiesPagination"></div>
     </div>
 
     <!-- Worlds -->
     <div class="tab-content" id="tab-worlds">
+      <div class="toolbar">
+        <button class="btn btn-primary btn-sm" onclick="openCreateWorld()">Create World</button>
+      </div>
       <div id="worldsTable"></div>
+
+      <!-- Generate World Section -->
+      <div style="margin-top:24px; padding:16px; background:#161b22; border:1px solid #30363d; border-radius:8px;">
+        <h3 style="margin-bottom:16px; font-size:16px; color:#e1e4e8;">Generate World Cities</h3>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px;">
+          <div>
+            <label style="display:block; font-size:13px; color:#8b949e; margin-bottom:4px;">World</label>
+            <select id="genWorldId" style="width:100%; padding:8px 12px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#e1e4e8; font-size:14px;">
+              <option value="default">Default World</option>
+            </select>
+          </div>
+          <div>
+            <label style="display:block; font-size:13px; color:#8b949e; margin-bottom:4px;">Number of Cities</label>
+            <input type="number" id="genCityCount" value="4" min="1" max="64" style="width:100%; padding:8px 12px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#e1e4e8; font-size:14px;">
+          </div>
+          <div>
+            <label style="display:block; font-size:13px; color:#8b949e; margin-bottom:4px;">Pattern</label>
+            <select id="genPattern" style="width:100%; padding:8px 12px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#e1e4e8; font-size:14px;">
+              <option value="cluster">Cluster (center out)</option>
+              <option value="spread">Spread (distributed)</option>
+              <option value="random">Random</option>
+            </select>
+          </div>
+          <div>
+            <label style="display:block; font-size:13px; color:#8b949e; margin-bottom:4px;">City Size</label>
+            <select id="genCitySize" style="width:100%; padding:8px 12px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#e1e4e8; font-size:14px;">
+              <option value="small">Small (sparse, 5 people, $15k)</option>
+              <option value="medium" selected>Medium (balanced, 15 people, $50k)</option>
+              <option value="large">Large (dense, 30 people, $100k)</option>
+            </select>
+          </div>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr; gap:12px; margin-bottom:16px;">
+          <div>
+            <label style="display:block; font-size:13px; color:#8b949e; margin-bottom:4px;">City Names (comma-separated, optional)</label>
+            <input type="text" id="genCityNames" placeholder="Leave empty for random names" style="width:100%; padding:8px 12px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#e1e4e8; font-size:14px;">
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:16px; margin-bottom:12px;">
+          <label style="display:flex; align-items:center; gap:6px; font-size:13px; color:#8b949e; cursor:pointer;">
+            <input type="checkbox" id="genClearExisting" style="cursor:pointer;"> Clear existing cities first
+          </label>
+        </div>
+        <button class="btn btn-primary" id="genStartBtn" onclick="startWorldGeneration()">Generate Cities</button>
+        <div id="genProgress" style="display:none; margin-top:16px;">
+          <div style="display:flex; align-items:center; gap:12px;">
+            <div style="flex:1; background:#21262d; border-radius:4px; height:8px; overflow:hidden;">
+              <div id="genProgressBar" style="background:#238636; height:100%; width:0%; transition:width 0.3s;"></div>
+            </div>
+            <span id="genProgressText" style="font-size:13px; color:#8b949e; white-space:nowrap;">0 / 0</span>
+          </div>
+          <div id="genProgressCity" style="font-size:12px; color:#8b949e; margin-top:4px;"></div>
+        </div>
+      </div>
     </div>
 
     <!-- Messages -->
@@ -196,6 +258,25 @@ export function getAdminPageHtml(): string {
   </div>
 </div>
 
+<!-- Create World Modal -->
+<div class="modal-overlay" id="createWorldModal">
+  <div class="modal">
+    <h3>Create World</h3>
+    <label>Name</label>
+    <input type="text" id="createWorldName" placeholder="My World">
+    <label>Grid Size</label>
+    <input type="number" id="createWorldGridSize" value="8" min="4" max="16">
+    <label>Max Cities</label>
+    <input type="number" id="createWorldMaxCities" value="64" min="1" max="256">
+    <label>Initial Population</label>
+    <input type="number" id="createWorldPopulation" value="100" min="10" max="10000">
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('createWorldModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveCreateWorld()">Create</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const API = '/api/admin';
 let currentPlayersPage = 1;
@@ -241,6 +322,7 @@ function showApp() {
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('app').style.display = 'block';
   loadDashboard();
+  loadCityWorldFilter();
 }
 
 // ── Tabs ──────────────────────────────────────────────────
@@ -253,7 +335,7 @@ function switchTab(name, btn) {
 
   if (name === 'dashboard') loadDashboard();
   else if (name === 'players') loadPlayers();
-  else if (name === 'cities') loadCities();
+  else if (name === 'cities') { loadCityWorldFilter().then(loadCities); }
   else if (name === 'worlds') loadWorlds();
   else if (name === 'messages') loadMessages();
 }
@@ -330,8 +412,34 @@ async function deletePlayer(id) {
 
 // ── Cities ────────────────────────────────────────────────
 
+var citiesWorldsCache = null;
+
+async function loadCityWorldFilter() {
+  try {
+    const r = await fetch(API + '/worlds');
+    const d = await r.json();
+    citiesWorldsCache = d.worlds || [];
+    const select = document.getElementById('cityWorldFilter');
+    if (!select) return;
+    const current = select.value;
+    var opts = '<option value="">All Worlds</option>';
+    for (var i = 0; i < citiesWorldsCache.length; i++) {
+      var w = citiesWorldsCache[i];
+      opts += '<option value="' + w.id + '">' + esc(w.name) + '</option>';
+    }
+    select.innerHTML = opts;
+    if (current) select.value = current;
+  } catch (err) {
+    console.error('Failed to load worlds for filter', err);
+  }
+}
+
 async function loadCities() {
-  const r = await fetch(API + '/cities?page=' + currentCitiesPage + '&limit=20');
+  var select = document.getElementById('cityWorldFilter');
+  var worldFilter = select ? select.value : '';
+  var url = API + '/cities?page=' + currentCitiesPage + '&limit=20';
+  if (worldFilter) url += '&worldId=' + encodeURIComponent(worldFilter);
+  const r = await fetch(url);
   const d = await r.json();
 
   if (d.cities.length === 0) {
@@ -340,13 +448,15 @@ async function loadCities() {
     return;
   }
 
-  let html = '<table><tr><th>Name</th><th>Owner</th><th>Money</th><th>Population</th><th>Happiness</th><th>Tax</th><th>Buildings</th><th>Status</th><th>Actions</th></tr>';
+  let html = '<table><tr><th>Name</th><th>World</th><th>Owner</th><th>Money</th><th>Population</th><th>Happiness</th><th>Tax</th><th>Buildings</th><th>Status</th><th>Actions</th></tr>';
   for (const c of d.cities) {
     const status = c.isActive
       ? '<span class="badge badge-green">' + c.activePlayers + ' online</span>'
       : '<span class="badge badge-yellow">idle</span>';
     const cityLink = '/?cityId=' + encodeURIComponent(c.id);
-    html += '<tr><td><a href="' + cityLink + '" target="_blank" style="color:#58a6ff;text-decoration:none" title="Open city in game">' + esc(c.name) + ' &#8599;</a></td><td class="mono">' + esc(c.ownerId.slice(0,8)) + '...</td>'
+    html += '<tr><td><a href="' + cityLink + '" target="_blank" style="color:#58a6ff;text-decoration:none" title="Open city in game">' + esc(c.name) + ' &#8599;</a></td>'
+      + '<td>' + esc(c.worldName || '-') + '</td>'
+      + '<td class="mono">' + esc(c.ownerId.slice(0,8)) + '...</td>'
       + '<td>' + fmtNum(c.money) + '</td><td>' + Math.floor(c.population) + '</td>'
       + '<td>' + Math.floor(c.happiness) + '%</td><td>' + c.taxRate + '%</td>'
       + '<td>' + c.buildingCount + '</td><td>' + status + '</td>'
@@ -425,6 +535,14 @@ async function loadWorlds() {
   }
   html += '</table>';
   document.getElementById('worldsTable').innerHTML = html;
+
+  // Populate generation world dropdown
+  var select = document.getElementById('genWorldId');
+  if (select && d.worlds) {
+    select.innerHTML = d.worlds.map(function(w) {
+      return '<option value="' + esc(w.id) + '">' + esc(w.name) + '</option>';
+    }).join('');
+  }
 }
 
 function openEditWorld(id, name, gridSize, maxCities) {
@@ -448,6 +566,112 @@ async function saveWorldEdit() {
   });
   closeModal('worldModal');
   loadWorlds();
+}
+
+function openCreateWorld() {
+  document.getElementById('createWorldName').value = '';
+  document.getElementById('createWorldGridSize').value = '8';
+  document.getElementById('createWorldMaxCities').value = '64';
+  document.getElementById('createWorldPopulation').value = '100';
+  document.getElementById('createWorldModal').classList.add('open');
+}
+
+async function saveCreateWorld() {
+  const name = document.getElementById('createWorldName').value.trim();
+  if (!name) { alert('Name is required'); return; }
+  const r = await fetch('/api/worlds/create', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({
+      name: name,
+      gridSize: Number(document.getElementById('createWorldGridSize').value),
+      maxCities: Number(document.getElementById('createWorldMaxCities').value),
+      initialPopulation: Number(document.getElementById('createWorldPopulation').value),
+    })
+  });
+  const d = await r.json();
+  if (!d.success) { alert('Failed to create world: ' + (d.error || 'Unknown error')); return; }
+  closeModal('createWorldModal');
+  loadWorlds();
+  loadDashboard();
+}
+
+// ── World Generation ──────────────────────────────────────
+
+async function startWorldGeneration() {
+  var worldId = document.getElementById('genWorldId').value;
+  var cityCount = Number(document.getElementById('genCityCount').value);
+  var pattern = document.getElementById('genPattern').value;
+  var citySize = document.getElementById('genCitySize').value;
+  var namesStr = document.getElementById('genCityNames').value.trim();
+  var cityNames = namesStr ? namesStr.split(',').map(function(n) { return n.trim(); }).filter(Boolean) : undefined;
+  var clearExisting = document.getElementById('genClearExisting').checked;
+
+  document.getElementById('genStartBtn').disabled = true;
+  document.getElementById('genProgress').style.display = 'block';
+  document.getElementById('genProgressText').textContent = 'Starting...';
+  document.getElementById('genProgressCity').textContent = '';
+  document.getElementById('genProgressBar').style.width = '0%';
+
+  try {
+    var r = await fetch(API + '/generate-world', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ worldId: worldId, cityCount: cityCount, cityNames: cityNames, pattern: pattern, clearExisting: clearExisting, citySize: citySize }),
+    });
+    var d = await r.json();
+    if (!d.success) {
+      alert('Generation failed: ' + (d.error || 'Unknown error'));
+      document.getElementById('genStartBtn').disabled = false;
+      document.getElementById('genProgress').style.display = 'none';
+      return;
+    }
+    pollGenerationProgress(d.generationId, d.totalCities);
+  } catch (err) {
+    alert('Failed to start generation');
+    document.getElementById('genStartBtn').disabled = false;
+    document.getElementById('genProgress').style.display = 'none';
+  }
+}
+
+function pollGenerationProgress(generationId, total) {
+  var poll = async function() {
+    try {
+      var r = await fetch(API + '/generate-world/progress/' + generationId);
+      var d = await r.json();
+
+      var pct = total > 0 ? Math.round((d.completed / total) * 100) : 0;
+      document.getElementById('genProgressBar').style.width = pct + '%';
+      document.getElementById('genProgressText').textContent = d.completed + ' / ' + total;
+
+      if (d.status === 'running') {
+        document.getElementById('genProgressCity').textContent = 'Generating: ' + d.currentCity + '...';
+        setTimeout(poll, 1000);
+        return;
+      }
+
+      if (d.status === 'completed') {
+        document.getElementById('genProgressCity').textContent = 'Generation complete! ' + d.completed + ' cities created.';
+        document.getElementById('genStartBtn').disabled = false;
+        loadWorlds();
+        loadCities();
+        loadDashboard();
+        return;
+      }
+
+      if (d.status === 'failed') {
+        document.getElementById('genProgressCity').textContent = 'Generation failed: ' + (d.error || 'Unknown error');
+        document.getElementById('genStartBtn').disabled = false;
+        return;
+      }
+
+      setTimeout(poll, 1000);
+    } catch (err) {
+      document.getElementById('genProgressCity').textContent = 'Lost connection to server';
+      document.getElementById('genStartBtn').disabled = false;
+    }
+  };
+  setTimeout(poll, 500);
 }
 
 // ── Messages ──────────────────────────────────────────────

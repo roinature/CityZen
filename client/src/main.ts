@@ -9,6 +9,9 @@ import {
   getEffectiveSize,
   findAdjacentCity,
   getOppositeDirection,
+  isZone,
+  calculateNetIncome,
+  MIN_DEMAND_TO_GROW,
   MessageType,
   MessageCategory,
   MessagePriority,
@@ -283,6 +286,7 @@ GameClient.create(SERVER_URL, {
 
     // Generate messages based on resource changes
     generateResourceMessages(previousState, resources, cityState);
+    generateAdvisorHints(cityState);
   },
 
   onZoneGrowth: (payload) => {
@@ -336,6 +340,11 @@ GameClient.create(SERVER_URL, {
 
   onError: (error) => {
     console.error(`Server error: ${error.message} (${error.code})`);
+    // Tell the player why a build failed. "Cell occupied" is skipped: the red
+    // preview already shows it, and dragging a road across another one is normal.
+    if (error.code === 'PLACEMENT_FAILED' && error.message !== 'Cell occupied' && canNotify('placement_error', 1500)) {
+      footerIndicator.toast(error.message);
+    }
     if (error.code === 'NOT_FOUND') {
       clearSession();
       showWorldMap();
@@ -384,7 +393,6 @@ resourceBar.onGameSpeedChange = (speed) => {
 };
 
 buildMode.onPlace = (pos, type, density, orientation) => {
-  console.log('[Client] onPlace called', { pos, type, density, orientation });
   gameClient.placeBuilding(pos, type, playerId, density, orientation);
 };
 
@@ -392,9 +400,12 @@ buildMode.onDemolish = (pos) => {
   gameClient.demolish(pos, playerId);
 };
 
-buildMode.onDragCostUpdate = (cost) => {
+buildMode.onDragCostUpdate = (cost, affordable = true) => {
   if (cost !== null) {
-    footerIndicator.show(`Road cost: $${cost}`);
+    footerIndicator.show(
+      affordable ? `Cost: $${cost.toLocaleString()}` : `Cost: $${cost.toLocaleString()} — not enough money`,
+      affordable ? 'info' : 'warn',
+    );
   } else {
     footerIndicator.hide();
   }
@@ -585,6 +596,35 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
+// --- Gameplay shortcuts: Space = pause/resume, 1-3 = speed, B = bulldoze ---
+let speedBeforePause = 1;
+window.addEventListener('keydown', (e) => {
+  if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+  const el = e.target as HTMLElement | null;
+  if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+  if (!cityState || !gameClient || gameMenu.isVisible() || optionsPanel.isVisible()) return;
+
+  if (e.code === 'Space') {
+    e.preventDefault();
+    const current = cityState.clock?.speed ?? 1;
+    if (current > 0) {
+      speedBeforePause = current;
+      gameClient.setGameSpeed(0, playerId);
+    } else {
+      gameClient.setGameSpeed(speedBeforePause, playerId);
+    }
+  } else if (e.code === 'Digit1' || e.code === 'Digit2' || e.code === 'Digit3') {
+    gameClient.setGameSpeed(Number(e.code.slice(-1)), playerId);
+  } else if (e.code === 'KeyB') {
+    const mode: ToolMode = buildMode.getToolMode() === 'bulldoze' ? 'pointer' : 'bulldoze';
+    toolSidebar.setActiveMode(mode);
+    buildMode.setToolMode(mode);
+    cameraController.setLeftClickPanEnabled(mode === 'pointer');
+    toolbar.setActive(null);
+    infraToolbar.setActive(null);
+  }
+});
+
 // --- Show world map helper ---
 function showWorldMap(): void {
   worldMap.show();
@@ -592,15 +632,21 @@ function showWorldMap(): void {
 
 // --- Game loop ---
 let lastTime = performance.now();
+let roadCount = 0;
+let roadCountSource: PlacedBuilding[] | null = null;
+let roadCountLength = -1;
 
 function gameLoop(): void {
   requestAnimationFrame(gameLoop);
 
   const now = performance.now();
-  const deltaTime = (now - lastTime) / 1000;
+  // Clamp so a backgrounded tab doesn't come back with one giant step
+  const deltaTime = Math.min((now - lastTime) / 1000, 0.1);
   lastTime = now;
 
   cameraController.update(deltaTime);
+  lighting.update(deltaTime);
+  cityRenderer.update(deltaTime);
   carManager.update(deltaTime, cityState);
   buildMode.updatePreview(cityState);
   compassIndicator.update(cameraController.getRotationAngle());
@@ -608,9 +654,12 @@ function gameLoop(): void {
   // Update sound system
   soundManager.updateZoom(sceneManager.getFrustumSize());
   if (cityState) {
-    const roadCount = cityState.buildings.filter(b =>
-      b.type.startsWith('road_')
-    ).length;
+    // Recount roads only when the building list changes, not every frame
+    if (cityState.buildings !== roadCountSource || cityState.buildings.length !== roadCountLength) {
+      roadCountSource = cityState.buildings;
+      roadCountLength = cityState.buildings.length;
+      roadCount = cityState.buildings.filter(b => b.type.startsWith('road_')).length;
+    }
     soundManager.updateTrafficLevel(roadCount);
   }
 
@@ -618,6 +667,55 @@ function gameLoop(): void {
 }
 
 gameLoop();
+
+// --- Advisor: explain *why* the city is stuck, not just that it is ---
+function advise(key: string, title: string, content: string, city: CityState, priority = MessagePriority.MEDIUM): void {
+  if (!canNotify(`advisor_${key}`, 180_000)) return;
+  messageManager.addMessage({
+    id: `advisor_${key}_${Date.now()}`,
+    type: MessageType.INFRASTRUCTURE_NEEDED,
+    category: MessageCategory.DEVELOPMENT,
+    priority,
+    title,
+    content,
+    cityId: city.id,
+    playerId,
+    createdAt: Date.now(),
+    isRead: false,
+    displayType: DisplayType.NOTIFICATION,
+  });
+  soundManager.triggerNotification();
+}
+
+function generateAdvisorHints(city: CityState): void {
+  if (city.clock?.speed === 0) return;
+  const res = city.resources;
+  const zones = city.buildings.filter(b => isZone(b.type));
+  const emptyOf = (type: string) => zones.some(b => b.type === type && (b.developmentLevel ?? 0) === 0);
+  const hasAny = (type: string) => zones.some(b => b.type === type);
+
+  if (res.money < 0) {
+    advise('debt', 'The city is in debt',
+      `The treasury is at -$${Math.abs(Math.floor(res.money)).toLocaleString()}. Services degrade while in debt, making citizens unhappy. Raise taxes or bulldoze costly buildings.`,
+      city, MessagePriority.HIGH);
+  } else if (res.population > 0 && calculateNetIncome(city) < 0 && res.money < 2000) {
+    advise('deficit', 'Running a deficit',
+      'Upkeep costs more than taxes bring in. Grow the population with denser housing, raise the tax rate, or remove buildings you do not need.',
+      city);
+  }
+
+  if (emptyOf('zone_residential') && res.demand && res.demand.residential < MIN_DEMAND_TO_GROW) {
+    advise('no_jobs', 'Nobody is moving in',
+      hasAny('zone_industrial') || hasAny('zone_commercial')
+        ? 'Residential zones stay empty until there are more jobs than residents. Zone more industrial or commercial land.'
+        : 'People only move in where there is work. Zone some industrial land next to your housing to create jobs.',
+      city);
+  } else if (emptyOf('zone_commercial') && res.demand && res.demand.commercial < MIN_DEMAND_TO_GROW && city.tick > 30) {
+    advise('no_customers', 'Shops have no customers',
+      'Commercial zones develop once enough residents live nearby. Grow your residential zones first.',
+      city, MessagePriority.LOW);
+  }
+}
 
 // --- Message Generation Functions ---
 function generateResourceMessages(previousState: any, currentResources: any, city: CityState): void {

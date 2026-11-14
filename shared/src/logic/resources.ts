@@ -1,7 +1,10 @@
 import type { CityState } from '../types/city.js';
 import { BUILDING_DEFS, getZoneLevelDef } from '../constants/buildings.js';
 import { isZone, type ZoneType } from '../types/building.js';
-import { TAX_PER_PERSON, DEFICIT_MASLOW_PENALTY_RATE, MIN_BUDGET_MULTIPLIER } from '../constants/economy.js';
+import {
+  TAX_PER_PERSON, DEFICIT_MASLOW_PENALTY_RATE, MIN_BUDGET_MULTIPLIER,
+  TAX_COMFORT_RATE, TAX_MASLOW_PENALTY_PER_POINT,
+} from '../constants/economy.js';
 import { LifeStage } from '../types/person.js';
 
 export function calculateTaxRevenue(state: CityState): number {
@@ -31,6 +34,15 @@ export function calculateBudgetPenalty(money: number): number {
   const deficit = Math.abs(money);
   const multiplier = 1.0 - deficit * DEFICIT_MASLOW_PENALTY_RATE;
   return Math.max(multiplier, MIN_BUDGET_MULTIPLIER);
+}
+
+/**
+ * Tax penalty multiplier (0.7–1.0) applied to Maslow targets.
+ * Taxes at or below the comfort rate are free; above it citizens get unhappier.
+ */
+export function calculateTaxPenalty(taxRate: number): number {
+  const excess = Math.max(0, taxRate - TAX_COMFORT_RATE);
+  return 1.0 - excess * TAX_MASLOW_PENALTY_PER_POINT;
 }
 
 export function calculateMaintenance(state: CityState): number {

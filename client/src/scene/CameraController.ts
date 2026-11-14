@@ -8,6 +8,8 @@ export class CameraController {
   private panSpeed = 30;
   private minZoom = 5;
   private maxZoom = 120;
+  private targetZoom: number;
+  private readonly zoomAnimSpeed = 12;
 
   // Camera target (the point the camera looks at)
   private target = new THREE.Vector3(32, 0, 32);
@@ -32,6 +34,7 @@ export class CameraController {
 
   constructor(sceneManager: SceneManager) {
     this.sceneManager = sceneManager;
+    this.targetZoom = sceneManager.getFrustumSize();
 
     window.addEventListener('keydown', (e) => {
       this.keys.add(e.code);
@@ -55,6 +58,16 @@ export class CameraController {
   }
 
   update(deltaTime: number): void {
+    // Smooth zoom toward the target frustum size
+    const currentZoom = this.sceneManager.getFrustumSize();
+    const zoomDiff = this.targetZoom - currentZoom;
+    if (Math.abs(zoomDiff) > 0.01) {
+      const t = Math.min(1, this.zoomAnimSpeed * deltaTime);
+      this.sceneManager.setFrustumSize(currentZoom + zoomDiff * t);
+    } else if (zoomDiff !== 0) {
+      this.sceneManager.setFrustumSize(this.targetZoom);
+    }
+
     // Smooth rotation animation
     const rotDiff = this.targetRotation - this.rotationAngle;
     if (Math.abs(rotDiff) > 0.001) {
@@ -119,10 +132,11 @@ export class CameraController {
 
   private onWheel(e: WheelEvent): void {
     e.preventDefault();
-    const delta = e.deltaY > 0 ? 1 : -1;
-    const currentSize = this.sceneManager.getFrustumSize();
-    const newSize = clamp(currentSize + delta, this.minZoom, this.maxZoom);
-    this.sceneManager.setFrustumSize(newSize);
+    // Proportional zoom: each notch scales the view by the same factor at any
+    // zoom level, and trackpads (many small deltas) stay smooth.
+    const pixels = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+    const factor = Math.exp(clamp(pixels, -200, 200) * 0.0015);
+    this.targetZoom = clamp(this.targetZoom * factor, this.minZoom, this.maxZoom);
   }
 
   private onMouseDown(e: MouseEvent): void {

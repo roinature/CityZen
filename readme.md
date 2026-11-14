@@ -78,6 +78,9 @@ CityZen/
 - **Right click**: Demolish building under cursor
 - **WASD / Arrow keys**: Pan camera
 - **Scroll wheel**: Zoom in/out
+- **Q / E**: Rotate camera
+- **Space**: Pause / resume · **1-3**: Game speed
+- **B**: Toggle bulldozer
 - **ESC**: Open/close game menu (or deselect building)
 
 ### Resources

@@ -1,6 +1,7 @@
 import type { CityState } from '../types/city.js';
 import { calculateNetIncome, calculatePopulationGrowth, calculateHappiness, clamp } from './resources.js';
 import { calculateDemand, processZoneGrowth } from './demand.js';
+import { MAX_DEBT } from '../constants/economy.js';
 import { GAME_MS_PER_TICK, TICKS_PER_GAME_DAY, DAYS_PER_GAME_YEAR } from '../constants/simulation.js';
 
 export function advanceClock(state: CityState): CityState {
@@ -50,7 +51,8 @@ export function simulateCityTick(state: CityState): CityState {
     ...working,
     resources: {
       ...working.resources,
-      money: Math.max(0, working.resources.money + netIncome),
+      // Allow limited debt so a running deficit has consequences (see calculateBudgetPenalty)
+      money: Math.max(-MAX_DEBT, working.resources.money + netIncome),
       population: Math.max(0, working.resources.population + popGrowth),
       happiness: clamp(happiness, 0, 100),
     },

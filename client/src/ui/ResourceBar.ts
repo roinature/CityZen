@@ -8,6 +8,7 @@ import {
   MAX_TAX_RATE,
   TAX_RATE_STEP,
   MAX_GAME_SPEED,
+  TAX_COMFORT_RATE,
 } from '@cityzen/shared';
 
 const SPEED_LABELS = ['||', '>', '>>', '>>>'];
@@ -17,6 +18,8 @@ export class ResourceBar {
   private moneyEl: HTMLSpanElement;
   private popEl: HTMLSpanElement;
   private happyEl: HTMLSpanElement;
+  private happyIconEl: HTMLSpanElement;
+  private lastMoney: number | null = null;
   private taxRevenueEl: HTMLSpanElement;
   private maintenanceEl: HTMLSpanElement;
   private netIncomeEl: HTMLSpanElement;
@@ -42,15 +45,15 @@ export class ResourceBar {
       </div>
       <div class="resource-separator"></div>
       <div class="resource-item">
-        <span class="resource-icon">$</span>
+        <span class="resource-icon" title="Treasury">💰</span>
         <span class="resource-value" id="res-money">5000</span>
       </div>
-      <div class="resource-item">
-        <span class="resource-icon">P</span>
+      <div class="resource-item" title="Population">
+        <span class="resource-icon">👥</span>
         <span class="resource-value" id="res-pop">0</span>
       </div>
-      <div class="resource-item">
-        <span class="resource-icon">H</span>
+      <div class="resource-item" title="Happiness">
+        <span class="resource-icon" id="res-happy-icon">🙂</span>
         <span class="resource-value" id="res-happy">50</span>
       </div>
       <div class="resource-separator"></div>
@@ -67,7 +70,7 @@ export class ResourceBar {
         <span class="resource-value" id="res-net-income">$0</span>
       </div>
       <div class="resource-separator"></div>
-      <div class="resource-item tax-slider-item">
+      <div class="resource-item tax-slider-item" title="Tax above ${TAX_COMFORT_RATE}% brings in more money but makes citizens unhappier">
         <span class="budget-label" id="tax-rate-label">Tax: 10%</span>
         <input type="range" id="tax-slider" min="${MIN_TAX_RATE}" max="${MAX_TAX_RATE}" step="${TAX_RATE_STEP}" value="10" class="tax-slider" />
       </div>
@@ -94,6 +97,7 @@ export class ResourceBar {
     this.moneyEl = this.container.querySelector('#res-money')!;
     this.popEl = this.container.querySelector('#res-pop')!;
     this.happyEl = this.container.querySelector('#res-happy')!;
+    this.happyIconEl = this.container.querySelector('#res-happy-icon')!;
     this.taxRevenueEl = this.container.querySelector('#res-tax-revenue')!;
     this.maintenanceEl = this.container.querySelector('#res-maintenance')!;
     this.netIncomeEl = this.container.querySelector('#res-net-income')!;
@@ -137,9 +141,21 @@ export class ResourceBar {
   }
 
   update(resources: ResourceState, state?: CityState): void {
-    this.moneyEl.textContent = this.unlimited ? '\u221E' : resources.money.toLocaleString();
+    const money = Math.floor(resources.money);
+    this.moneyEl.textContent = this.unlimited ? '\u221E' : money.toLocaleString();
+    this.moneyEl.classList.toggle('budget-negative', !this.unlimited && money < 0);
+    this.moneyEl.title = money < 0 ? 'In debt: city services are degrading. Raise taxes or cut upkeep.' : '';
+    // Flash on purchases and refunds (bigger jumps than the per-tick trickle)
+    if (!this.unlimited && this.lastMoney !== null && Math.abs(money - this.lastMoney) >= 5) {
+      this.flashMoney(money > this.lastMoney);
+    }
+    this.lastMoney = money;
+
     this.popEl.textContent = resources.population.toLocaleString();
-    this.happyEl.textContent = `${resources.happiness}%`;
+    const happiness = Math.round(resources.happiness);
+    this.happyEl.textContent = `${happiness}%`;
+    this.happyIconEl.textContent = happiness >= 70 ? '😄' : happiness >= 45 ? '🙂' : happiness >= 25 ? '😕' : '😠';
+    this.happyEl.classList.toggle('budget-negative', happiness < 30);
 
     // Update demographics tooltip
     const summary = resources.populationSummary;
@@ -180,6 +196,14 @@ export class ResourceBar {
       this.updateDemandBar(this.demandComEl, resources.demand.commercial, '#42A5F5');
       this.updateDemandBar(this.demandIndEl, resources.demand.industrial, '#FFA726');
     }
+  }
+
+  private flashMoney(gain: boolean): void {
+    const cls = gain ? 'money-flash-gain' : 'money-flash-spend';
+    this.moneyEl.classList.remove('money-flash-gain', 'money-flash-spend');
+    // Force a reflow so re-adding the class restarts the animation
+    void this.moneyEl.offsetWidth;
+    this.moneyEl.classList.add(cls);
   }
 
   private updateDemandBar(el: HTMLDivElement, value: number, color: string): void {

@@ -41,3 +41,8 @@ export const MASLOW_LERP_RATE = 0.1;           // Per-tick lerp speed toward tar
 export const MIGRATION_HAPPINESS_THRESHOLD = 35; // Person considers leaving when happiness drops below this
 export const MIGRATION_HAPPINESS_DELTA = 10;     // Target city must be this much better to attract migrants
 export const MIGRATION_MAX_RATE = 0.05;          // Max 5% of city population can leave per game day
+
+// Immigration from the unassigned world pool into vacant housing
+export const IMMIGRATION_RATE = 0.05;              // Share of vacant housing filled per tick (before attractiveness)
+export const IMMIGRATION_MAX_PER_TICK = 10;        // Hard cap on arrivals per city per tick
+export const IMMIGRATION_MIN_ATTRACTIVENESS = 0.3; // Even a miserable city fills at 30% of the normal rate

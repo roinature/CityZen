@@ -10,7 +10,12 @@ export function initBroadcast(): void {
 }
 
 export async function broadcastToChannel(channel: string, event: string, payload: unknown): Promise<void> {
-  await supabase.channel(channel).httpSend(event, payload);
+  try {
+    await supabase.channel(channel).httpSend(event, payload);
+  } catch (err) {
+    // Silently swallow broadcast errors to prevent server crashes
+    // when Supabase is unreachable or misconfigured
+  }
 }
 
 export async function broadcastToAll(event: string, payload: unknown): Promise<void> {

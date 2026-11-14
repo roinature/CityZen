@@ -254,10 +254,11 @@ export class GameRoom {
       }
     }
 
-    // Remove building, refund half cost
+    // Remove building, refund half of what was actually paid (zones are priced by density)
     this.state.buildings = this.state.buildings.filter((b: PlacedBuilding) => b.id !== buildingId);
     if (!this.unlimitedMoney) {
-      this.state.resources.money += Math.floor(def.cost / 2);
+      const paid = isZone(building.type) && building.density ? ZONE_DENSITY_COSTS[building.density] : def.cost;
+      this.state.resources.money += Math.floor(paid / 2);
     }
     this.state.updatedAt = Date.now();
 

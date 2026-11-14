@@ -4,20 +4,58 @@ import { isRoad, isZone, getZoneLevelDef, getEffectiveSize } from '@cityzen/shar
 import { calculateCityScore } from '@cityzen/shared';
 import { BuildingFactory, type RoadNeighbors } from './BuildingFactory.js';
 
+const GROW_SECONDS = 0.45;
+
+/** Overshoots slightly past 1 before settling, giving new buildings a little bounce. */
+function easeOutBack(t: number): number {
+  const c1 = 1.70158;
+  const c3 = c1 + 1;
+  return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+}
+
 export class CityRenderer {
   private scene: THREE.Scene;
   private factory: BuildingFactory;
   private meshes: Map<string, THREE.Group> = new Map();
   private buildingLevels: Map<string, number> = new Map();
   private zonePopRatios: Map<string, number> = new Map();
+  /** Buildings currently playing their "rise from the ground" animation (id → progress 0..1). */
+  private growAnims: Map<string, number> = new Map();
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
     this.factory = new BuildingFactory();
   }
 
+  /** Advance construction animations. Call once per frame. */
+  update(deltaTime: number): void {
+    if (this.growAnims.size === 0) return;
+    for (const [id, progress] of this.growAnims) {
+      const mesh = this.meshes.get(id);
+      if (!mesh) {
+        this.growAnims.delete(id);
+        continue;
+      }
+      const t = Math.min(1, progress + deltaTime / GROW_SECONDS);
+      mesh.scale.y = easeOutBack(t);
+      if (t >= 1) {
+        mesh.scale.y = 1;
+        this.growAnims.delete(id);
+      } else {
+        this.growAnims.set(id, t);
+      }
+    }
+  }
+
+  private startGrowAnim(id: string, mesh: THREE.Group): void {
+    mesh.scale.y = 0.02;
+    this.growAnims.set(id, 0);
+  }
+
   syncState(state: CityState): void {
     const currentIds = new Set(this.meshes.keys());
+    // Loading a whole city at once should appear instantly, not as a wave of pop-ins
+    const animate = currentIds.size > 0 || state.buildings.length <= 3;
     const newIds = new Set(state.buildings.map((b: PlacedBuilding) => b.id));
 
     // Update factory with current city score
@@ -90,6 +128,9 @@ export class CityRenderer {
         const mesh = this.factory.createBuilding(building, neighbors, ratio);
         this.scene.add(mesh);
         this.meshes.set(building.id, mesh);
+        if (animate && !isRoad(building.type)) {
+          this.startGrowAnim(building.id, mesh);
+        }
 
         if (isZone(building.type)) {
           this.buildingLevels.set(building.id, building.developmentLevel ?? 0);
@@ -103,7 +144,8 @@ export class CityRenderer {
         const prevLevel = this.buildingLevels.get(building.id) ?? 0;
         const currLevel = building.developmentLevel ?? 0;
 
-        let needsRebuild = prevLevel !== currLevel;
+        const levelChanged = prevLevel !== currLevel;
+        let needsRebuild = levelChanged;
 
         // For density-aware zones, check if visible building count changed
         if (building.density && currLevel > 0) {
@@ -123,6 +165,9 @@ export class CityRenderer {
           this.scene.add(mesh);
           this.meshes.set(building.id, mesh);
           this.buildingLevels.set(building.id, currLevel);
+          if (levelChanged) {
+            this.startGrowAnim(building.id, mesh);
+          }
         }
       }
     }
@@ -198,6 +243,7 @@ export class CityRenderer {
       this.disposeMesh(mesh);
     }
     this.meshes.clear();
+    this.growAnims.clear();
     this.buildingLevels.clear();
     this.zonePopRatios.clear();
   }

@@ -1753,3 +1753,59 @@ body {
   transform: translateX(-50%);
   border-radius: 1px;
 }
+
+/* --- HUD feedback --- */
+/* The bottom-centre of the screen belongs to the infrastructure toolbar, which
+   used to cover the cost indicator — show build feedback under the resource bar. */
+.footer-indicator {
+  top: 64px;
+  bottom: auto;
+  z-index: 40;
+}
+
+.footer-indicator.warn {
+  color: #ff8a80;
+}
+
+.footer-toast {
+  position: absolute;
+  top: 108px;
+  left: 50%;
+  z-index: 40;
+  transform: translate(-50%, -8px);
+  background: rgba(183, 28, 28, 0.92);
+  color: white;
+  padding: 8px 18px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none !important;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.footer-toast.visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+@keyframes money-flash-spend {
+  0% { color: #ff5252; transform: scale(1.18); }
+  100% { color: inherit; transform: scale(1); }
+}
+
+@keyframes money-flash-gain {
+  0% { color: #69f0ae; transform: scale(1.18); }
+  100% { color: inherit; transform: scale(1); }
+}
+
+.money-flash-spend {
+  display: inline-block;
+  animation: money-flash-spend 0.6s ease-out;
+}
+
+.money-flash-gain {
+  display: inline-block;
+  animation: money-flash-gain 0.6s ease-out;
+}

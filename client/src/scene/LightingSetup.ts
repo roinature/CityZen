@@ -1,13 +1,64 @@
 import * as THREE from 'three';
+import { DEFAULT_GRID_SIZE, CELL_SIZE } from '@cityzen/shared';
 
 export interface LightingControls {
   setNight(isNight: boolean): void;
+  /** Advance the day/night fade. Call once per frame. */
+  update(deltaTime: number): void;
 }
 
+interface LightPreset {
+  sunIntensity: number;
+  sunColor: THREE.Color;
+  sunHeight: number;
+  ambientIntensity: number;
+  ambientColor: THREE.Color;
+  hemiIntensity: number;
+  hemiSky: THREE.Color;
+  hemiGround: THREE.Color;
+  background: THREE.Color;
+}
+
+const DAY: LightPreset = {
+  sunIntensity: 1.0,
+  sunColor: new THREE.Color(0xffffff),
+  sunHeight: 50,
+  ambientIntensity: 0.6,
+  ambientColor: new THREE.Color(0x404060),
+  hemiIntensity: 0.3,
+  hemiSky: new THREE.Color(0x87ceeb),
+  hemiGround: new THREE.Color(0x7ec850),
+  background: new THREE.Color(0x87ceeb),
+};
+
+const NIGHT: LightPreset = {
+  sunIntensity: 0.15,
+  sunColor: new THREE.Color(0x8888cc),
+  sunHeight: 20,
+  ambientIntensity: 0.3,
+  ambientColor: new THREE.Color(0x101030),
+  hemiIntensity: 0.1,
+  hemiSky: new THREE.Color(0x1a1a3e),
+  hemiGround: new THREE.Color(0x0a0a1a),
+  background: new THREE.Color(0x0a0a1e),
+};
+
+const TRANSITION_SECONDS = 1.2;
+
+// The camera looks along the grid diagonals (and rotates in 90° steps). A sun on
+// the same diagonal hides every shadow behind its building and lights both
+// visible walls identically, so keep it well off-diagonal.
+const SUN_OFFSET_X = 42;
+const SUN_OFFSET_Z = 12;
+
 export function setupLighting(scene: THREE.Scene): LightingControls {
-  // Directional light (sun)
+  const center = (DEFAULT_GRID_SIZE * CELL_SIZE) / 2;
+
+  // Directional light (sun), aimed at the middle of the plot so the shadow
+  // frustum covers the whole grid rather than the corner around the origin
   const sun = new THREE.DirectionalLight(0xffffff, 1.0);
-  sun.position.set(30, 50, 30);
+  sun.target.position.set(center, 0, center);
+  scene.add(sun.target);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   sun.shadow.camera.left = -50;
@@ -26,29 +77,31 @@ export function setupLighting(scene: THREE.Scene): LightingControls {
   const hemi = new THREE.HemisphereLight(0x87ceeb, 0x7ec850, 0.3);
   scene.add(hemi);
 
+  const background = new THREE.Color();
+  scene.background = background;
+
+  let blend = 0;  // 0 = day, 1 = night
+  let target = 0;
+
+  const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+
+  function apply(t: number): void {
+    sun.intensity = lerp(DAY.sunIntensity, NIGHT.sunIntensity, t);
+    sun.color.lerpColors(DAY.sunColor, NIGHT.sunColor, t);
+    sun.position.set(center + SUN_OFFSET_X, lerp(DAY.sunHeight, NIGHT.sunHeight, t), center + SUN_OFFSET_Z);
+    ambient.intensity = lerp(DAY.ambientIntensity, NIGHT.ambientIntensity, t);
+    ambient.color.lerpColors(DAY.ambientColor, NIGHT.ambientColor, t);
+    hemi.intensity = lerp(DAY.hemiIntensity, NIGHT.hemiIntensity, t);
+    hemi.color.lerpColors(DAY.hemiSky, NIGHT.hemiSky, t);
+    hemi.groundColor.lerpColors(DAY.hemiGround, NIGHT.hemiGround, t);
+    background.lerpColors(DAY.background, NIGHT.background, t);
+  }
+
+  apply(0);
+
   return {
     setNight(isNight: boolean): void {
-      if (isNight) {
-        sun.intensity = 0.15;
-        sun.color.setHex(0x8888cc);
-        sun.position.set(30, 20, 30);
-        ambient.intensity = 0.3;
-        ambient.color.setHex(0x101030);
-        hemi.intensity = 0.1;
-        hemi.color.setHex(0x1a1a3e);
-        hemi.groundColor.setHex(0x0a0a1a);
-        scene.background = new THREE.Color(0x0a0a1e);
-      } else {
-        sun.intensity = 1.0;
-        sun.color.setHex(0xffffff);
-        sun.position.set(30, 50, 30);
-        ambient.intensity = 0.6;
-        ambient.color.setHex(0x404060);
-        hemi.intensity = 0.3;
-        hemi.color.setHex(0x87ceeb);
-        hemi.groundColor.setHex(0x7ec850);
-        scene.background = null;
-      }
+      target = isNight ? 1 : 0;
 
       // Update emissive glow for buildings and cars
       scene.traverse((obj) => {
@@ -67,6 +120,14 @@ export function setupLighting(scene: THREE.Scene): LightingControls {
           }
         }
       });
+    },
+
+    update(deltaTime: number): void {
+      if (blend === target) return;
+      const step = deltaTime / TRANSITION_SECONDS;
+      blend = target > blend ? Math.min(target, blend + step) : Math.max(target, blend - step);
+      // Smoothstep so the fade eases in and out
+      apply(blend * blend * (3 - 2 * blend));
     },
   };
 }

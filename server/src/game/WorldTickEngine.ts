@@ -14,6 +14,8 @@ import {
   calculateCityMaslowCapacity,
   calculateBaseMaslowTargets,
   calculateBudgetPenalty,
+  calculateTaxPenalty,
+  calculateImmigrationCount,
   findConnectedCities,
   evaluateMigration,
 } from '@cityzen/shared';
@@ -91,7 +93,10 @@ export class WorldTickEngine {
         const baseTargets = calculateBaseMaslowTargets(maslowProfile, popCount);
 
         // Apply budget penalty: deficit reduces Maslow targets (cascading failure)
-        const budgetMultiplier = calculateBudgetPenalty(room.state.resources.money);
+        // Tax penalty: rates above the comfort rate make everyone less satisfied
+        const budgetMultiplier =
+          calculateBudgetPenalty(room.state.resources.money) *
+          calculateTaxPenalty(room.state.resources.taxRate);
         if (budgetMultiplier < 1.0) {
           for (const need of Object.keys(baseTargets) as Array<keyof typeof baseTargets>) {
             baseTargets[need] *= budgetMultiplier;
@@ -99,6 +104,16 @@ export class WorldTickEngine {
         }
 
         this.populationManager.updateCityMaslow(room.id, baseTargets);
+
+        // Immigration: vacant housing attracts people from the unassigned world pool
+        const arrivals = calculateImmigrationCount(
+          calculateHousingCapacity(room.state) - popCount,
+          room.state.resources.happiness,
+          this.populationManager.getUnassignedCount(),
+        );
+        if (arrivals > 0) {
+          this.populationManager.seedCity(room.id, arrivals);
+        }
 
         // Assign/reassign people to residential zones
         this.populationManager.assignPeopleToZones(room.id, room.state.buildings);
