@@ -5,7 +5,7 @@ import {
 import { BuildingFactory } from '../world/BuildingFactory.js';
 import { DensityPicker } from './DensityPicker.js';
 
-const CATEGORIES = [
+const CATEGORIES: ReadonlyArray<{ label: string; types: readonly BuildingType[] }> = [
   { label: 'Roads', types: ROAD_TYPES },
   { label: 'Zones', types: ZONE_TYPES },
   { label: 'Parks', types: [BuildingType.PARK] },
@@ -69,15 +69,7 @@ export class Toolbar {
           this.close();
           return;
         }
-        this.openCategory = category.label;
-        this.pane.hidden = false;
-        this.updateCategories();
-        this.serviceCategories.hidden = category.label !== 'Services';
-        if (this.serviceCategories.hidden) {
-          this.renderItems(category.types);
-        } else {
-          this.renderServices();
-        }
+        this.showCategory(category);
       });
       categories.appendChild(btn);
       this.categoryButtons.push(btn);
@@ -92,6 +84,24 @@ export class Toolbar {
   private renderServices(): void {
     const category = INFRA_CATEGORIES[this.serviceCategories.selectedIndex];
     this.renderItems(category.types);
+  }
+
+  private showCategory(category: (typeof CATEGORIES)[number]): void {
+    this.openCategory = category.label;
+    this.pane.hidden = false;
+    this.updateCategories();
+    this.serviceCategories.hidden = category.label !== 'Services';
+    if (this.serviceCategories.hidden) this.renderItems(category.types);
+    else this.renderServices();
+  }
+
+  showBuilding(type: BuildingType): void {
+    const service = INFRA_CATEGORIES.find(category => category.types.includes(type));
+    if (service) this.serviceCategories.value = service.id;
+    const category = CATEGORIES.find(category => service ? category.label === 'Services' : category.types.includes(type));
+    if (!category) return;
+    this.showCategory(category);
+    this.itemButtons.get(type)?.focus();
   }
 
   private renderItems(types: readonly BuildingType[]): void {

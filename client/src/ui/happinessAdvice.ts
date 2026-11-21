@@ -1,0 +1,135 @@
+import {
+  BUILDING_DEFS, BuildingType, INFRA_CATEGORIES, MASLOW_NEEDS_ORDERED, MaslowNeed, TAX_COMFORT_RATE,
+  calculateBaseMaslowTargets, calculateBudgetPenalty, calculateCityMaslowCapacity, calculateLoanPayments,
+  calculateNetIncome, calculateTaxPenalty, canPlaceBuilding, type CityState,
+} from '@cityzen/shared';
+
+export const LOW_HAPPINESS = 40;
+
+export type AdvisorAction =
+  | { kind: 'finance' }
+  | { kind: 'needs' }
+  | { kind: 'build'; building: BuildingType };
+
+export interface HappinessAdvice {
+  title: string;
+  detail: string;
+  action: AdvisorAction;
+}
+
+const NEED_NAMES: Record<MaslowNeed, string> = {
+  [MaslowNeed.PHYSIOLOGICAL]: 'Basic services',
+  [MaslowNeed.SAFETY]: 'Safety',
+  [MaslowNeed.LOVE_BELONGING]: 'Community',
+  [MaslowNeed.ESTEEM]: 'Civic pride',
+  [MaslowNeed.COGNITIVE]: 'Education',
+  [MaslowNeed.AESTHETIC]: 'Public spaces',
+  [MaslowNeed.SELF_ACTUALIZATION]: 'Civic participation',
+};
+
+const SERVICE_TYPES = [BuildingType.PARK, ...INFRA_CATEGORIES.flatMap(category => category.types)];
+
+export function needsHappinessAdvice(city: CityState): boolean {
+  return city.resources.population > 0 && city.resources.happiness < LOW_HAPPINESS;
+}
+
+export function getHappinessAdvice(city: CityState): HappinessAdvice[] {
+  if (!needsHappinessAdvice(city)) return [];
+
+  const { money, population, populationSummary, taxRate } = city.resources;
+  const advice: HappinessAdvice[] = [];
+  if (money < 0) {
+    return [{
+      title: 'Restore the city budget',
+      detail: `The treasury is $${Math.ceil(-money).toLocaleString()} in debt, which reduces the benefit of city services. Review upkeep and income in Finance before adding more expenses.`,
+      action: { kind: 'finance' },
+    }];
+  }
+
+  if (taxRate > TAX_COMFORT_RATE) {
+    const netAtLowerRate = calculateNetIncome({
+      ...city, resources: { ...city.resources, taxRate: TAX_COMFORT_RATE },
+    }) - calculateLoanPayments(city.resources);
+    advice.push({
+      title: 'Review high taxes',
+      detail: `Taxes are at ${taxRate}%. Rates above ${TAX_COMFORT_RATE}% reduce satisfaction across all needs. ` +
+        (netAtLowerRate < 0
+          ? `At ${TAX_COMFORT_RATE}%, the city would lose about $${Math.ceil(-netAtLowerRate).toLocaleString()} per tick. Review expenses before cutting the rate.`
+          : `Try lowering the rate toward ${TAX_COMFORT_RATE}% while the budget can support it.`),
+      action: { kind: 'finance' },
+    });
+  }
+
+  const profile = calculateCityMaslowCapacity(city);
+  const baseline = calculateBaseMaslowTargets(profile, population);
+  const penalty = calculateBudgetPenalty(money) * calculateTaxPenalty(taxRate);
+  const recommended = new Set<BuildingType>();
+  let unaffordableImprovement = false;
+  let noRoomForService = false;
+  for (const need of MASLOW_NEEDS_ORDERED) {
+    if (advice.length >= 3) break;
+    const current = populationSummary?.averageMaslow[need];
+    if (baseline[need] >= 70 || (current !== undefined && current >= 60)) continue;
+
+    const candidates = SERVICE_TYPES.flatMap(type => {
+      if (recommended.has(type)) return [];
+      const def = BUILDING_DEFS[type];
+      const contribution = def.effects.maslowContributions?.find(effect => effect.need === need);
+      if (!contribution) return [];
+
+      // Ask the same service model the simulation uses whether this building
+      // improves coverage or quality for this need.
+      const provision = profile[need];
+      const after = calculateBaseMaslowTargets({
+        ...profile,
+        [need]: {
+          ...provision,
+          providers: [...provision.providers, { value: contribution.value, capacity: contribution.capacityServed }],
+        },
+      }, population)[need];
+      const benefit = (after - baseline[need]) * penalty;
+      if (benefit < 1) return [];
+      if (def.cost > money) {
+        unaffordableImprovement = true;
+        return [];
+      }
+      return [{ def, benefit, score: benefit / Math.sqrt(def.cost) }];
+    }).sort((a, b) => b.score - a.score);
+
+    const candidate = candidates.find(({ def }) =>
+      city.grid.some((column, x) => column.some((_, z) =>
+        canPlaceBuilding(city.grid, { x, z }, def.type, city.resources).valid)));
+    if (!candidate) {
+      if (candidates.length > 0) noRoomForService = true;
+      continue;
+    }
+
+    const { def, benefit } = candidate;
+    recommended.add(def.type);
+    const status = current === undefined
+      ? `${NEED_NAMES[need]} satisfaction is projected at ${Math.round(baseline[need] * penalty)}%.`
+      : `${NEED_NAMES[need]} satisfaction is at ${Math.round(current)}%.`;
+    advice.push({
+      title: `Build a ${def.label}`,
+      detail: `${status} This could raise the satisfaction target by about ${Math.round(benefit)} points. ` +
+        `Costs $${def.cost.toLocaleString()} to build and $${def.effects.maintenance ?? 0} per tick to maintain.`,
+      action: { kind: 'build', building: def.type },
+    });
+  }
+  if (advice.length === 0) {
+    advice.push(noRoomForService ? {
+      title: 'Find room for city services',
+      detail: 'The current layout has no open footprint for services that would improve these needs. Review the needs breakdown before deciding which land to redevelop.',
+      action: { kind: 'needs' },
+    } : unaffordableImprovement ? {
+      title: 'Make room in the budget for services',
+      detail: 'The services that would help most are above the current construction budget. Review expenses and income in Finance.',
+      action: { kind: 'finance' },
+    } : {
+      title: 'Review City Needs',
+      detail: 'Existing services can take time to affect happiness. Check the needs breakdown before spending more.',
+      action: { kind: 'needs' },
+    });
+  }
+  return advice;
+}

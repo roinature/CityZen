@@ -112,6 +112,91 @@ body {
   white-space: nowrap;
 }
 
+.happiness-advisor {
+  position: relative;
+  text-align: left;
+  background: transparent;
+  color: var(--hud-text);
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.happiness-advisor:hover .resource-label {
+  text-decoration: underline;
+}
+
+.happiness-advisor:focus-visible {
+  outline: 2px solid var(--hud-accent);
+  outline-offset: 3px;
+}
+
+.happiness-advisor.low .resource-label,
+.happiness-advisor.low .resource-value {
+  color: #ffd37e;
+}
+
+.happiness-advisor.low .resource-value::after {
+  content: " · Advice";
+  font-size: 10px;
+  font-weight: 500;
+}
+
+@media (max-width: 480px) {
+  .happiness-advisor.low .resource-value::after { content: " !"; }
+}
+
+.city-advisor {
+  margin: auto;
+  inset: 0;
+  width: min(500px, calc(100% - 24px));
+  max-height: calc(100% - 24px);
+  overflow: auto;
+  background: var(--hud-surface);
+  color: var(--hud-text);
+  border: 1px solid var(--hud-edge);
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 12px 44px #0d160fb0;
+}
+
+.city-advisor::backdrop {
+  background: #08110ac4;
+}
+
+.city-advisor header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.city-advisor h2 { font-size: 20px; }
+.city-advisor h3 { font-size: 14px; }
+.city-advisor p { font-size: 13px; line-height: 1.45; }
+.city-advisor .advisor-close { font-size: 18px; padding: 4px 10px; }
+.advisor-status, .advisor-recommendations p { color: var(--hud-muted); }
+.advisor-pause { color: #ffd37e; margin-top: 5px; }
+
+.advisor-recommendations {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+}
+
+.advisor-recommendations li {
+  display: grid;
+  justify-items: start;
+  gap: 5px;
+  border-radius: 8px;
+  background: #ffffff0a;
+  padding: 10px 12px;
+}
+
+.advisor-recommendations li:first-child { margin-top: 12px; }
+
 .resource-stats,
 .resource-actions,
 .build-controls,

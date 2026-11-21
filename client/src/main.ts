@@ -15,9 +15,6 @@ import {
   calculateDemandTargets,
   getZoneLevelHappinessRequirement,
   MIN_DEMAND_TO_GROW,
-  EMIGRATION_HAPPINESS_THRESHOLD,
-  MaslowNeed,
-  MASLOW_NEEDS_ORDERED,
   MessageType,
   MessageCategory,
   MessagePriority,
@@ -32,6 +29,8 @@ import { createTerrain } from './world/Terrain.js';
 import { CityRenderer } from './world/CityRenderer.js';
 import { BuildMode } from './input/BuildMode.js';
 import { ResourceBar } from './ui/ResourceBar.js';
+import { CityAdvisor } from './ui/CityAdvisor.js';
+import { getHappinessAdvice, needsHappinessAdvice } from './ui/happinessAdvice.js';
 import { Toolbar } from './ui/Toolbar.js';
 import { Lobby } from './ui/Lobby.js';
 import { WorldMap } from './ui/WorldMap.js';
@@ -124,6 +123,7 @@ function beginCityLoad(label: string): void {
   lobby.hide();
   worldMap.hide();
   cityState = null;
+  cityAdvisor.hide();
   buildMode.setCityState(null);
   setToolMode('pointer');
   cityRenderer.clear();
@@ -210,6 +210,55 @@ const financePanel = new FinancePanel(uiRoot, {
 });
 const maslowPanel = new MaslowPanel(uiRoot);
 
+const cityAdvisor = new CityAdvisor(uiRoot, action => {
+  if (!cityState) return;
+  if (action.kind === 'finance') {
+    toolbar.close();
+    financePanel.update(cityState);
+    financePanel.show();
+  } else if (action.kind === 'build') {
+    toolbar.showBuilding(action.building);
+  } else {
+    toolbar.close();
+    if (cityState.resources.populationSummary) maslowPanel.update(cityState.resources.populationSummary);
+    maslowPanel.show();
+  }
+});
+
+resourceBar.onOpenAdvisor = () => {
+  if (!cityState) return;
+  toolbar.close();
+  cityAdvisor.show(cityState);
+};
+
+let unhappyCityId: string | null = null;
+function refreshCityAdvisor(city: CityState): void {
+  if (cityAdvisor.isOpen()) cityAdvisor.update(city);
+  if (!needsHappinessAdvice(city)) {
+    unhappyCityId = null;
+    return;
+  }
+  if (unhappyCityId === city.id) return;
+  unhappyCityId = city.id;
+  if (!canNotify(`city_advisor_${city.id}`, 120_000)) return;
+
+  const [firstTip] = getHappinessAdvice(city);
+  messageManager.addMessage({
+    id: `city_advisor_${city.id}_${Date.now()}`,
+    type: MessageType.HAPPINESS_LOW,
+    category: MessageCategory.HAPPINESS,
+    priority: MessagePriority.HIGH,
+    title: 'City Advisor',
+    content: `Happiness is at ${Math.floor(city.resources.happiness)}%. ${firstTip.title}. Select Happiness for details.`,
+    cityId: city.id,
+    playerId,
+    createdAt: Date.now(),
+    isRead: false,
+    displayType: DisplayType.NOTIFICATION,
+  });
+  soundManager.triggerNotification();
+}
+
 function addHudAction(label: string, onClick: () => void): HTMLButtonElement {
   const button = document.createElement('button');
   button.className = 'hud-button';
@@ -266,6 +315,7 @@ GameClient.create(SERVER_URL, {
     edgeRoadIndicator.update(city.buildings, worldState, city.id);
     carManager.clear();
     resourceBar.update(city.resources, cityState);
+    refreshCityAdvisor(cityState);
     lobby.hide();
     worldMap.hide();
     cityLoading.hide();
@@ -292,6 +342,7 @@ GameClient.create(SERVER_URL, {
     cityRenderer.syncState(cityState);
     edgeRoadIndicator.update(cityState.buildings, worldState, cityState.id);
     resourceBar.update(cityState.resources, cityState);
+    refreshCityAdvisor(cityState);
     soundManager.triggerConstruction();
   },
 
@@ -311,6 +362,7 @@ GameClient.create(SERVER_URL, {
     cityRenderer.syncState(cityState);
     edgeRoadIndicator.update(cityState.buildings, worldState, cityState.id);
     resourceBar.update(cityState.resources, cityState);
+    refreshCityAdvisor(cityState);
     soundManager.triggerBulldoze();
   },
 
@@ -324,6 +376,7 @@ GameClient.create(SERVER_URL, {
     cityState.tick = tick;
     cityState.clock = clock;
     resourceBar.update(resources, cityState);
+    refreshCityAdvisor(cityState);
     if (financePanel.isVisible()) {
       financePanel.update(cityState);
     }
@@ -642,7 +695,7 @@ addHudAction('Menu', () => {
 
 // --- ESC key handler ---
 window.addEventListener('keydown', (e) => {
-  if (e.code !== 'Escape') return;
+  if (e.code !== 'Escape' || cityAdvisor.isOpen()) return;
 
   if (maslowPanel.isVisible()) {
     maslowPanel.hide();
@@ -668,7 +721,7 @@ window.addEventListener('keydown', (e) => {
   if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
   const el = e.target as HTMLElement | null;
   if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
-  if (!cityState || !gameClient || gameMenu.isVisible() || optionsPanel.isVisible()) return;
+  if (!cityState || !gameClient || cityAdvisor.isOpen() || gameMenu.isVisible() || optionsPanel.isVisible()) return;
 
   if (e.code === 'Space' && !el?.closest('button, select')) {
     e.preventDefault();
@@ -688,6 +741,8 @@ window.addEventListener('keydown', (e) => {
 
 // --- Show world map helper ---
 function showWorldMap(): void {
+  cityAdvisor.hide();
+  unhappyCityId = null;
   // No city on screen any more: drop the active tool and hide the HUD
   setToolMode('pointer');
   setInCity(false);
@@ -754,24 +809,6 @@ function advise(key: string, title: string, content: string, city: CityState, pr
   soundManager.triggerNotification();
 }
 
-/** What to build for each need, in the order citizens care about them. */
-const NEED_ADVICE: Record<MaslowNeed, string> = {
-  [MaslowNeed.PHYSIOLOGICAL]: 'power and water (Energy, Water & Sewage)',
-  [MaslowNeed.SAFETY]: 'police and fire stations',
-  [MaslowNeed.LOVE_BELONGING]: 'clinics, transport or parks',
-  [MaslowNeed.ESTEEM]: 'a landmark or museum (Tourism)',
-  [MaslowNeed.COGNITIVE]: 'schools or a library (Education)',
-  [MaslowNeed.AESTHETIC]: 'parks or Art & Culture buildings',
-  [MaslowNeed.SELF_ACTUALIZATION]: 'government buildings',
-};
-
-/** The most basic need that is badly met: fixing it lifts happiness the most. */
-function weakestNeed(city: CityState): MaslowNeed | null {
-  const maslow = city.resources.populationSummary?.averageMaslow;
-  if (!maslow) return null;
-  return MASLOW_NEEDS_ORDERED.find(need => maslow[need] < 50) ?? null;
-}
-
 function generateAdvisorHints(city: CityState): void {
   if (city.clock?.speed === 0) return;
   const res = city.resources;
@@ -779,23 +816,14 @@ function generateAdvisorHints(city: CityState): void {
   const emptyOf = (type: string) => zones.some(b => b.type === type && (b.developmentLevel ?? 0) === 0);
   const hasAny = (type: string) => zones.some(b => b.type === type);
   const happiness = Math.round(res.happiness);
-  const weakest = weakestNeed(city);
-  const fixHappiness = weakest ? ` Citizens most want ${NEED_ADVICE[weakest]}.` : '';
-
-  if (res.money < 0) {
+  if (res.money < 0 && !needsHappinessAdvice(city)) {
     advise('debt', 'The city is in debt',
-      `The treasury is at -$${Math.abs(Math.floor(res.money)).toLocaleString()}. Services degrade while in debt, making citizens unhappy. Raise taxes, bulldoze costly buildings, or take a loan from the Finance panel.`,
+      `The treasury is at -$${Math.abs(Math.floor(res.money)).toLocaleString()}. Review expenses and income in Finance to restore city services.`,
       city, MessagePriority.HIGH);
-  } else if (res.population > 0 && calculateNetIncome(city) < 0 && res.money < 2000) {
+  } else if (res.money >= 0 && res.population > 0 && calculateNetIncome(city) < 0 && res.money < 2000) {
     advise('deficit', 'Running a deficit',
-      'Upkeep costs more than taxes bring in. Zone more housing and workplaces (both pay tax), raise the tax rate, or bulldoze services you cannot afford yet.',
+      'Upkeep costs more than taxes bring in. Zone more housing and workplaces or review expenses in Finance.',
       city);
-  }
-
-  if (res.population > 0 && res.happiness < EMIGRATION_HAPPINESS_THRESHOLD) {
-    advise('exodus', 'People are leaving the city',
-      `Happiness is down to ${happiness}%. Nobody moves in and residents leave every day until it is back above ${EMIGRATION_HAPPINESS_THRESHOLD}%.${fixHappiness}`,
-      city, MessagePriority.HIGH);
   }
 
   const labor = calculateLaborStats(city);
@@ -820,9 +848,9 @@ function generateAdvisorHints(city: CityState): void {
   const blockedLevel = [2, 3].find(level =>
     res.happiness < getZoneLevelHappinessRequirement(level) &&
     zones.some(b => (b.developmentLevel ?? 0) === level - 1));
-  if (blockedLevel && res.population > 0) {
+  if (blockedLevel && res.population > 0 && !needsHappinessAdvice(city)) {
     advise('growth_capped', 'Buildings have stopped growing',
-      `Zones only develop to level ${blockedLevel} once happiness reaches ${getZoneLevelHappinessRequirement(blockedLevel)}% (now ${happiness}%).${fixHappiness}`,
+      `Zones only develop to level ${blockedLevel} once happiness reaches ${getZoneLevelHappinessRequirement(blockedLevel)}% (now ${happiness}%).`,
       city);
   }
 }
@@ -890,24 +918,8 @@ function generateResourceMessages(previousState: any, currentResources: any, cit
     }
   }
 
-  // Check happiness levels (cooldown: 60 s to avoid oscillation spam)
-  if (currentResources.happiness < 30 && previousState.happiness >= 30 && canNotify('happiness_low', 60_000)) {
-    const message = {
-      id: `happiness_low_${Date.now()}`,
-      type: MessageType.HAPPINESS_LOW,
-      category: MessageCategory.HAPPINESS,
-      priority: MessagePriority.HIGH,
-      title: 'Low Happiness Warning',
-      content: `Citizen happiness is at ${Math.floor(currentResources.happiness)}%. Consider improving services and infrastructure.`,
-      cityId: city.id,
-      playerId,
-      createdAt: Date.now(),
-      isRead: false,
-      displayType: DisplayType.NOTIFICATION,
-    };
-    messageManager.addMessage(message);
-    soundManager.triggerNotification();
-  } else if (currentResources.happiness > 80 && previousState.happiness <= 80 && canNotify('happiness_high', 60_000)) {
+  // Celebrate crossings into very high happiness.
+  if (currentResources.happiness > 80 && previousState.happiness <= 80 && canNotify('happiness_high', 60_000)) {
     const message = {
       id: `happiness_high_${Date.now()}`,
       type: MessageType.HAPPINESS_HIGH,

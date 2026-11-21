@@ -1,4 +1,5 @@
 import { type ResourceState, type CityState, type GameClock, MAX_GAME_SPEED } from '@cityzen/shared';
+import { LOW_HAPPINESS } from './happinessAdvice.js';
 
 const SPEED_LABELS = ['Ⅱ', '1×', '2×', '3×'];
 
@@ -7,6 +8,7 @@ export class ResourceBar {
   private moneyEl: HTMLSpanElement;
   private popEl: HTMLSpanElement;
   private happyEl: HTMLSpanElement;
+  private happinessButton: HTMLButtonElement;
   private cityNameEl: HTMLSpanElement;
   readonly actions: HTMLDivElement;
   readonly demand: HTMLDivElement;
@@ -18,6 +20,7 @@ export class ResourceBar {
   private speedBtns: HTMLButtonElement[] = [];
 
   onGameSpeedChange: ((speed: number) => void) | null = null;
+  onOpenAdvisor: (() => void) | null = null;
   private unlimited = false;
 
   constructor(parent: HTMLElement) {
@@ -41,10 +44,10 @@ export class ResourceBar {
             <span class="resource-label">Population</span>
             <span class="resource-value" id="res-pop"></span>
           </div>
-          <div class="resource-item">
+          <button type="button" class="resource-item happiness-advisor" aria-haspopup="dialog" aria-controls="city-advisor">
             <span class="resource-label">Happiness</span>
             <span class="resource-value" id="res-happy"></span>
-          </div>
+          </button>
         </div>
         <div class="resource-item clock-item">
           <span class="resource-value" id="res-clock"></span>
@@ -78,6 +81,8 @@ export class ResourceBar {
     this.moneyEl = this.container.querySelector('#res-money')!;
     this.popEl = this.container.querySelector('#res-pop')!;
     this.happyEl = this.container.querySelector('#res-happy')!;
+    this.happinessButton = this.container.querySelector('.happiness-advisor')!;
+    this.happinessButton.addEventListener('click', () => this.onOpenAdvisor?.());
     this.demandResEl = this.demand.querySelector('#demand-res')!;
     this.demandComEl = this.demand.querySelector('#demand-com')!;
     this.demandIndEl = this.demand.querySelector('#demand-ind')!;
@@ -121,9 +126,11 @@ export class ResourceBar {
     this.lastMoney = money;
 
     this.popEl.textContent = resources.population.toLocaleString();
-    const happiness = Math.round(resources.happiness);
+    const happiness = Math.floor(resources.happiness);
     this.happyEl.textContent = `${happiness}%`;
-    this.happyEl.classList.toggle('budget-negative', happiness < 30);
+    this.happinessButton.classList.toggle('low', resources.population > 0 && resources.happiness < LOW_HAPPINESS);
+    this.happinessButton.setAttribute('aria-label', `Happiness ${happiness}%. Open City Advisor`);
+    this.happinessButton.title = 'Open City Advisor';
 
     // Update demographics tooltip
     const summary = resources.populationSummary;
