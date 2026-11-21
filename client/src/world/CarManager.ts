@@ -1,66 +1,117 @@
 import * as THREE from 'three';
+import { type CityState, type PlacedBuilding, CELL_SIZE, isRoad } from '@cityzen/shared';
 import {
-  type CityState,
-  type Position,
-  BUILDING_DEFS,
-  isRoad,
-  CELL_SIZE,
-  DEFAULT_GRID_SIZE,
-  getEffectiveSize,
-} from '@cityzen/shared';
+  RoadNetwork,
+  isXAxis,
+  movementsConflict,
+  positionAt,
+  type Junction,
+  type Movement,
+  type Path,
+  type PathEvent,
+  type Tile,
+} from './traffic/RoadNetwork.js';
+import { TrafficLights, signalFor } from './traffic/TrafficLights.js';
 
-const CAR_COLORS = [0xe53935, 0x1e88e5, 0xfdd835, 0x43a047, 0xff8f00, 0x8e24aa];
-const CAR_SPEED = 2.5; // cells per second
-const MAX_CARS = 20;
-const CARS_PER_ROAD = 0.15; // spawn ratio: 1 car per ~7 road tiles
-const COLLISION_DISTANCE = 0.4; // minimum distance before stopping (in cells)
-const SLOW_DOWN_DISTANCE = 0.8; // distance at which cars start slowing down
-const CAR_Y = 0.03; // Y position: wheels sit just above road surface (road at 0.02)
+const CAR_COLORS = [0xe53935, 0x1e88e5, 0xfdd835, 0x43a047, 0xff8f00, 0x8e24aa, 0xeceff1, 0x37474f];
+const CARS_PER_ROAD = 0.15; // one car per ~7 road tiles
+const CAR_Y = 0.03; // wheels sit just above the road surface (road at 0.02)
 
-interface Direction {
-  dx: number;
-  dz: number;
-}
-
-const DIRECTIONS: Direction[] = [
-  { dx: 1, dz: 0 },
-  { dx: -1, dz: 0 },
-  { dx: 0, dz: 1 },
-  { dx: 0, dz: -1 },
-];
+// All distances in cells, speeds in cells per second.
+const CAR_LEN = 0.5;
+const HALF = CAR_LEN / 2;
+const MIN_GAP = 0.12;
+const LANE_TOL = 0.2;
+const CROSS_TOL = 0.2;
+const ACCEL = 2.2;
+const BRAKE = 4;
+const BRAKE_MAX = 10;
+const APPROACH = 3;
+/** Yield and roundabout entries are decided this close to the line. */
+const DECIDE = 1.0;
+const SPAWN_CLEARANCE = 0.8;
+const FADE = 0.35;
+/** A car blocked this long by something other than a light or a give-way is in a deadlock. */
+const DEADLOCK_SECONDS = 4;
+const GHOST_SECONDS = 1.2;
+const GIVE_UP_SECONDS = 30;
 
 interface Car {
+  id: number;
   mesh: THREE.Group;
-  /** Current grid cell the car is moving from */
-  from: Position;
-  /** Grid cell the car is moving toward */
-  to: Position;
-  /** 0..1 interpolation between from and to */
-  progress: number;
-  /** Current movement direction */
-  direction: Direction;
-  /** Direction the car was traveling when it entered the 'from' cell */
-  prevDirection: Direction;
-  /** Current speed multiplier (0 = stopped, 1 = full speed) */
-  speedMultiplier: number;
-  /** Whether the car is performing a U-turn at a dead end */
-  uTurn: boolean;
-  /** Whether the car is driving off the grid edge */
+  tiles: (Tile | null)[];
+  dirs: number[];
+  finalDir: number;
   exiting: boolean;
+  entering: boolean;
+  path: Path;
+  s: number;
+  v: number;
+  seg: number;
+  x: number;
+  z: number;
+  yaw: number;
+  /** Index of the next junction/roundabout event on the path. */
+  ev: number;
+  /** Cleared to enter the junction of event `ev`. */
+  permitted: boolean;
+  movement: Movement | null;
+  leader: Car | null;
+  leaderGap: number;
+  controlGap: number;
+  ignoreLeader: boolean;
+  waitMemo: number;
+  stuck: number;
+  stuckTotal: number;
+  ghost: number;
+  age: number;
+  /** ≥ 0 while shrinking away. */
+  leaving: number;
 }
 
+const pick = <T>(items: readonly T[]): T => items[Math.floor(Math.random() * items.length)];
+
+function angleDelta(a: number, b: number): number {
+  let d = (b - a) % (Math.PI * 2);
+  if (d > Math.PI) d -= Math.PI * 2;
+  if (d < -Math.PI) d += Math.PI * 2;
+  return d;
+}
+
+function roadSignature(buildings: readonly PlacedBuilding[]): string {
+  let sig = '';
+  for (const b of buildings) {
+    if (isRoad(b.type)) sig += `${b.id}@${b.position.x},${b.position.z}${b.orientation ?? ''};`;
+  }
+  return sig;
+}
+
+/**
+ * Traffic. Cars plan a route between lots (or the map edges), follow lanes,
+ * keep their distance, and take turns at junctions: lights at big crossings,
+ * all-way give-way at small ones, and yield-on-entry at roundabouts.
+ */
 export class CarManager {
   private scene: THREE.Scene;
   private cars: Car[] = [];
-  private roadSet: Set<string> = new Set();
-  private roadSpeedMap: Map<string, number> = new Map();
-  private roadBuildingMap: Map<string, string> = new Map();
-  private roadBuildingData: Map<string, { x: number; z: number; w: number; d: number }> = new Map();
+  private network: RoadNetwork | null = null;
+  private lights: TrafficLights;
+  private roadSig = '';
+  private lastBuildings: readonly PlacedBuilding[] | null = null;
+  private lastBuildingCount = -1;
+  private endpointAge = 0;
   private enabled = true;
-  private maxCarLimit = MAX_CARS;
+  private maxCarLimit = 20;
+  private nextId = 1;
+  private time = 0;
+  private frame = 0;
+  private spawnCooldown = 0;
+  private hash = new Map<number, Car[]>();
+  private nearby: Car[] = [];
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
+    this.lights = new TrafficLights(scene);
   }
 
   setEnabled(enabled: boolean): void {
@@ -72,580 +123,509 @@ export class CarManager {
     this.maxCarLimit = max;
   }
 
+  clear(): void {
+    for (const car of this.cars) this.removeMesh(car);
+    this.cars = [];
+    this.network = null;
+    this.roadSig = '';
+    this.lastBuildings = null;
+    this.lastBuildingCount = -1;
+    this.lights.clear();
+  }
+
   update(deltaTime: number, state: CityState | null): void {
     if (!state || !this.enabled) return;
+    const dt = Math.min(deltaTime, 0.05);
+    this.time += dt;
+    this.frame++;
 
-    this.rebuildRoadSet(state);
-    this.adjustCarCount();
+    this.syncNetwork(state, dt);
+    const net = this.network;
+    if (!net) return;
 
-    for (let ci = this.cars.length - 1; ci >= 0; ci--) {
-      const car = this.cars[ci];
-      // Check for cars ahead and adjust speed
-      const carAhead = this.getCarAhead(car);
-      if (carAhead) {
-        const distance = this.getDistanceToCar(car, carAhead);
-        if (distance < COLLISION_DISTANCE) {
-          // Too close - stop completely
-          car.speedMultiplier = 0;
-        } else if (distance < SLOW_DOWN_DISTANCE) {
-          // Gradually slow down as we approach
-          car.speedMultiplier = Math.max(0.1, (distance - COLLISION_DISTANCE) / (SLOW_DOWN_DISTANCE - COLLISION_DISTANCE));
-        } else {
-          car.speedMultiplier = 1;
-        }
-      } else {
-        // No car ahead - full speed
-        car.speedMultiplier = Math.min(1, car.speedMultiplier + deltaTime * 2); // Gradually accelerate
-      }
-
-      // Road speed multiplier + U-turn slowdown
-      const roadSpeed = this.roadSpeedMap.get(this.posKey(car.from)) ?? 1.0;
-      const speedFactor = car.uTurn ? 0.6 : 1;
-      car.progress += CAR_SPEED * deltaTime * car.speedMultiplier * speedFactor * roadSpeed;
-
-      if (car.progress >= 1) {
-        if (car.exiting) {
-          // Car has driven off the edge — remove it
-          this.scene.remove(car.mesh);
-          this.disposeMesh(car.mesh);
-          this.cars.splice(ci, 1);
-          continue;
-        }
-        // Arrived at destination cell — pick next cell
-        car.from = car.to;
-        car.progress = 0;
-        car.uTurn = false;
-        this.pickNextCell(car);
-      }
-
-      if (car.uTurn) {
-        // U-turn: follow a semicircular arc within the same cell
-        const cellCenter = this.gridToWorld(car.from);
-        const laneWidth = CELL_SIZE * 0.3;
-        const arcShift = CELL_SIZE * 0.2;
-
-        const arcCenterX = cellCenter.x + car.prevDirection.dx * arcShift;
-        const arcCenterZ = cellCenter.z + car.prevDirection.dz * arcShift;
-        const startAngle = Math.atan2(-car.prevDirection.dx, car.prevDirection.dz);
-        const currentAngle = startAngle - Math.PI * car.progress;
-
-        const carX = arcCenterX + Math.cos(currentAngle) * laneWidth;
-        const carZ = arcCenterZ + Math.sin(currentAngle) * laneWidth;
-        car.mesh.position.set(carX, CAR_Y, carZ);
-
-        const tangentX = Math.sin(currentAngle);
-        const tangentZ = -Math.cos(currentAngle);
-        car.mesh.rotation.y = Math.atan2(-tangentZ, tangentX);
-      } else {
-        const worldFrom = this.gridToWorld(car.from);
-        const worldTo = this.gridToWorld(car.to);
-        const prevOff = this.getLaneOffset(car.prevDirection);
-        const currOff = this.getLaneOffset(car.direction);
-        const t = car.progress;
-
-        // Start and end positions in lane
-        const sx = worldFrom.x + prevOff.x;
-        const sz = worldFrom.z + prevOff.z;
-        const ex = worldTo.x + currOff.x;
-        const ez = worldTo.z + currOff.z;
-
-        const isTurn = car.prevDirection.dx !== car.direction.dx
-                    || car.prevDirection.dz !== car.direction.dz;
-
-        let carX: number, carZ: number;
-
-        if (isTurn) {
-          // Detect left vs right turn via cross product
-          const cross = car.prevDirection.dx * car.direction.dz
-                      - car.prevDirection.dz * car.direction.dx;
-          const isLeftTurn = cross < 0;
-
-          let tx: number, tz: number;
-
-          if (isLeftTurn) {
-            // Left turn: route through intersection center in two phases.
-            // Phase 1 (t 0→0.5): lane → center, Phase 2 (t 0.5→1): center → exit lane.
-            const mx = worldFrom.x;
-            const mz = worldFrom.z;
-            const d = CELL_SIZE * 0.35;
-
-            if (t < 0.5) {
-              const pt = t * 2;
-              const mp = 1 - pt;
-              // Quadratic Bézier: S → C1 → M
-              const c1x = sx + car.prevDirection.dx * d;
-              const c1z = sz + car.prevDirection.dz * d;
-              carX = mp*mp*sx + 2*mp*pt*c1x + pt*pt*mx;
-              carZ = mp*mp*sz + 2*mp*pt*c1z + pt*pt*mz;
-              tx = 2*mp*(c1x - sx) + 2*pt*(mx - c1x);
-              tz = 2*mp*(c1z - sz) + 2*pt*(mz - c1z);
-            } else {
-              const pt = (t - 0.5) * 2;
-              const mp = 1 - pt;
-              // Quadratic Bézier: M → C2 → E
-              const c2x = ex - car.direction.dx * d;
-              const c2z = ez - car.direction.dz * d;
-              carX = mp*mp*mx + 2*mp*pt*c2x + pt*pt*ex;
-              carZ = mp*mp*mz + 2*mp*pt*c2z + pt*pt*ez;
-              tx = 2*mp*(c2x - mx) + 2*pt*(ex - c2x);
-              tz = 2*mp*(c2z - mz) + 2*pt*(ez - c2z);
-            }
-          } else {
-            // Right turn: cubic Bézier hugging the inner corner.
-            const d = CELL_SIZE * 0.5;
-            const c1x = sx + car.prevDirection.dx * d;
-            const c1z = sz + car.prevDirection.dz * d;
-            const c2x = ex - car.direction.dx * d;
-            const c2z = ez - car.direction.dz * d;
-
-            const mt = 1 - t;
-            carX = mt*mt*mt*sx + 3*mt*mt*t*c1x + 3*mt*t*t*c2x + t*t*t*ex;
-            carZ = mt*mt*mt*sz + 3*mt*mt*t*c1z + 3*mt*t*t*c2z + t*t*t*ez;
-            tx = 3*mt*mt*(c1x-sx) + 6*mt*t*(c2x-c1x) + 3*t*t*(ex-c2x);
-            tz = 3*mt*mt*(c1z-sz) + 6*mt*t*(c2z-c1z) + 3*t*t*(ez-c2z);
-          }
-
-          car.mesh.rotation.y = Math.atan2(-tz, tx);
-        } else {
-          // Straight: simple linear interpolation
-          carX = sx + (ex - sx) * t;
-          carZ = sz + (ez - sz) * t;
-          car.mesh.rotation.y = Math.atan2(-car.direction.dz, car.direction.dx);
-        }
-
-        car.mesh.position.set(carX, CAR_Y, carZ);
-      }
-    }
-  }
-
-  /** Calculate the lane offset for right-hand traffic */
-  private getLaneOffset(direction: Direction): { x: number; z: number } {
-    // Offset perpendicular to direction, to the right
-    // In this coordinate system (+Z = south), 90° clockwise rotation of (dx, dz) is (-dz, dx)
-    const laneWidth = CELL_SIZE * 0.3;
-    return {
-      x: -direction.dz * laneWidth,
-      z: direction.dx * laneWidth,
-    };
-  }
-
-  /** Find a car that is ahead of this car in its direction of travel */
-  private getCarAhead(car: Car): Car | null {
-    let closestCar: Car | null = null;
-    let closestDistance = Infinity;
-
-    for (const other of this.cars) {
-      if (other === car || other.exiting) continue;
-
-      // Check if the other car is ahead of this car
-      if (this.isCarAhead(car, other)) {
-        const distance = this.getDistanceToCar(car, other);
-        if (distance < closestDistance) {
-          closestDistance = distance;
-          closestCar = other;
-        }
-      }
+    this.lights.update(dt);
+    for (const j of net.junctions) {
+      j.queued = j.counting;
+      j.counting = [0, 0];
+      j.occupants.length = 0;
+      for (const [car, w] of j.waiting) if (w.frame < this.frame - 2) j.waiting.delete(car);
     }
 
-    return closestCar;
-  }
+    this.adjustCarCount(net, dt);
+    this.buildHash();
 
-  /** Check if 'other' car is ahead of 'car' in its direction of travel */
-  private isCarAhead(car: Car, other: Car): boolean {
-    // Cars traveling in opposite directions are in different lanes - ignore them
-    const dirDot = car.direction.dx * other.direction.dx + car.direction.dz * other.direction.dz;
-    if (dirDot < 0) {
-      // Opposite directions - different lanes, no collision possible
-      return false;
-    }
-
-    // Get actual world positions (including lane offsets)
-    const carPos = this.getCarWorldPosition(car);
-    const otherPos = this.getCarWorldPosition(other);
-
-    // Vector from car to other
-    const toOther = {
-      x: otherPos.x - carPos.x,
-      z: otherPos.z - carPos.z,
-    };
-
-    // Normalize car's direction
-    const dirLength = Math.sqrt(car.direction.dx * car.direction.dx + car.direction.dz * car.direction.dz);
-    const normDir = {
-      dx: car.direction.dx / dirLength,
-      dz: car.direction.dz / dirLength,
-    };
-
-    // Dot product to check if other is in front
-    const dot = toOther.x * normDir.dx + toOther.z * normDir.dz;
-
-    // Cross product magnitude for lateral distance (should be small for same lane)
-    const cross = Math.abs(toOther.x * normDir.dz - toOther.z * normDir.dx);
-
-    // Other car is ahead if:
-    // 1. Dot product is positive (in front)
-    // 2. Lateral distance is small (same lane - tighter check now that we have lanes)
-    return dot > 0 && cross < CELL_SIZE * 0.35;
-  }
-
-  /** Get the world position of a car (including interpolated lane offset) */
-  private getCarWorldPosition(car: Car): { x: number; z: number } {
-    if (car.uTurn) {
-      const cellCenter = this.gridToWorld(car.from);
-      const laneWidth = CELL_SIZE * 0.3;
-      const arcShift = CELL_SIZE * 0.2;
-      const arcCenterX = cellCenter.x + car.prevDirection.dx * arcShift;
-      const arcCenterZ = cellCenter.z + car.prevDirection.dz * arcShift;
-      const startAngle = Math.atan2(-car.prevDirection.dx, car.prevDirection.dz);
-      const currentAngle = startAngle - Math.PI * car.progress;
-      return {
-        x: arcCenterX + Math.cos(currentAngle) * laneWidth,
-        z: arcCenterZ + Math.sin(currentAngle) * laneWidth,
-      };
-    }
-
-    const worldFrom = this.gridToWorld(car.from);
-    const worldTo = this.gridToWorld(car.to);
-    const prevOff = this.getLaneOffset(car.prevDirection);
-    const currOff = this.getLaneOffset(car.direction);
-    const t = car.progress;
-
-    const sx = worldFrom.x + prevOff.x;
-    const sz = worldFrom.z + prevOff.z;
-    const ex = worldTo.x + currOff.x;
-    const ez = worldTo.z + currOff.z;
-
-    const isTurn = car.prevDirection.dx !== car.direction.dx
-                || car.prevDirection.dz !== car.direction.dz;
-
-    if (isTurn) {
-      const cross = car.prevDirection.dx * car.direction.dz
-                  - car.prevDirection.dz * car.direction.dx;
-      const isLeftTurn = cross < 0;
-
-      if (isLeftTurn) {
-        const mx = worldFrom.x;
-        const mz = worldFrom.z;
-        const d = CELL_SIZE * 0.35;
-
-        if (t < 0.5) {
-          const pt = t * 2;
-          const mp = 1 - pt;
-          const c1x = sx + car.prevDirection.dx * d;
-          const c1z = sz + car.prevDirection.dz * d;
-          return {
-            x: mp*mp*sx + 2*mp*pt*c1x + pt*pt*mx,
-            z: mp*mp*sz + 2*mp*pt*c1z + pt*pt*mz,
-          };
-        } else {
-          const pt = (t - 0.5) * 2;
-          const mp = 1 - pt;
-          const c2x = ex - car.direction.dx * d;
-          const c2z = ez - car.direction.dz * d;
-          return {
-            x: mp*mp*mx + 2*mp*pt*c2x + pt*pt*ex,
-            z: mp*mp*mz + 2*mp*pt*c2z + pt*pt*ez,
-          };
-        }
-      } else {
-        const d = CELL_SIZE * 0.5;
-        const c1x = sx + car.prevDirection.dx * d;
-        const c1z = sz + car.prevDirection.dz * d;
-        const c2x = ex - car.direction.dx * d;
-        const c2z = ez - car.direction.dz * d;
-        const mt = 1 - t;
-        return {
-          x: mt*mt*mt*sx + 3*mt*mt*t*c1x + 3*mt*t*t*c2x + t*t*t*ex,
-          z: mt*mt*mt*sz + 3*mt*mt*t*c1z + 3*mt*t*t*c2z + t*t*t*ez,
-        };
-      }
-    }
-
-    return {
-      x: sx + (ex - sx) * t,
-      z: sz + (ez - sz) * t,
-    };
-  }
-
-  /** Calculate distance between two cars in world units */
-  private getDistanceToCar(car: Car, other: Car): number {
-    const carPos = this.getCarWorldPosition(car);
-    const otherPos = this.getCarWorldPosition(other);
-    const dx = otherPos.x - carPos.x;
-    const dz = otherPos.z - carPos.z;
-    return Math.sqrt(dx * dx + dz * dz) / CELL_SIZE; // Return distance in cells
-  }
-
-  clear(): void {
+    // Who is in (or cleared into) which junction.
     for (const car of this.cars) {
-      this.scene.remove(car.mesh);
-      this.disposeMesh(car.mesh);
-    }
-    this.cars = [];
-    this.roadSet.clear();
-    this.roadSpeedMap.clear();
-    this.roadBuildingMap.clear();
-    this.roadBuildingData.clear();
-  }
-
-  private rebuildRoadSet(state: CityState): void {
-    this.roadSet.clear();
-    this.roadSpeedMap.clear();
-    this.roadBuildingMap.clear();
-    this.roadBuildingData.clear();
-    for (const b of state.buildings) {
-      if (isRoad(b.type)) {
-        const def = BUILDING_DEFS[b.type];
-        const speed = def.speedMultiplier ?? 1.0;
-        const { w, d } = getEffectiveSize(b.type, b.orientation);
-        this.roadBuildingData.set(b.id, {
-          x: b.position.x, z: b.position.z,
-          w, d,
-        });
-        for (let dx = 0; dx < w; dx++) {
-          for (let dz = 0; dz < d; dz++) {
-            const key = `${b.position.x + dx},${b.position.z + dz}`;
-            this.roadSet.add(key);
-            this.roadSpeedMap.set(key, speed);
-            this.roadBuildingMap.set(key, b.id);
-          }
-        }
+      const events = car.path.events;
+      while (car.ev < events.length && car.s - HALF > events[car.ev].sExit) {
+        car.ev++;
+        car.permitted = false;
+        car.movement = null;
+      }
+      const e = events[car.ev];
+      if (e?.junction && (car.permitted || car.s + HALF >= e.sEntry)) {
+        car.movement ??= this.movementFor(car, e);
+        e.junction.occupants.push(car.movement);
       }
     }
-  }
 
-  private adjustCarCount(): void {
-    const desiredCount = Math.min(this.maxCarLimit, Math.floor(this.roadSet.size * CARS_PER_ROAD));
-
-    // Remove excess cars
-    while (this.cars.length > desiredCount) {
-      const car = this.cars.pop()!;
-      this.scene.remove(car.mesh);
-      this.disposeMesh(car.mesh);
+    for (const car of this.cars) {
+      car.leader = null;
+      car.leaderGap = Infinity;
+      car.controlGap = Infinity;
+      car.ignoreLeader = false;
+      car.waitMemo = 0;
+      if (car.ghost <= 0) this.scanLeader(car);
+      this.control(car);
     }
 
-    // Remove cars sitting on demolished roads
+    // Two cars each waiting on the other: the one with more room goes first.
+    for (const car of this.cars) {
+      const other = car.leader;
+      if (other && other.leader === car) {
+        car.ignoreLeader = car.leaderGap > other.leaderGap
+          || (car.leaderGap === other.leaderGap && car.id < other.id);
+      }
+    }
+
     for (let i = this.cars.length - 1; i >= 0; i--) {
-      const car = this.cars[i];
-      if (!this.roadSet.has(this.posKey(car.from)) && !this.roadSet.has(this.posKey(car.to))) {
-        this.scene.remove(car.mesh);
-        this.disposeMesh(car.mesh);
+      if (!this.move(this.cars[i], dt)) {
+        this.removeMesh(this.cars[i]);
         this.cars.splice(i, 1);
       }
     }
+  }
 
-    // Spawn new cars
-    while (this.cars.length < desiredCount && this.roadSet.size > 0) {
-      const car = this.spawnCar();
-      if (car) {
-        this.cars.push(car);
-      } else {
-        break;
+  // ── Network ───────────────────────────────────────────────
+
+  private syncNetwork(state: CityState, dt: number): void {
+    this.endpointAge += dt;
+    const buildings = state.buildings;
+    const changed = buildings !== this.lastBuildings || buildings.length !== this.lastBuildingCount;
+    if (!changed && this.network && this.endpointAge < 5) return;
+    this.lastBuildings = buildings;
+    this.lastBuildingCount = buildings.length;
+    this.endpointAge = 0;
+
+    const sig = roadSignature(buildings);
+    if (sig === this.roadSig && this.network) {
+      // Lots changed (zones grew, buildings placed): refresh trip ends only.
+      this.network.setEndpoints(buildings);
+      return;
+    }
+    this.roadSig = sig;
+    const net = new RoadNetwork(buildings, state.grid.length);
+    this.network = net;
+    this.lights.rebuild(net.junctions);
+
+    // Keep cars whose remaining route still exists; the rest pull away.
+    for (const car of this.cars) {
+      const current = this.currentStep(car);
+      const tiles = car.tiles.map(t => {
+        if (!t) return null;
+        const nt = net.tileAt(t.x, t.z);
+        return nt && nt.building === t.building ? nt : null;
+      });
+      car.tiles = tiles;
+      car.ev = 0;
+      car.permitted = false;
+      car.movement = null;
+      if (tiles.some((t, i) => i >= current && !t)) {
+        car.path.events = [];
+        if (car.leaving < 0) car.leaving = 0;
+        continue;
+      }
+      car.path.events = net.computeEvents(car.path, tiles, car.dirs, car.finalDir);
+    }
+  }
+
+  private currentStep(car: Car): number {
+    const { stepS } = car.path;
+    let i = 0;
+    while (i + 1 < stepS.length && stepS[i + 1] <= car.s) i++;
+    return i;
+  }
+
+  // ── Population ────────────────────────────────────────────
+
+  private adjustCarCount(net: RoadNetwork, dt: number): void {
+    const desired = Math.min(this.maxCarLimit, Math.floor(net.tiles.length * CARS_PER_ROAD));
+    let active = 0;
+    for (const car of this.cars) if (car.leaving < 0) active++;
+
+    for (let i = this.cars.length - 1; i >= 0 && active > desired; i--) {
+      if (this.cars[i].leaving < 0) {
+        this.cars[i].leaving = 0;
+        active--;
       }
     }
+
+    this.spawnCooldown -= dt;
+    if (active >= desired || this.spawnCooldown > 0) return;
+    this.spawnCooldown = 0.1;
+    const car = this.spawnCar(net);
+    if (car) this.cars.push(car);
   }
 
-  private spawnCar(): Car | null {
-    const roads = Array.from(this.roadSet);
-    if (roads.length === 0) return null;
+  private spawnCar(net: RoadNetwork): Car | null {
+    if (!net.endpoints.length && !net.entries.length) return null;
 
-    // 30% chance to spawn from a grid edge if edge roads exist
-    if (Math.random() < 0.3) {
-      const edgeCar = this.spawnEdgeCar();
-      if (edgeCar) return edgeCar;
+    let start: Tile;
+    let startDirs: number[];
+    const entering = net.entries.length > 0 && (net.endpoints.length === 0 || Math.random() < 0.3);
+    if (entering) {
+      const gate = pick(net.entries);
+      start = gate.tile;
+      startDirs = [gate.dir];
+    } else {
+      start = pick(net.endpoints);
+      startDirs = [0, 1, 2, 3];
     }
 
-    // Pick a random road cell
-    const startKey = roads[Math.floor(Math.random() * roads.length)];
-    const from = this.keyToPos(startKey);
+    for (let attempt = 0; attempt < 4; attempt++) {
+      let goal: { tile: Tile; exitDir: number };
+      const leaveMap = net.exits.length > 0 && (net.endpoints.length === 0 || Math.random() < (entering ? 0.35 : 0.2));
+      if (leaveMap) {
+        const gate = pick(net.exits);
+        if (gate.tile === start) continue;
+        goal = { tile: gate.tile, exitDir: gate.dir };
+      } else {
+        const tile = pick(net.endpoints);
+        if (tile === start) continue;
+        if (attempt < 3 && Math.abs(tile.x - start.x) + Math.abs(tile.z - start.z) < 5) continue;
+        goal = { tile, exitDir: -1 };
+      }
 
-    const mesh = this.createCarMesh();
-    const worldPos = this.gridToWorld(from);
-    mesh.position.set(worldPos.x, CAR_Y, worldPos.z);
-    this.scene.add(mesh);
+      const steps = net.findRoute(start, startDirs, goal);
+      if (!steps || steps.length < 2) continue;
+      // Pull out in the direction of travel.
+      if (!entering) steps[0] = { tile: steps[0].tile, dir: steps[1].dir };
 
-    const dir = DIRECTIONS[Math.floor(Math.random() * DIRECTIONS.length)];
-    const car: Car = {
-      mesh,
-      from,
-      to: { ...from },
-      progress: 0,
-      direction: dir,
-      prevDirection: dir,
-      speedMultiplier: 1,
-      uTurn: false,
-      exiting: false,
-    };
+      const route = { steps, entering, exitDir: goal.exitDir };
+      const path = net.buildPath(route, Math.random() < 0.5 ? 0 : 1);
+      if (path.xs.length < 2) continue;
+      if (this.isOccupied(path.xs[0], path.zs[0], SPAWN_CLEARANCE)) return null;
 
-    this.pickNextCell(car);
-    return car;
+      const mesh = this.createCarMesh();
+      this.scene.add(mesh);
+      const car: Car = {
+        id: this.nextId++,
+        mesh,
+        tiles: steps.map(st => st.tile),
+        dirs: steps.map(st => st.dir),
+        finalDir: goal.exitDir >= 0 ? goal.exitDir : steps[steps.length - 1].dir,
+        exiting: goal.exitDir >= 0,
+        entering,
+        path,
+        s: 0,
+        v: entering ? path.speed[0] : 0,
+        seg: 0,
+        x: path.xs[0],
+        z: path.zs[0],
+        yaw: Math.atan2(-(path.zs[1] - path.zs[0]), path.xs[1] - path.xs[0]),
+        ev: 0,
+        permitted: false,
+        movement: null,
+        leader: null,
+        leaderGap: Infinity,
+        controlGap: Infinity,
+        ignoreLeader: false,
+        waitMemo: 0,
+        stuck: 0,
+        stuckTotal: 0,
+        ghost: 0,
+        age: 0,
+        leaving: -1,
+      };
+      this.place(car);
+      return car;
+    }
+    return null;
   }
 
-  /** Find road cells on the grid edges that can receive cars from outside */
-  private getEdgeRoadCells(): { pos: Position; dir: Direction }[] {
-    const result: { pos: Position; dir: Direction }[] = [];
-    for (const key of this.roadSet) {
-      const pos = this.keyToPos(key);
-      // West edge: car enters heading east
-      if (pos.x === 0) result.push({ pos, dir: { dx: 1, dz: 0 } });
-      // East edge: car enters heading west
-      if (pos.x === DEFAULT_GRID_SIZE - 1) result.push({ pos, dir: { dx: -1, dz: 0 } });
-      // North edge: car enters heading south
-      if (pos.z === 0) result.push({ pos, dir: { dx: 0, dz: 1 } });
-      // South edge: car enters heading north
-      if (pos.z === DEFAULT_GRID_SIZE - 1) result.push({ pos, dir: { dx: 0, dz: -1 } });
+  private isOccupied(x: number, z: number, radius: number): boolean {
+    for (const car of this.cars) {
+      if ((car.x - x) ** 2 + (car.z - z) ** 2 < radius * radius) return true;
     }
-    return result;
-  }
-
-  /** Spawn a car entering from outside the grid at an edge road cell */
-  private spawnEdgeCar(): Car | null {
-    const edges = this.getEdgeRoadCells();
-    if (edges.length === 0) return null;
-
-    const pick = edges[Math.floor(Math.random() * edges.length)];
-    // Start one cell outside the grid
-    const from: Position = {
-      x: pick.pos.x - pick.dir.dx,
-      z: pick.pos.z - pick.dir.dz,
-    };
-
-    const mesh = this.createCarMesh();
-    const worldPos = this.gridToWorld(from);
-    mesh.position.set(worldPos.x, CAR_Y, worldPos.z);
-    const angle = Math.atan2(-pick.dir.dz, pick.dir.dx);
-    mesh.rotation.y = angle;
-    this.scene.add(mesh);
-
-    return {
-      mesh,
-      from,
-      to: pick.pos,
-      progress: 0,
-      direction: pick.dir,
-      prevDirection: pick.dir,
-      speedMultiplier: 1,
-      uTurn: false,
-      exiting: false,
-    };
-  }
-
-  private pickNextCell(car: Car): void {
-    // Save current direction as previous before potentially changing it
-    car.prevDirection = { ...car.direction };
-
-    // Try to continue in the same direction first
-    const forward: Position = {
-      x: car.from.x + car.direction.dx,
-      z: car.from.z + car.direction.dz,
-    };
-
-    if (this.canMoveTo(car.from, forward)) {
-      car.to = forward;
-      this.rotateCarMesh(car);
-      return;
-    }
-
-    // If forward is off-grid, let the car drive off the edge
-    if (this.isOffGrid(forward) && this.isEdgeRoad(car.from, car.direction)) {
-      car.to = forward;
-      car.exiting = true;
-      this.rotateCarMesh(car);
-      return;
-    }
-
-    // Otherwise pick a random adjacent road (excluding where we came from)
-    const neighbors = DIRECTIONS
-      .map((d) => ({ pos: { x: car.from.x + d.dx, z: car.from.z + d.dz }, dir: d }))
-      .filter(({ pos, dir }) => {
-        // Don't reverse direction unless it's the only option
-        const isReverse = dir.dx === -car.direction.dx && dir.dz === -car.direction.dz;
-        return !isReverse && this.canMoveTo(car.from, pos);
-      });
-
-    if (neighbors.length > 0) {
-      const pick = neighbors[Math.floor(Math.random() * neighbors.length)];
-      car.to = pick.pos;
-      car.direction = pick.dir;
-      this.rotateCarMesh(car);
-      return;
-    }
-
-    // Dead end — perform U-turn arc, then continue in reverse
-    const reverse: Position = {
-      x: car.from.x - car.direction.dx,
-      z: car.from.z - car.direction.dz,
-    };
-
-    if (this.canMoveTo(car.from, reverse)) {
-      // U-turn: stay in same cell, reverse direction, follow arc
-      car.to = { ...car.from };
-      car.direction = { dx: -car.direction.dx, dz: -car.direction.dz };
-      car.uTurn = true;
-      return;
-    }
-
-    // Completely isolated — stay put
-    car.to = { ...car.from };
-  }
-
-  /** Check if a position is outside the grid bounds */
-  private isOffGrid(pos: Position): boolean {
-    return pos.x < 0 || pos.x >= DEFAULT_GRID_SIZE || pos.z < 0 || pos.z >= DEFAULT_GRID_SIZE;
-  }
-
-  /** Check if a road cell is on the grid edge facing the given direction */
-  private isEdgeRoad(pos: Position, dir: Direction): boolean {
-    if (!this.roadSet.has(this.posKey(pos))) return false;
-    if (dir.dx === 1 && pos.x === DEFAULT_GRID_SIZE - 1) return true;
-    if (dir.dx === -1 && pos.x === 0) return true;
-    if (dir.dz === 1 && pos.z === DEFAULT_GRID_SIZE - 1) return true;
-    if (dir.dz === -1 && pos.z === 0) return true;
     return false;
   }
 
-  private isRoad(pos: Position): boolean {
-    if (pos.x < 0 || pos.x >= DEFAULT_GRID_SIZE || pos.z < 0 || pos.z >= DEFAULT_GRID_SIZE) {
-      return false;
+  // ── Perception ────────────────────────────────────────────
+
+  private hashKey(cx: number, cz: number): number {
+    return (cx + 16) * 4096 + (cz + 16);
+  }
+
+  private buildHash(): void {
+    this.hash.clear();
+    for (const car of this.cars) {
+      const key = this.hashKey(Math.floor(car.x), Math.floor(car.z));
+      let bucket = this.hash.get(key);
+      if (!bucket) {
+        bucket = [];
+        this.hash.set(key, bucket);
+      }
+      bucket.push(car);
     }
-    return this.roadSet.has(this.posKey(pos));
   }
 
-  /** Check if a car can move from one cell to an adjacent cell */
-  private canMoveTo(from: Position, to: Position): boolean {
-    if (!this.isRoad(to)) return false;
-
-    const fromId = this.roadBuildingMap.get(this.posKey(from));
-    const toId = this.roadBuildingMap.get(this.posKey(to));
-    if (!fromId || !toId) return false;
-
-    // Same building: always allow internal movement
-    if (fromId === toId) return true;
-
-    // Different buildings: only allow if both cells are on their respective
-    // building edges facing the direction of movement
-    const fromData = this.roadBuildingData.get(fromId)!;
-    const toData = this.roadBuildingData.get(toId)!;
-
-    const dx = to.x - from.x;
-    const dz = to.z - from.z;
-
-    // Check 'from' cell is on the exit edge of its building
-    let fromOnEdge = false;
-    if (dx === 1) fromOnEdge = from.x === fromData.x + fromData.w - 1;
-    else if (dx === -1) fromOnEdge = from.x === fromData.x;
-    else if (dz === 1) fromOnEdge = from.z === fromData.z + fromData.d - 1;
-    else if (dz === -1) fromOnEdge = from.z === fromData.z;
-
-    // Check 'to' cell is on the entry edge of its building
-    let toOnEdge = false;
-    if (dx === 1) toOnEdge = to.x === toData.x;
-    else if (dx === -1) toOnEdge = to.x === toData.x + toData.w - 1;
-    else if (dz === 1) toOnEdge = to.z === toData.z;
-    else if (dz === -1) toOnEdge = to.z === toData.z + toData.d - 1;
-
-    return fromOnEdge && toOnEdge;
+  private query(x: number, z: number, r: number): Car[] {
+    const out = this.nearby;
+    out.length = 0;
+    for (let cx = Math.floor(x - r); cx <= Math.floor(x + r); cx++) {
+      for (let cz = Math.floor(z - r); cz <= Math.floor(z + r); cz++) {
+        const bucket = this.hash.get(this.hashKey(cx, cz));
+        if (bucket) for (const car of bucket) out.push(car);
+      }
+    }
+    return out;
   }
+
+  /**
+   * Distance along this car's path to the first car sitting on it, between
+   * sFrom and sTo. Returns the gap from this car's front to that car's rear.
+   */
+  private findOnPath(car: Car, sFrom: number, sTo: number, slowOnly: boolean): { other: Car; gap: number } | null {
+    const { xs, zs, ss } = car.path;
+    const [mx, mz] = positionAt(car.path, (sFrom + sTo) / 2, car.seg);
+    const candidates = this.query(mx, mz, (sTo - sFrom) / 2 + 0.8);
+    let best: { other: Car; gap: number } | null = null;
+    let k0 = car.seg;
+    while (k0 > 0 && ss[k0] > sFrom) k0--;
+    while (k0 < ss.length - 2 && ss[k0 + 1] < sFrom) k0++;
+
+    for (const other of candidates) {
+      if (other === car || (slowOnly && other.v > 0.6)) continue;
+      const ohx = Math.cos(other.yaw);
+      const ohz = -Math.sin(other.yaw);
+      for (let k = k0; k < ss.length - 1 && ss[k] <= sTo; k++) {
+        const ax = xs[k], az = zs[k];
+        const bx = xs[k + 1] - ax, bz = zs[k + 1] - az;
+        const len2 = bx * bx + bz * bz;
+        if (len2 === 0) continue;
+        // The last segment extends past the path end: a car parking still
+        // has to stop short of whoever is queued just beyond its spot.
+        const tMax = k === ss.length - 2 ? 1 + CAR_LEN / Math.sqrt(len2) : 1;
+        const t = Math.min(tMax, Math.max(0, ((other.x - ax) * bx + (other.z - az) * bz) / len2));
+        const dx = other.x - (ax + bx * t);
+        const dz = other.z - (az + bz * t);
+        // A car crossing at an angle blocks more of the lane than its centre suggests.
+        const len = Math.sqrt(len2);
+        const tol = LANE_TOL + CROSS_TOL * Math.abs(ohx * bz - ohz * bx) / len;
+        if (dx * dx + dz * dz > tol * tol) continue;
+        const along = ss[k] + len * t;
+        if (along <= car.s + 0.02 || along < sFrom || along > sTo) continue;
+        const gap = along - car.s - CAR_LEN;
+        if (!best || gap < best.gap) best = { other, gap };
+        break;
+      }
+    }
+    return best;
+  }
+
+  private scanLeader(car: Car): void {
+    const look = Math.min(3.5, 1 + (car.v * car.v) / (2 * BRAKE) + CAR_LEN);
+    const hit = this.findOnPath(car, car.s, car.s + look + HALF, false);
+    if (hit) {
+      car.leader = hit.other;
+      car.leaderGap = hit.gap;
+    }
+  }
+
+  // ── Junction control ──────────────────────────────────────
+
+  private movementFor(car: Car, e: PathEvent): Movement {
+    return { car, inDir: e.inDir, outDir: e.outDir, arrival: this.time, frame: this.frame };
+  }
+
+  private stopAt(car: Car, dist: number): void {
+    car.controlGap = Math.min(car.controlGap, dist);
+  }
+
+  private grant(car: Car, e: PathEvent): void {
+    car.permitted = true;
+    if (e.junction) {
+      car.movement = e.junction.waiting.get(car) ?? this.movementFor(car, e);
+      e.junction.waiting.delete(car);
+      e.junction.occupants.push(car.movement);
+    }
+  }
+
+  private control(car: Car): void {
+    const e = car.path.events[car.ev];
+    if (!e || car.permitted || car.leaving >= 0) return;
+    const front = car.s + HALF;
+    if (front >= e.sEntry) {
+      car.permitted = true;
+      return;
+    }
+    const dist = e.sEntry - front;
+    if (dist > APPROACH) return;
+    const first = car.leaderGap > dist - 0.05;
+
+    if (e.junction) {
+      const j = e.junction;
+      j.counting[isXAxis(e.inDir) ? 0 : 1]++;
+      if (j.control === 'signal') {
+        const light = signalFor(j, e.inDir);
+        if (light === 'red') return this.stopAt(car, dist);
+        if (light === 'yellow') {
+          // Too close to stop comfortably: carry on through.
+          if (dist <= (car.v * car.v) / (2 * BRAKE_MAX) + 0.05) this.grant(car, e);
+          else this.stopAt(car, dist);
+          return;
+        }
+        if (dist > Math.max(0.5, (car.v * car.v) / (2 * BRAKE) + 0.1)) return;
+        // Green still means giving way to whoever is already crossing your path
+        // (left turns against oncoming traffic, merges into the same exit).
+        const mine = this.movementFor(car, e);
+        for (const other of j.occupants) {
+          if (other.car !== car && movementsConflict(mine, other)) return this.stopAt(car, dist);
+        }
+        if (!this.exitClear(car, e)) return this.stopAt(car, dist);
+        return this.grant(car, e);
+      }
+      this.yieldAt(car, e, j, dist, first);
+      return;
+    }
+
+    // Roundabout: give way to traffic already circulating.
+    this.stopAt(car, dist);
+    if (!first || dist > DECIDE) return;
+    const ra = e.roundabout!;
+    for (const other of this.query(ra.cx, ra.cz, 2.3)) {
+      if (other === car) continue;
+      const oe = other.path.events[other.ev];
+      if (!oe || oe.roundabout !== ra) continue;
+      if (other.s + HALF < oe.sEntry || other.s - HALF > oe.sExit) continue;
+      const angle = Math.atan2(other.z - ra.cz, other.x - ra.cx);
+      const upstream = ((angle - e.mergeAngle) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+      if (upstream < 1.7 || upstream > Math.PI * 2 - 0.5) return;
+    }
+    car.controlGap = Infinity;
+    this.grant(car, e);
+  }
+
+  /** All-way give-way: first come, first served among crossing movements. */
+  private yieldAt(car: Car, e: PathEvent, j: Junction, dist: number, first: boolean): void {
+    this.stopAt(car, dist);
+    if (!first) return;
+    let mine = j.waiting.get(car);
+    if (!mine) {
+      mine = this.movementFor(car, e);
+      j.waiting.set(car, mine);
+    }
+    mine.frame = this.frame;
+    if (dist > DECIDE) return;
+
+    for (const other of j.occupants) {
+      if (other.car !== car && movementsConflict(mine, other)) return;
+    }
+    for (const other of j.waiting.values()) {
+      if (other === mine || other.frame < this.frame - 1) continue;
+      if (other.arrival < mine.arrival && movementsConflict(mine, other)) return;
+    }
+    if (!this.exitClear(car, e)) return;
+    car.controlGap = Infinity;
+    this.grant(car, e);
+  }
+
+  /** Don't enter a junction unless there is room to leave it. */
+  private exitClear(car: Car, e: PathEvent): boolean {
+    if (e.sExit >= car.path.length - 0.05) return true;
+    return !this.findOnPath(car, e.sExit - 0.1, Math.min(car.path.length, e.sExit + CAR_LEN + 0.3), true);
+  }
+
+  /** Waiting for a light/give-way, directly or behind a queue that is. */
+  private waitingLegitimately(car: Car, depth = 0): boolean {
+    if (car.waitMemo) return car.waitMemo > 0;
+    let result = false;
+    if (car.controlGap <= car.leaderGap) result = true;
+    else if (car.leader && depth < 30) result = this.waitingLegitimately(car.leader, depth + 1);
+    car.waitMemo = result ? 1 : -1;
+    return result;
+  }
+
+  // ── Motion ────────────────────────────────────────────────
+
+  /** Advances one car; returns false once it should be removed. */
+  private move(car: Car, dt: number): boolean {
+    const path = car.path;
+    car.age += dt;
+    car.ghost -= dt;
+
+    // Speed limit: this segment and any slower ones coming up, braking in time.
+    let vmax = path.speed[car.seg];
+    for (let k = car.seg + 1; k < path.ss.length - 1 && path.ss[k] < car.s + 2; k++) {
+      vmax = Math.min(vmax, Math.sqrt(path.speed[k] ** 2 + 2 * BRAKE * Math.max(0, path.ss[k] - car.s)));
+    }
+    if (!car.exiting) {
+      vmax = Math.min(vmax, Math.sqrt(2 * BRAKE * Math.max(0, path.length - car.s)) + 0.15);
+    }
+
+    const leaderFree = car.ignoreLeader || car.ghost > 0 ? Infinity : car.leaderGap - MIN_GAP;
+    const free = Math.min(leaderFree, car.controlGap - 0.03);
+    const target = Math.min(vmax, Math.sqrt(2 * BRAKE * Math.max(0, free)));
+    car.v = target > car.v ? Math.min(target, car.v + ACCEL * dt) : Math.max(target, car.v - BRAKE_MAX * dt);
+    let ds = car.v * dt;
+    if (ds > free) ds = Math.max(0, free);
+    car.s = Math.min(path.length, car.s + ds);
+
+    // Deadlock watchdog
+    if (car.v < 0.05) {
+      car.stuckTotal += dt;
+      if (!this.waitingLegitimately(car)) car.stuck += dt;
+    } else {
+      car.stuck = 0;
+      car.stuckTotal = Math.max(0, car.stuckTotal - dt * 2);
+    }
+    if (car.stuck > DEADLOCK_SECONDS) {
+      car.ghost = GHOST_SECONDS;
+      car.stuck = 0;
+    }
+    if (car.stuckTotal > GIVE_UP_SECONDS && car.leaving < 0) car.leaving = 0;
+
+    if (car.s >= path.length - 1e-3) {
+      if (car.exiting) return false;
+      if (car.leaving < 0) car.leaving = 0;
+    }
+
+    this.place(car, dt);
+
+    if (car.leaving >= 0) {
+      car.leaving += dt;
+      if (car.leaving >= FADE) return false;
+      car.mesh.scale.setScalar(1 - car.leaving / FADE);
+    } else if (!car.entering && car.age < FADE) {
+      car.mesh.scale.setScalar(0.3 + 0.7 * (car.age / FADE));
+    } else {
+      car.mesh.scale.setScalar(1);
+    }
+    return true;
+  }
+
+  private place(car: Car, dt = 0): void {
+    const { xs, zs, ss } = car.path;
+    while (car.seg < ss.length - 2 && ss[car.seg + 1] <= car.s) car.seg++;
+    const k = car.seg;
+    const len = ss[k + 1] - ss[k];
+    const t = len > 0 ? Math.min(1, Math.max(0, (car.s - ss[k]) / len)) : 0;
+    car.x = xs[k] + (xs[k + 1] - xs[k]) * t;
+    car.z = zs[k] + (zs[k + 1] - zs[k]) * t;
+    const heading = Math.atan2(-(zs[k + 1] - zs[k]), xs[k + 1] - xs[k]);
+    car.yaw = dt > 0 ? car.yaw + angleDelta(car.yaw, heading) * (1 - Math.exp(-dt * 14)) : heading;
+    car.mesh.position.set(car.x * CELL_SIZE, CAR_Y, car.z * CELL_SIZE);
+    car.mesh.rotation.y = car.yaw;
+  }
+
+  private removeMesh(car: Car): void {
+    this.scene.remove(car.mesh);
+    this.disposeMesh(car.mesh);
+    const e = car.path.events[car.ev];
+    e?.junction?.waiting.delete(car);
+  }
+
+  // ── Car model ─────────────────────────────────────────────
 
   private createCarMesh(): THREE.Group {
     const group = new THREE.Group();
@@ -838,32 +818,6 @@ export class CarManager {
     group.scale.set(0.9, 0.9, 0.9);
 
     return group;
-  }
-
-  private rotateCarMesh(car: Car): void {
-    // Car model is built with front facing +X direction
-    // Rotation is smoothly interpolated in the update loop
-    // Only set rotation immediately for initial spawn (when prevDirection === direction)
-    if (car.prevDirection.dx === car.direction.dx && car.prevDirection.dz === car.direction.dz) {
-      const angle = Math.atan2(-car.direction.dz, car.direction.dx);
-      car.mesh.rotation.y = angle;
-    }
-  }
-
-  private gridToWorld(pos: Position): { x: number; z: number } {
-    return {
-      x: pos.x * CELL_SIZE + CELL_SIZE / 2,
-      z: pos.z * CELL_SIZE + CELL_SIZE / 2,
-    };
-  }
-
-  private posKey(pos: Position): string {
-    return `${pos.x},${pos.z}`;
-  }
-
-  private keyToPos(key: string): Position {
-    const [x, z] = key.split(',').map(Number);
-    return { x, z };
   }
 
   private disposeMesh(group: THREE.Group): void {
