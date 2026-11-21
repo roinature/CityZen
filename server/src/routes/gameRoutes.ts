@@ -13,23 +13,95 @@ import {
   type SetUnlimitedMoneyPayload,
   type SetGameSpeedPayload,
   type PlacedBuilding,
+  type CityState,
 } from '@cityzen/shared';
+import { IS_SERVERLESS } from '../config.js';
+import { GameRoom } from '../game/GameRoom.js';
+import { clearCitySession, readCitySession, writeCitySession } from '../game/citySession.js';
+import { loadCityState, mutateCityState } from '../persistence/jsonStore.js';
 import { RoomManager } from '../game/RoomManager.js';
 import { WorldManager } from '../game/WorldManager.js';
 import { savePlayerProfile, loadPlayerProfile } from '../persistence/playerStore.js';
-import { broadcastToAll } from '../realtime/supabaseBroadcast.js';
+import { broadcastToChannel } from '../realtime/supabaseBroadcast.js';
 
-// Server-side session tracking: playerId -> roomId
-const playerSessions = new Map<string, string>();
+interface CityActionResult {
+  success: boolean;
+  error?: string;
+  code?: string;
+  roadsChanged?: boolean;
+}
 
 export function createGameRoutes(roomManager: RoomManager, worldManager: WorldManager): Router {
   const router = Router();
 
-  // Helper to get current room for a player
-  function getPlayerRoom(playerId: string) {
-    const roomId = playerSessions.get(playerId);
-    if (!roomId) return null;
-    return roomManager.getRoom(roomId) ?? null;
+  // Local presence is separate from the signed city session used across workers.
+  const playerSessions = new Map<string, string>();
+
+  function joinRoom(res: Response, room: GameRoom, playerId: string, playerName: string): void {
+    playerSessions.set(playerId, room.id);
+    room.addPlayer(playerId, playerName);
+    writeCitySession(res, { playerId, cityId: room.id });
+  }
+
+  function cityAction(
+    action: (room: GameRoom, body: Request['body']) => CityActionResult,
+  ): (req: Request, res: Response) => Promise<void> {
+    return async (req, res) => {
+      try {
+        const playerId = req.body?.playerId;
+        if (typeof playerId !== 'string' || !playerId) {
+          res.json({ success: false, error: 'Missing playerId' });
+          return;
+        }
+        const session = IS_SERVERLESS ? readCitySession(req, playerId) : null;
+        const cityId = IS_SERVERLESS ? session?.cityId : playerSessions.get(playerId);
+        let state: CityState | undefined;
+        let result: CityActionResult | undefined;
+        if (cityId && IS_SERVERLESS) {
+          const events: Array<{ event: string; data: unknown }> = [];
+          const mutation = await mutateCityState(cityId, (city) => {
+            const room = new GameRoom(city.id, city.name, city.ownerId, '', city,
+              (event, data) => events.push({ event, data }),
+            );
+            room.unlimitedMoney = session?.unlimitedMoney === true;
+            const result = action(room, req.body);
+            return { result, state: room.state };
+          });
+          if (mutation) {
+            ({ result, state } = mutation);
+            if (result.success) {
+              roomManager.getRoom(cityId)?.syncPersistedState(state);
+              const broadcasts = events.map(({ event, data }) => broadcastToChannel(`city:${cityId}`, event, data));
+              for (const worldId of mutation.updatedWorldIds) {
+                broadcasts.push(worldManager.publishCityEdges(worldId, cityId).catch(err => {
+                  console.error('Could not publish world road connections:', err);
+                }));
+              }
+              await Promise.all(broadcasts);
+            }
+          }
+        } else if (cityId) {
+          const room = roomManager.getRoom(cityId);
+          if (room) {
+            result = action(room, req.body);
+            state = room.state;
+          }
+        }
+
+        if (!result || !state) {
+          res.json({ success: false, error: 'Not in a city', code: 'NO_ROOM' });
+          return;
+        }
+        if (!IS_SERVERLESS && result.success && result.roadsChanged) {
+          worldManager.updateCityEdgeConnections(state.id, calculateEdgeConnections(state.buildings));
+        }
+        const { roadsChanged, ...response } = result;
+        res.json(response);
+      } catch (err) {
+        console.error('City action failed:', err);
+        res.status(500).json({ success: false, error: 'Could not save city changes' });
+      }
+    };
   }
 
   function leaveCurrentRoom(playerId: string): void {
@@ -118,8 +190,7 @@ export function createGameRoutes(roomManager: RoomManager, worldManager: WorldMa
       // Auto-join the newly created city
       const room = roomManager.getRoom(result.cityId!);
       if (room) {
-        playerSessions.set(playerId, room.id);
-        room.addPlayer(playerId, payload.playerName);
+        joinRoom(res, room, playerId, payload.playerName);
         console.log(`Plot claimed at (${payload.position.wx}, ${payload.position.wz}) - City "${payload.cityName}" by ${payload.playerName}`);
       }
 
@@ -149,7 +220,6 @@ export function createGameRoutes(roomManager: RoomManager, worldManager: WorldMa
       }
 
       const room = await roomManager.createRoom(payload.cityName, playerId, payload.playerName);
-      playerSessions.set(playerId, room.id);
 
       // Update player profile with owned city
       await savePlayerProfile({
@@ -159,7 +229,7 @@ export function createGameRoutes(roomManager: RoomManager, worldManager: WorldMa
         createdAt: profile?.createdAt ?? Date.now(),
       });
 
-      room.addPlayer(playerId, payload.playerName);
+      joinRoom(res, room, playerId, payload.playerName);
 
       console.log(`City created: "${payload.cityName}" (${room.id}) by ${payload.playerName}`);
       res.json({ success: true, cityId: room.id });
@@ -190,14 +260,16 @@ export function createGameRoutes(roomManager: RoomManager, worldManager: WorldMa
         }
       }
 
-      const room = await roomManager.getOrLoadRoom(payload.cityId);
-      if (!room) {
+      const cachedRoom = IS_SERVERLESS ? roomManager.getRoom(payload.cityId) : undefined;
+      const room = cachedRoom ?? await roomManager.getOrLoadRoom(payload.cityId);
+      const savedCity = cachedRoom ? await loadCityState(payload.cityId) : null;
+      if (!room || (cachedRoom && !savedCity)) {
         res.json({ success: false, error: 'City not found', code: 'NOT_FOUND' });
         return;
       }
 
-      playerSessions.set(playerId, room.id);
-      room.addPlayer(playerId, payload.playerName);
+      if (savedCity) room.syncPersistedState(savedCity);
+      joinRoom(res, room, playerId, payload.playerName);
 
       console.log(`${payload.playerName} joined city ${room.state.name}`);
       res.json({ success: true, cityId: room.id, city: room.state, players: room.getPlayerList() });
@@ -206,109 +278,41 @@ export function createGameRoutes(roomManager: RoomManager, worldManager: WorldMa
     }
   });
 
-  // POST /api/building/place
-  router.post('/building/place', (req: Request, res: Response) => {
-    const { playerId, position, type, density, orientation } = req.body as PlaceBuildingPayload & { playerId: string };
-    if (!playerId) {
-      res.json({ success: false, error: 'Missing playerId' });
-      return;
-    }
-
-    const room = getPlayerRoom(playerId);
-    if (!room) {
-      res.json({ success: false, error: 'Not in a city', code: 'NO_ROOM' });
-      return;
-    }
-
+  router.post('/building/place', cityAction((room, body: PlaceBuildingPayload & { playerId: string }) => {
+    const { playerId, position, type, density, orientation } = body;
     const result = room.placeBuilding(playerId, position, type, density, orientation);
-    if (!result.success) {
-      res.json({ success: false, error: result.error, code: 'PLACEMENT_FAILED' });
-    } else {
-      if (isRoad(type)) {
-        const roomId = playerSessions.get(playerId)!;
-        const connections = calculateEdgeConnections(room.state.buildings);
-        worldManager.updateCityEdgeConnections(roomId, connections);
-      }
-      res.json({ success: true });
-    }
-  });
+    return result.success ? { success: true, roadsChanged: isRoad(type) } :
+      { ...result, code: 'PLACEMENT_FAILED' };
+  }));
 
-  // POST /api/building/demolish
-  router.post('/building/demolish', (req: Request, res: Response) => {
-    const { playerId, position } = req.body as DemolishPayload & { playerId: string };
-    if (!playerId) {
-      res.json({ success: false, error: 'Missing playerId' });
-      return;
-    }
-
-    const room = getPlayerRoom(playerId);
-    if (!room) {
-      res.json({ success: false, error: 'Not in a city', code: 'NO_ROOM' });
-      return;
-    }
-
-    // Check if we're demolishing a road before actually demolishing
+  router.post('/building/demolish', cityAction((room, body: DemolishPayload) => {
+    const { position } = body;
     const cell = room.state.grid[position.x]?.[position.z];
     const building = cell?.buildingId ? room.state.buildings.find((b: PlacedBuilding) => b.id === cell.buildingId) : null;
-    const wasRoad = building && isRoad(building.type);
-
     const result = room.demolishBuilding(position);
-    if (!result.success) {
-      res.json({ success: false, error: result.error, code: 'DEMOLISH_FAILED' });
-    } else {
-      if (wasRoad) {
-        const roomId = playerSessions.get(playerId)!;
-        const connections = calculateEdgeConnections(room.state.buildings);
-        worldManager.updateCityEdgeConnections(roomId, connections);
-      }
-      res.json({ success: true });
-    }
-  });
+    return result.success ? { success: true, roadsChanged: !!building && isRoad(building.type) } :
+      { ...result, code: 'DEMOLISH_FAILED' };
+  }));
 
-  // POST /api/city/tax-rate
-  router.post('/city/tax-rate', (req: Request, res: Response) => {
-    const { playerId, taxRate } = req.body as SetTaxRatePayload & { playerId: string };
-    const room = getPlayerRoom(playerId);
-    if (!room) {
+  router.post('/city/tax-rate', cityAction((room, body: SetTaxRatePayload) => room.setTaxRate(body.taxRate)));
+
+  router.post('/city/loan/take', cityAction((room, body: { amount: number; termDays: number }) =>
+    room.takeLoan(Number(body.amount), Number(body.termDays)),
+  ));
+
+  router.post('/city/loan/repay', cityAction((room, body: { loanId: string }) => room.repayLoan(body.loanId)));
+
+  router.post('/city/unlimited-money', (req: Request, res: Response) => {
+    const { playerId, enabled } = req.body as SetUnlimitedMoneyPayload & { playerId: string };
+    const session = readCitySession(req, playerId);
+    const cityId = playerSessions.get(playerId);
+    const room = cityId ? roomManager.getRoom(cityId) : undefined;
+    if (IS_SERVERLESS ? !session : !room) {
       res.json({ success: false, error: 'Not in a city', code: 'NO_ROOM' });
       return;
     }
-
-    const result = room.setTaxRate(taxRate);
-    res.json(result.success ? { success: true } : { success: false, error: result.error });
-  });
-
-  // POST /api/city/loan/take
-  router.post('/city/loan/take', (req: Request, res: Response) => {
-    const { playerId, amount, termDays } = req.body as { playerId: string; amount: number; termDays: number };
-    const room = getPlayerRoom(playerId);
-    if (!room) {
-      res.json({ success: false, error: 'Not in a city' });
-      return;
-    }
-    res.json(room.takeLoan(Number(amount), Number(termDays)));
-  });
-
-  // POST /api/city/loan/repay
-  router.post('/city/loan/repay', (req: Request, res: Response) => {
-    const { playerId, loanId } = req.body as { playerId: string; loanId: string };
-    const room = getPlayerRoom(playerId);
-    if (!room) {
-      res.json({ success: false, error: 'Not in a city' });
-      return;
-    }
-    res.json(room.repayLoan(loanId));
-  });
-
-  // POST /api/city/unlimited-money
-  router.post('/city/unlimited-money', (req: Request, res: Response) => {
-    const { playerId, enabled } = req.body as SetUnlimitedMoneyPayload & { playerId: string };
-    const room = getPlayerRoom(playerId);
-    if (!room) {
-      res.json({ success: false, error: 'Not in a city' });
-      return;
-    }
-    room.setUnlimitedMoney(enabled);
+    if (IS_SERVERLESS && session) writeCitySession(res, { ...session, unlimitedMoney: enabled === true });
+    room?.setUnlimitedMoney(enabled === true);
     res.json({ success: true });
   });
 
@@ -319,30 +323,28 @@ export function createGameRoutes(roomManager: RoomManager, worldManager: WorldMa
     res.json(result.success ? { success: true } : { success: false, error: result.error });
   });
 
-  // POST /api/city/save
   router.post('/city/save', async (req: Request, res: Response) => {
     const { playerId } = req.body as { playerId: string };
-    const room = getPlayerRoom(playerId);
-    if (!room) {
-      res.json({ success: false, error: 'Not in a city' });
-      return;
+    const cityId = IS_SERVERLESS ? readCitySession(req, playerId)?.cityId : playerSessions.get(playerId);
+    try {
+      const room = cityId ? roomManager.getRoom(cityId) : undefined;
+      if (room) {
+        await room.forceSave();
+      } else if (!IS_SERVERLESS || !cityId || !await loadCityState(cityId)) {
+        res.json({ success: false, error: 'Not in a city', code: 'NO_ROOM' });
+        return;
+      }
+      res.json({ success: true });
+    } catch (err) {
+      console.error('City save failed:', err);
+      res.status(500).json({ success: false, error: 'Could not save city changes' });
     }
-    await room.forceSave();
-    res.json({ success: true });
   });
 
-  // POST /api/city/restart
-  router.post('/city/restart', (req: Request, res: Response) => {
-    const { playerId } = req.body as { playerId: string };
-    const room = getPlayerRoom(playerId);
-    if (!room) {
-      res.json({ success: false, error: 'Not in a city' });
-      return;
-    }
+  router.post('/city/restart', cityAction((room) => {
     room.restart();
-    worldManager.updateCityEdgeConnections(room.id, calculateEdgeConnections(room.state.buildings));
-    res.json({ success: true });
-  });
+    return { success: true, roadsChanged: true };
+  }));
 
   // POST /api/city/leave
   router.post('/city/leave', (req: Request, res: Response) => {
@@ -350,6 +352,7 @@ export function createGameRoutes(roomManager: RoomManager, worldManager: WorldMa
     if (playerId) {
       leaveCurrentRoom(playerId);
     }
+    clearCitySession(res);
     res.json({ success: true });
   });
 

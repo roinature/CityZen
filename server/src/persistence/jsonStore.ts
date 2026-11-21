@@ -1,6 +1,8 @@
 import prisma from './prismaClient.js';
+import type { Prisma } from '../generated/prisma/index.js';
+import { writeWorldCityEdges } from './worldStore.js';
 import type { CityState, PlacedBuilding, RoadOrientation, Loan } from '@cityzen/shared';
-import { createEmptyGrid, BUILDING_DEFS, MaslowNeed, getEffectiveSize, BuildingType } from '@cityzen/shared';
+import { createEmptyGrid, BUILDING_DEFS, MaslowNeed, getEffectiveSize, BuildingType, calculateEdgeConnections } from '@cityzen/shared';
 
 // Loans are stored in City.loans (JSONB), added by the 20261114000000_city_loans
 // migration. Until that migration has been applied the column doesn't exist, so
@@ -30,116 +32,142 @@ async function hasLoansColumn(): Promise<boolean> {
   return loansColumnExists;
 }
 
-async function loadCityLoans(cityId: string): Promise<Loan[]> {
-  if (!(await hasLoansColumn())) return [];
-  try {
-    const rows = await prisma.$queryRaw<Array<{ loans: unknown }>>`
-      SELECT "loans" FROM "City" WHERE "id" = ${cityId}
-    `;
-    const loans = rows[0]?.loans;
-    return Array.isArray(loans) ? (loans as Loan[]) : [];
-  } catch (err) {
-    console.error(`Failed to load loans for city ${cityId}:`, err);
-    return [];
-  }
+async function loadCityLoans(cityId: string, db: Prisma.TransactionClient, persistLoans: boolean): Promise<Loan[]> {
+  if (!persistLoans) return [];
+  const rows = await db.$queryRaw<Array<{ loans: unknown }>>`
+    SELECT "loans" FROM "City" WHERE "id" = ${cityId}
+  `;
+  const loans = rows[0]?.loans;
+  return Array.isArray(loans) ? (loans as Loan[]) : [];
 }
 
-export async function saveCityState(cityId: string, state: CityState): Promise<void> {
+const cityTransactionOptions = { maxWait: 10_000, timeout: 15_000 };
+
+export async function saveCityState(cityId: string, state: CityState, expectedRevision?: number): Promise<number | null> {
   const persistLoans = await hasLoansColumn();
-
-  // Use interactive transaction with increased timeout (15s) to handle large city saves
-  await prisma.$transaction(async (tx) => {
-    // 1. Upsert city metadata (resources, clock, tick)
-    await tx.city.upsert({
-      where: { id: cityId },
-      update: {
-        name: state.name,
-        ownerId: state.ownerId || '',
-        money: state.resources.money,
-        population: state.resources.population,
-        happiness: state.resources.happiness,
-        taxRate: state.resources.taxRate,
-        demandResidential: state.resources.demand.residential,
-        demandCommercial: state.resources.demand.commercial,
-        demandIndustrial: state.resources.demand.industrial,
-        clockGameTimeMs: state.clock.gameTimeMs,
-        clockSpeed: state.clock.speed,
-        clockGameDay: state.clock.gameDay,
-        clockGameYear: state.clock.gameYear,
-        maslowPhysiological: state.resources.populationSummary?.averageMaslow?.[MaslowNeed.PHYSIOLOGICAL] ?? 50,
-        maslowSafety: state.resources.populationSummary?.averageMaslow?.[MaslowNeed.SAFETY] ?? 50,
-        maslowLoveBelonging: state.resources.populationSummary?.averageMaslow?.[MaslowNeed.LOVE_BELONGING] ?? 50,
-        maslowEsteem: state.resources.populationSummary?.averageMaslow?.[MaslowNeed.ESTEEM] ?? 50,
-        maslowCognitive: state.resources.populationSummary?.averageMaslow?.[MaslowNeed.COGNITIVE] ?? 50,
-        maslowAesthetic: state.resources.populationSummary?.averageMaslow?.[MaslowNeed.AESTHETIC] ?? 50,
-        maslowSelfActualization: state.resources.populationSummary?.averageMaslow?.[MaslowNeed.SELF_ACTUALIZATION] ?? 50,
-        tick: state.tick,
-        updatedAt: new Date(),
-      },
-      create: {
-        id: cityId,
-        name: state.name,
-        ownerId: state.ownerId || '',
-        money: state.resources.money,
-        population: state.resources.population,
-        happiness: state.resources.happiness,
-        taxRate: state.resources.taxRate,
-        demandResidential: state.resources.demand.residential,
-        demandCommercial: state.resources.demand.commercial,
-        demandIndustrial: state.resources.demand.industrial,
-        clockGameTimeMs: state.clock.gameTimeMs,
-        clockSpeed: state.clock.speed,
-        clockGameDay: state.clock.gameDay,
-        clockGameYear: state.clock.gameYear,
-        maslowPhysiological: state.resources.populationSummary?.averageMaslow?.[MaslowNeed.PHYSIOLOGICAL] ?? 50,
-        maslowSafety: state.resources.populationSummary?.averageMaslow?.[MaslowNeed.SAFETY] ?? 50,
-        maslowLoveBelonging: state.resources.populationSummary?.averageMaslow?.[MaslowNeed.LOVE_BELONGING] ?? 50,
-        maslowEsteem: state.resources.populationSummary?.averageMaslow?.[MaslowNeed.ESTEEM] ?? 50,
-        maslowCognitive: state.resources.populationSummary?.averageMaslow?.[MaslowNeed.COGNITIVE] ?? 50,
-        maslowAesthetic: state.resources.populationSummary?.averageMaslow?.[MaslowNeed.AESTHETIC] ?? 50,
-        maslowSelfActualization: state.resources.populationSummary?.averageMaslow?.[MaslowNeed.SELF_ACTUALIZATION] ?? 50,
-        tick: state.tick,
-      },
-    });
-
-    if (persistLoans) {
-      const loansJson = JSON.stringify(state.resources.loans ?? []);
-      await tx.$executeRaw`UPDATE "City" SET "loans" = ${loansJson}::jsonb WHERE "id" = ${cityId}`;
+  return prisma.$transaction(async (tx) => {
+    if (expectedRevision !== undefined) {
+      const revision = await lockCity(tx, cityId);
+      if (revision !== expectedRevision) return null;
     }
+    return writeCityState(tx, cityId, state, persistLoans, expectedRevision);
+  }, cityTransactionOptions);
+}
 
-    // 2. Replace all buildings: delete existing, then bulk insert
-    await tx.building.deleteMany({ where: { cityId } });
+async function lockCity(tx: Prisma.TransactionClient, cityId: string): Promise<number | null> {
+  const [row] = await tx.$queryRaw<Array<{ updatedAt: Date }>>`
+    SELECT "updatedAt" FROM "City" WHERE "id" = ${cityId} FOR UPDATE
+  `;
+  return row?.updatedAt.getTime() ?? null;
+}
 
-    if (state.buildings.length > 0) {
-      await tx.building.createMany({
-        data: state.buildings.map((b) => ({
-          id: b.id,
-          cityId,
-          type: b.type,
-          positionX: b.position.x,
-          positionZ: b.position.z,
-          placedBy: b.placedBy,
-          placedAt: b.placedAt,
-          developmentLevel: b.developmentLevel ?? null,
-          developedAt: b.developedAt ?? null,
-          density: b.density ?? null,
-          orientation: b.orientation ?? null,
-        })),
-      });
-    }
-  }, {
-    maxWait: 10000, // Wait up to 10s to acquire a connection
-    timeout: 15000, // 15s execution timeout
+async function writeCityState(
+  tx: Prisma.TransactionClient, cityId: string, state: CityState, persistLoans: boolean, previousRevision?: number,
+  previousBuildings?: Map<string, PlacedBuilding>,
+): Promise<number> {
+  const updatedAt = new Date(Math.max(Date.now(), (previousRevision ?? 0) + 1));
+  const cityData = {
+    name: state.name,
+    ownerId: state.ownerId || '',
+    money: state.resources.money,
+    population: state.resources.population,
+    happiness: state.resources.happiness,
+    taxRate: state.resources.taxRate,
+    demandResidential: state.resources.demand.residential,
+    demandCommercial: state.resources.demand.commercial,
+    demandIndustrial: state.resources.demand.industrial,
+    clockGameTimeMs: state.clock.gameTimeMs,
+    clockSpeed: state.clock.speed,
+    clockGameDay: state.clock.gameDay,
+    clockGameYear: state.clock.gameYear,
+    maslowPhysiological: state.resources.populationSummary?.averageMaslow?.[MaslowNeed.PHYSIOLOGICAL] ?? 50,
+    maslowSafety: state.resources.populationSummary?.averageMaslow?.[MaslowNeed.SAFETY] ?? 50,
+    maslowLoveBelonging: state.resources.populationSummary?.averageMaslow?.[MaslowNeed.LOVE_BELONGING] ?? 50,
+    maslowEsteem: state.resources.populationSummary?.averageMaslow?.[MaslowNeed.ESTEEM] ?? 50,
+    maslowCognitive: state.resources.populationSummary?.averageMaslow?.[MaslowNeed.COGNITIVE] ?? 50,
+    maslowAesthetic: state.resources.populationSummary?.averageMaslow?.[MaslowNeed.AESTHETIC] ?? 50,
+    maslowSelfActualization: state.resources.populationSummary?.averageMaslow?.[MaslowNeed.SELF_ACTUALIZATION] ?? 50,
+    tick: state.tick,
+    updatedAt,
+  };
+  await tx.city.upsert({
+    where: { id: cityId },
+    update: cityData,
+    create: { id: cityId, ...cityData },
   });
+
+  if (persistLoans) {
+    const loansJson = JSON.stringify(state.resources.loans ?? []);
+    await tx.$executeRaw`UPDATE "City" SET "loans" = ${loansJson}::jsonb WHERE "id" = ${cityId}`;
+  }
+
+  const buildingsToWrite = state.buildings.filter(building => previousBuildings?.get(building.id) !== building);
+  if (previousBuildings) {
+    const currentBuildings = new Map(state.buildings.map(building => [building.id, building]));
+    const removedIds = [...previousBuildings].filter(([id, building]) => currentBuildings.get(id) !== building)
+      .map(([id]) => id);
+    if (removedIds.length) await tx.building.deleteMany({ where: { cityId, id: { in: removedIds } } });
+  } else {
+    await tx.building.deleteMany({ where: { cityId } });
+  }
+
+  if (buildingsToWrite.length) {
+    await tx.building.createMany({
+      data: buildingsToWrite.map((b) => ({
+        id: b.id,
+        cityId,
+        type: b.type,
+        positionX: b.position.x,
+        positionZ: b.position.z,
+        placedBy: b.placedBy,
+        placedAt: b.placedAt,
+        developmentLevel: b.developmentLevel ?? null,
+        developedAt: b.developedAt ?? null,
+        density: b.density ?? null,
+        orientation: b.orientation ?? null,
+      })),
+    });
+  }
+  return updatedAt.getTime();
+}
+
+export async function mutateCityState<T extends { success: boolean; roadsChanged?: boolean }>(
+  cityId: string, mutate: (state: CityState) => { result: T; state: CityState },
+): Promise<{ result: T; state: CityState; updatedWorldIds: string[] } | null> {
+  const persistLoans = await hasLoansColumn();
+  return prisma.$transaction(async (tx) => {
+    const revision = await lockCity(tx, cityId);
+    if (revision === null) return null;
+    const savedState = await readCityState(cityId, tx, persistLoans);
+    if (!savedState) return null;
+    const previousBuildings = new Map(savedState.buildings.map(building => [building.id, building]));
+    const { result, state } = mutate(savedState);
+    let updatedWorldIds: string[] = [];
+    if (result.success) {
+      state.updatedAt = await writeCityState(tx, cityId, state, persistLoans, revision, previousBuildings);
+      if (result.roadsChanged) {
+        const before = calculateEdgeConnections([...previousBuildings.values()]);
+        const after = calculateEdgeConnections(state.buildings);
+        if (JSON.stringify(before) !== JSON.stringify(after)) {
+          updatedWorldIds = await writeWorldCityEdges(tx, cityId, after);
+        }
+      }
+    }
+    return { result, state, updatedWorldIds };
+  }, cityTransactionOptions);
 }
 
 export async function loadCityState(cityId: string): Promise<CityState | null> {
+  return readCityState(cityId, prisma, await hasLoansColumn());
+}
+
+async function readCityState(cityId: string, db: Prisma.TransactionClient, persistLoans: boolean): Promise<CityState | null> {
   const [city, loans] = await Promise.all([
-    prisma.city.findUnique({
+    db.city.findUnique({
       where: { id: cityId },
       include: { buildings: true },
     }),
-    loadCityLoans(cityId),
+    loadCityLoans(cityId, db, persistLoans),
   ]);
 
   if (!city) return null;

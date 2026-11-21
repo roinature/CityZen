@@ -45,10 +45,8 @@ export class GameClient {
   private callbacks: GameCallbacks;
   private worldChannel!: RealtimeChannel;
   private cityChannel: RealtimeChannel | null = null;
-  private currentCityId: string | null = null;
+  private joinedCityChannel: RealtimeChannel | null = null;
   private currentWorldId = 'default';
-  /** City whose state was just delivered from the join response; its echo broadcast is skipped. */
-  private skipCityStateEchoFor: string | null = null;
 
   static async create(serverUrl: string, callbacks: GameCallbacks): Promise<GameClient> {
     const client = new GameClient(serverUrl, callbacks);
@@ -108,17 +106,14 @@ export class GameClient {
     // Unsubscribe from previous city channel
     this.unsubscribeFromCityChannel();
 
-    this.currentCityId = cityId;
-    this.cityChannel = this.supabase.channel(`city:${cityId}`);
+    const channel = this.supabase.channel(`city:${cityId}`);
+    this.cityChannel = channel;
 
     await new Promise<void>((resolve) => {
-      this.cityChannel!
+      channel
         .on('broadcast', { event: S2C.CITY_STATE }, (msg) => {
           const payload = msg.payload as CityStatePayload;
-          if (this.skipCityStateEchoFor === payload.city.id) {
-            this.skipCityStateEchoFor = null;
-            return;
-          }
+          if (this.joinedCityChannel !== channel) return;
           this.callbacks.onCityState(payload.city, payload.players);
         })
         .on('broadcast', { event: S2C.BUILDING_PLACED }, (msg) => {
@@ -159,7 +154,7 @@ export class GameClient {
     if (this.cityChannel) {
       this.supabase.removeChannel(this.cityChannel);
       this.cityChannel = null;
-      this.currentCityId = null;
+      this.joinedCityChannel = null;
     }
   }
 
@@ -189,32 +184,29 @@ export class GameClient {
   async createCity(cityName: string, playerName: string, playerId?: string): Promise<void> {
     const result = await this.post('/api/city/create', { cityName, playerName, playerId });
     if (result.success && result.cityId) {
-      await this.subscribeToCityChannel(result.cityId);
+      await this.joinCity(result.cityId, playerName, playerId);
     } else if (!result.success) {
       this.callbacks.onError({ message: result.error || 'Failed to create city', code: 'CREATE_FAILED' });
     }
   }
 
   async joinCity(cityId: string, playerName: string, playerId?: string): Promise<void> {
-    // Subscribe and join in parallel; the join response carries the city state,
-    // so entering takes one round-trip instead of subscribe + join + broadcast.
+    const subscribed = this.subscribeToCityChannel(cityId);
+    const channel = this.cityChannel;
     const [, result] = await Promise.all([
-      this.subscribeToCityChannel(cityId),
+      subscribed,
       this.post('/api/city/join', { cityId, playerName, playerId }),
     ]);
+    if (this.cityChannel !== channel) return;
     if (!result.success) {
       this.unsubscribeFromCityChannel();
       this.callbacks.onError({ message: result.error || 'Failed to join city', code: result.code || 'JOIN_FAILED' });
       return;
     }
-    if (result.city) {
-      // The server also broadcasts this state; ignore that echo if it reaches us
-      this.skipCityStateEchoFor = cityId;
-      setTimeout(() => {
-        if (this.skipCityStateEchoFor === cityId) this.skipCityStateEchoFor = null;
-      }, 5000);
-      this.callbacks.onCityState(result.city, result.players ?? []);
-    }
+    // The join response establishes the session for edits. An earlier
+    // realtime broadcast can arrive before the browser receives that session.
+    this.joinedCityChannel = channel;
+    if (result.city) this.callbacks.onCityState(result.city, result.players ?? []);
   }
 
   async placeBuilding(position: Position, type: BuildingType, playerId?: string, density?: ZoneDensity, orientation?: RoadOrientation): Promise<void> {

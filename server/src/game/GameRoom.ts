@@ -26,8 +26,9 @@ import {
   validateLoanRequest,
   createLoan,
 } from '@cityzen/shared';
-import { saveCityState } from '../persistence/jsonStore.js';
+import { loadCityState, saveCityState } from '../persistence/jsonStore.js';
 import { broadcastToChannel } from '../realtime/supabaseBroadcast.js';
+import { IS_SERVERLESS } from '../config.js';
 import type { MessageManager } from '../services/MessageManager.js';
 
 function createInitialClock(): GameClock {
@@ -39,6 +40,8 @@ function createInitialClock(): GameClock {
   };
 }
 
+type CityBroadcast = (event: string, data: unknown) => void;
+
 export class GameRoom {
   id: string;
   state: CityState;
@@ -48,10 +51,14 @@ export class GameRoom {
   unlimitedMoney = false;
   ownerName = 'Unknown';
   private messageManager: MessageManager | null = null;
+  private persistedRevision?: number;
 
-  constructor(id: string, name: string, ownerId: string, ownerName: string, existingState?: CityState) {
+  constructor(id: string, name: string, ownerId: string, ownerName: string, existingState?: CityState,
+    private collectBroadcast?: CityBroadcast,
+  ) {
     this.id = id;
     this.ownerName = ownerName;
+    this.persistedRevision = existingState?.updatedAt;
     this.state = existingState ?? {
       id,
       name,
@@ -374,11 +381,22 @@ export class GameRoom {
     return Array.from(this.players.values()).map(e => e.player);
   }
 
+  syncPersistedState(state: CityState): void {
+    if (this.persistedRevision !== undefined && this.persistedRevision >= state.updatedAt) return;
+    this.persistedRevision = state.updatedAt;
+    this.state = structuredClone(state);
+  }
+
   private broadcast(event: string, data: unknown): void {
+    if (this.collectBroadcast) {
+      this.collectBroadcast(event, data);
+      return;
+    }
     broadcastToChannel(`city:${this.id}`, event, data);
   }
 
   private saveAfterMutation(): void {
+    if (this.collectBroadcast) return;
     if (this.debouncedSaveTimer) clearTimeout(this.debouncedSaveTimer);
     this.debouncedSaveTimer = setTimeout(() => this.save(), 1000);
   }
@@ -398,7 +416,14 @@ export class GameRoom {
     }
     this.isSaving = true;
     try {
-      await saveCityState(this.id, this.state);
+      const snapshot = IS_SERVERLESS ? structuredClone(this.state) : this.state;
+      const revision = await saveCityState(this.id, snapshot, IS_SERVERLESS ? this.persistedRevision : undefined);
+      if (revision !== null) {
+        this.persistedRevision = Math.max(this.persistedRevision ?? 0, revision);
+      } else {
+        const latest = await loadCityState(this.id);
+        if (latest) this.syncPersistedState(latest);
+      }
     } catch (err) {
       console.error(`Failed to save city ${this.id}:`, err);
     } finally {

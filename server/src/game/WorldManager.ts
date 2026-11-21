@@ -12,6 +12,7 @@ import {
   AUTO_SAVE_INTERVAL_MS,
   calculateEdgeConnections,
 } from '@cityzen/shared';
+import { IS_SERVERLESS } from '../config.js';
 import { RoomManager } from './RoomManager.js';
 import { WorldTickEngine } from './WorldTickEngine.js';
 import { PopulationManager } from './PopulationManager.js';
@@ -116,7 +117,7 @@ export class WorldManager {
       const hasPlayers = this.roomManager.getActiveRooms().some(
         r => r.players.size > 0 && state.cities.some(c => c.cityId === r.id),
       );
-      if (hasPlayers && !instance.saving) void this.save(state.id);
+      if (hasPlayers && !instance.saving) void this.save(state.id, IS_SERVERLESS);
     }, AUTO_SAVE_INTERVAL_MS);
 
     console.log(
@@ -171,10 +172,19 @@ export class WorldManager {
   async loadWorld(worldId: string): Promise<WorldState | null> {
     // Already loaded?
     const existing = this.worlds.get(worldId);
-    if (existing) return existing.state;
+    if (existing && !IS_SERVERLESS) return existing.state;
 
     const state = await loadWorldState(worldId);
     if (!state) return null;
+    if (existing) {
+      // Another worker may have claimed a plot or edited a city's edge roads.
+      const cachedCities = new Map(existing.state.cities.map(city => [city.cityId, city]));
+      existing.state.cities = state.cities.map(city => {
+        const cached = cachedCities.get(city.cityId);
+        return cached ? { ...city, population: cached.population, happiness: cached.happiness } : city;
+      });
+      return existing.state;
+    }
 
     const instance = await this.startWorldInstance(state, false);
     return instance.state;
@@ -291,7 +301,6 @@ export class WorldManager {
       instance.state.updatedAt = Date.now();
 
       broadcastToAll(S2C.WORLD_STATE, { world: instance.state });
-
       this.save(instance.state.id);
     }
   }
@@ -302,14 +311,23 @@ export class WorldManager {
     return instance.state.cities.find((c: WorldCityEntry) => c.cityId === cityId);
   }
 
-  async save(worldId = 'default'): Promise<void> {
+  async publishCityEdges(worldId: string, cityId: string): Promise<void> {
+    const world = await loadWorldState(worldId);
+    if (!world) return;
+    const edges = world.cities.find(city => city.cityId === cityId)?.edgeConnections;
+    const cached = this.getCityEntry(cityId);
+    if (cached && edges) cached.edgeConnections = edges;
+    await broadcastToAll(S2C.WORLD_STATE, { world });
+  }
+
+  async save(worldId = 'default', preserveCities = false): Promise<void> {
     const instance = this.worlds.get(worldId);
     if (!instance) return;
     // Explicit saves (plot claims etc.) always go through; overlapping ones just queue in the DB.
     instance.saving = true;
     try {
       const populationData = instance.populationManager.serialize();
-      await saveWorldState(instance.state, populationData);
+      await saveWorldState(instance.state, populationData, preserveCities);
     } catch (err) {
       console.error(`Failed to save world state (${worldId}):`, err);
     } finally {

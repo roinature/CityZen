@@ -1,10 +1,11 @@
 import prisma from './prismaClient.js';
-import type { WorldState } from '@cityzen/shared';
+import type { EdgeConnection, WorldState } from '@cityzen/shared';
 import type { Prisma } from '../generated/prisma/index.js';
 
 export async function saveWorldState(
   state: WorldState,
   populationData?: unknown[],
+  preserveCities = false,
 ): Promise<void> {
   await prisma.world.upsert({
     where: { id: state.id },
@@ -14,7 +15,7 @@ export async function saveWorldState(
       maxCities: state.maxCities,
       totalPopulation: state.totalPopulation,
       initialPopulation: state.initialPopulation,
-      cities: state.cities as unknown as Prisma.InputJsonValue,
+      ...(preserveCities ? {} : { cities: state.cities as unknown as Prisma.InputJsonValue }),
       clock: state.clock as unknown as Prisma.InputJsonValue,
       populationData: (populationData ?? []) as unknown as Prisma.InputJsonValue,
       updatedAt: new Date(),
@@ -31,6 +32,25 @@ export async function saveWorldState(
       populationData: (populationData ?? []) as unknown as Prisma.InputJsonValue,
     },
   });
+}
+
+export async function writeWorldCityEdges(
+  tx: Prisma.TransactionClient, cityId: string, connections: EdgeConnection[],
+): Promise<string[]> {
+  const worlds = await tx.$queryRaw<Array<{ id: string }>>`
+    UPDATE "World" AS world SET "cities" = (
+      SELECT jsonb_agg(
+        CASE WHEN entry->>'cityId' = ${cityId}
+          THEN jsonb_set(entry, '{edgeConnections}', ${JSON.stringify(connections)}::jsonb)
+          ELSE entry END
+        ORDER BY ordinal
+      )
+      FROM jsonb_array_elements(world."cities") WITH ORDINALITY AS city(entry, ordinal)
+    )
+    WHERE world."cities" @> ${JSON.stringify([{ cityId }])}::jsonb
+    RETURNING world."id"
+  `;
+  return worlds.map(world => world.id);
 }
 
 export async function loadWorldState(worldId: string): Promise<WorldState | null> {

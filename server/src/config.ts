@@ -5,6 +5,7 @@ import path from 'path';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
+export const IS_SERVERLESS = process.env.VERCEL === '1';
 export const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3030;
 export const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
 

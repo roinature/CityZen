@@ -1,7 +1,8 @@
 import { v4 as uuid } from 'uuid';
 import type { CityListItem } from '@cityzen/shared';
+import { IS_SERVERLESS } from '../config.js';
 import { GameRoom } from './GameRoom.js';
-import { loadCityState, listSavedCities } from '../persistence/jsonStore.js';
+import { loadCityState, listSavedCities, saveCityState } from '../persistence/jsonStore.js';
 import { loadPlayerProfile } from '../persistence/playerStore.js';
 import { MessageManager } from '../services/MessageManager.js';
 
@@ -18,6 +19,10 @@ export class RoomManager {
   async createRoom(cityName: string, ownerId: string, ownerName: string): Promise<GameRoom> {
     const id = uuid();
     const room = new GameRoom(id, cityName, ownerId, ownerName);
+    if (IS_SERVERLESS) {
+      const revision = await saveCityState(id, room.state);
+      if (revision !== null) room.syncPersistedState({ ...room.state, updatedAt: revision });
+    }
     room.setMessageManager(this.messageManager);
     room.start();
     this.rooms.set(id, room);
