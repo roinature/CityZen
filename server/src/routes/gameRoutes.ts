@@ -193,6 +193,7 @@ export function createGameRoutes(roomManager: RoomManager, worldManager: WorldMa
 
       res.json({ success: true, cityId: result.cityId });
     } catch (err) {
+      console.error('Claim failed:', err);
       res.json({ success: false, error: 'Failed to claim plot' });
     }
   });
@@ -233,6 +234,7 @@ export function createGameRoutes(roomManager: RoomManager, worldManager: WorldMa
       console.log(`${payload.playerName} joined city ${room.state.name}`);
       res.json({ success: true, cityId: room.id, city: room.state, players: room.getPlayerList() });
     } catch (err) {
+      console.error('Join failed:', err);
       res.json({ success: false, error: 'Failed to join city' });
     }
   });
