@@ -16,13 +16,14 @@ import {
   DEFAULT_GRID_SIZE,
   canPlaceBuilding,
   getEffectiveSize,
+  replacesRoads,
 } from '@cityzen/shared';
 import { BuildingFactory } from '../world/BuildingFactory.js';
 import { GridRaycaster } from './Raycaster.js';
 import type { ToolMode } from '../ui/BuildTools.js';
 
 function isLineDragType(type: BuildingType): boolean {
-  return isRoad(type);
+  return isRoad(type) && !replacesRoads(type);
 }
 
 function isRectDragType(type: BuildingType): boolean {

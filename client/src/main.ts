@@ -372,7 +372,10 @@ GameClient.create(SERVER_URL, {
       const { w, d } = getEffectiveSize(building.type, building.orientation);
       for (let dx = 0; dx < w; dx++) {
         for (let dz = 0; dz < d; dz++) {
-          cityState.grid[building.position.x + dx][building.position.z + dz].buildingId = null;
+          // Only clear cells still owned by this building: a roundabout may
+          // already have been placed over a road it replaced.
+          const cell = cityState.grid[building.position.x + dx][building.position.z + dz];
+          if (cell.buildingId === building.id) cell.buildingId = null;
         }
       }
     }

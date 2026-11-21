@@ -23,6 +23,7 @@ import {
   createStarterLayout,
   canPlaceBuilding,
   getEffectiveSize,
+  getReplacedRoads,
   simulateCityTick,
   validateLoanRequest,
   createLoan,
@@ -244,6 +245,11 @@ export class GameRoom {
     );
     if (!result.valid) {
       return { success: false, error: result.reason };
+    }
+
+    // A roundabout dropped on a crossing replaces the roads under it.
+    for (const road of getReplacedRoads(this.state.grid, position, type, this.state.buildings, orientation)) {
+      this.demolishBuilding(road.position);
     }
 
     const def = BUILDING_DEFS[type];

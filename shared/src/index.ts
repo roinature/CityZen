@@ -101,7 +101,7 @@ export { BUILDING_DEFS, ZONE_LEVELS, ZONE_DENSITY_COSTS, getZoneLevelDef } from 
 export type { ZoneLevelDef } from './constants/buildings.js';
 
 // Logic
-export { canPlaceBuilding, createEmptyGrid, getEffectiveSize } from './logic/placement.js';
+export { canPlaceBuilding, createEmptyGrid, getEffectiveSize, getReplacedRoads, replacesRoads } from './logic/placement.js';
 export { createStarterLayout, getStarterEntranceX, isStarterEntranceRoad } from './logic/starterLayout.js';
 export type { TaxBreakdown } from './logic/resources.js';
 export { calculateTaxBreakdown, calculateTaxRevenue, calculateMaintenance, calculateNetIncome, calculatePopulationGrowth, calculateHappiness, calculateHousingCapacity, calculateBudgetPenalty, calculateTaxPenalty, clamp, calculateCityScore } from './logic/resources.js';

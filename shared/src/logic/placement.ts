@@ -1,7 +1,7 @@
 import type { Grid, Position } from '../types/grid.js';
 import type { ResourceState } from '../types/resources.js';
 import type { PlacedBuilding } from '../types/building.js';
-import { BuildingType, type RoadOrientation, type ZoneDensity, isZone } from '../types/building.js';
+import { BuildingType, type RoadOrientation, type ZoneDensity, isRoad, isZone } from '../types/building.js';
 import { BUILDING_DEFS, ZONE_DENSITY_COSTS } from '../constants/buildings.js';
 import { DEFAULT_GRID_SIZE } from '../constants/grid.js';
 
@@ -14,6 +14,34 @@ export function getEffectiveSize(
     return { w: def.size.w, d: def.size.d };
   }
   return { w: def.size.d, d: def.size.w };
+}
+
+/** Types that may be dropped onto existing roads, replacing them (e.g. a roundabout on a crossing). */
+export function replacesRoads(type: BuildingType): boolean {
+  return type === BuildingType.ROAD_ROUNDABOUT;
+}
+
+/**
+ * Road buildings a placement would replace. Only meaningful for types where
+ * `replacesRoads` is true; returns an empty list otherwise.
+ */
+export function getReplacedRoads(
+  grid: Grid,
+  pos: Position,
+  type: BuildingType,
+  buildings: PlacedBuilding[],
+  orientation?: RoadOrientation,
+): PlacedBuilding[] {
+  if (!replacesRoads(type)) return [];
+  const { w, d } = getEffectiveSize(type, orientation);
+  const ids = new Set<string>();
+  for (let dx = 0; dx < w; dx++) {
+    for (let dz = 0; dz < d; dz++) {
+      const id = grid[pos.x + dx]?.[pos.z + dz]?.buildingId;
+      if (id) ids.add(id);
+    }
+  }
+  return buildings.filter(b => ids.has(b.id) && isRoad(b.type) && !replacesRoads(b.type));
 }
 
 export interface PlacementResult {
@@ -39,6 +67,9 @@ export function canPlaceBuilding(
   }
 
   const { w, d } = getEffectiveSize(type, orientation);
+  const replaceable = replacesRoads(type) && buildings
+    ? new Set(buildings.filter(b => isRoad(b.type) && !replacesRoads(b.type)).map(b => b.id))
+    : null;
   for (let dx = 0; dx < w; dx++) {
     for (let dz = 0; dz < d; dz++) {
       const cx = pos.x + dx;
@@ -51,7 +82,8 @@ export function canPlaceBuilding(
       const terrain = grid[cx][cz].terrain;
       if (terrain) return { valid: false, reason: terrain === 'water' ? 'Open water' : 'Slope too steep' };
 
-      if (grid[cx][cz].buildingId !== null) {
+      const occupant = grid[cx][cz].buildingId;
+      if (occupant !== null && !replaceable?.has(occupant)) {
         return { valid: false, reason: 'Cell occupied' };
       }
     }

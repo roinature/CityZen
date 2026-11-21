@@ -72,6 +72,16 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     height: 0.15,
     speedMultiplier: 2.5,
   },
+  [BuildingType.ROAD_ROUNDABOUT]: {
+    type: BuildingType.ROAD_ROUNDABOUT,
+    label: 'Roundabout',
+    cost: 120,
+    size: { w: 3, d: 3 },
+    effects: { maintenance: 0.3 },
+    color: '#4a4a4a',
+    height: 0.1,
+    speedMultiplier: 0.8,
+  },
 
   // === STANDALONE ===
   [BuildingType.PARK]: {

@@ -30,7 +30,7 @@ const SIDES = [
 ] as const;
 
 function isPaved(type: BuildingType | undefined): boolean {
-  return type === BuildingType.ROAD_STREET || type === BuildingType.ROAD_AVENUE;
+  return type === BuildingType.ROAD_STREET || type === BuildingType.ROAD_AVENUE || type === BuildingType.ROAD_ROUNDABOUT;
 }
 
 export function createStreetscape(roads: ReadonlyMap<string, BuildingType>, gridSize: number): THREE.Group {

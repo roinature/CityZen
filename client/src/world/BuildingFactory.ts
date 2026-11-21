@@ -898,6 +898,11 @@ export class BuildingFactory {
 
     const isMultiCell = effW > 1 || effD > 1;
 
+    if (building.type === BuildingType.ROAD_ROUNDABOUT) {
+      this.addRoundabout(group, roadMaterial, w, d, n);
+      return;
+    }
+
     if (count <= 1 && !isMultiCell) {
       this.addRoundedRoad(group, roadMaterial, w, d, n, count);
     } else {
@@ -1129,6 +1134,70 @@ export class BuildingFactory {
         }
       }
     }
+  }
+
+  /** Square of asphalt with a planted central island and a dashed circulating lane. */
+  private addRoundabout(
+    group: THREE.Group, roadMaterial: THREE.Material, w: number, d: number, n: RoadNeighbors,
+  ): void {
+    const surface = new THREE.Mesh(new THREE.PlaneGeometry(w, d), roadMaterial);
+    surface.rotation.x = -Math.PI / 2;
+    surface.position.y = 0.02;
+    surface.receiveShadow = true;
+    group.add(surface);
+
+    const radius = Math.min(w, d) / 2;
+    const curb = new THREE.Mesh(
+      new THREE.CylinderGeometry(radius * 0.46, radius * 0.47, 0.08, 40),
+      new THREE.MeshLambertMaterial({ color: 0xbdbdbd }),
+    );
+    curb.position.y = 0.06;
+    curb.receiveShadow = true;
+    group.add(curb);
+
+    const island = new THREE.Mesh(
+      new THREE.CylinderGeometry(radius * 0.42, radius * 0.42, 0.1, 40),
+      new THREE.MeshLambertMaterial({ color: 0x5f9a4a }),
+    );
+    island.position.y = 0.07;
+    island.receiveShadow = true;
+    group.add(island);
+
+    const trunk = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.05, 0.08, 0.5, 6),
+      new THREE.MeshLambertMaterial({ color: 0x77583f }),
+    );
+    trunk.position.y = 0.37;
+    trunk.castShadow = true;
+    group.add(trunk);
+    const crown = new THREE.Mesh(
+      new THREE.DodecahedronGeometry(0.32),
+      new THREE.MeshLambertMaterial({ color: 0x6fa04f, flatShading: true }),
+    );
+    crown.position.y = 0.8;
+    crown.castShadow = true;
+    group.add(crown);
+
+    // Dashed outer edge of the circulating lane
+    const dashMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const dashes = 28;
+    const ringR = radius * 0.94;
+    for (let i = 0; i < dashes; i++) {
+      const a = (i / dashes) * Math.PI * 2;
+      const dash = new THREE.Mesh(new THREE.PlaneGeometry(0.16, 0.035), dashMaterial);
+      dash.rotation.x = -Math.PI / 2;
+      dash.rotation.z = -a - Math.PI / 2;
+      dash.position.set(Math.cos(a) * ringR, 0.025, Math.sin(a) * ringR);
+      group.add(dash);
+    }
+
+    // Night light over the island
+    const light = new THREE.PointLight(0xffffcc, 0.8, 10);
+    light.position.set(0, 4, 0);
+    light.layers.set(2);
+    group.add(light);
+
+    this.addCurbBarriers(group, n, w, d);
   }
 
   private addCurbBarriers(group: THREE.Group, n: RoadNeighbors, w: number, d: number): void {

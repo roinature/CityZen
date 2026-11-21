@@ -12,6 +12,7 @@ export enum BuildingType {
   ROAD_STREET = 'road_street',
   ROAD_AVENUE = 'road_avenue',
   ROAD_HIGHWAY = 'road_highway',
+  ROAD_ROUNDABOUT = 'road_roundabout',
 
   // Standalone
   PARK = 'park',
@@ -89,6 +90,7 @@ export const ROAD_TYPES = [
   BuildingType.ROAD_STREET,
   BuildingType.ROAD_AVENUE,
   BuildingType.ROAD_HIGHWAY,
+  BuildingType.ROAD_ROUNDABOUT,
 ] as const;
 
 // Infrastructure category arrays
