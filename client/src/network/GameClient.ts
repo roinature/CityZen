@@ -4,6 +4,8 @@ import {
   type CityStatePayload,
   type WorldStatePayload,
   type BuildingPlacedPayload,
+  type BuildingsPlacedPayload,
+  type PlaceBuildingsPayload,
   type BuildingDemolishedPayload,
   type ResourcesUpdatePayload,
   type ZoneGrowthPayload,
@@ -26,7 +28,7 @@ import {
 export interface GameCallbacks {
   onWorldState: (world: WorldState) => void;
   onCityState: (city: import('@cityzen/shared').CityState, players: Player[]) => void;
-  onBuildingPlaced: (payload: BuildingPlacedPayload) => void;
+  onBuildingsPlaced: (payload: BuildingsPlacedPayload) => void;
   onBuildingDemolished: (payload: BuildingDemolishedPayload) => void;
   onResourcesUpdate: (resources: ResourceState, tick: number, clock: GameClock) => void;
   onZoneGrowth: (payload: ZoneGrowthPayload) => void;
@@ -117,7 +119,13 @@ export class GameClient {
           this.callbacks.onCityState(payload.city, payload.players);
         })
         .on('broadcast', { event: S2C.BUILDING_PLACED }, (msg) => {
-          this.callbacks.onBuildingPlaced(msg.payload as BuildingPlacedPayload);
+          if (this.joinedCityChannel !== channel) return;
+          const { building, resources } = msg.payload as BuildingPlacedPayload;
+          this.callbacks.onBuildingsPlaced({ buildings: [building], resources });
+        })
+        .on('broadcast', { event: S2C.BUILDINGS_PLACED }, (msg) => {
+          if (this.joinedCityChannel !== channel) return;
+          this.callbacks.onBuildingsPlaced(msg.payload as BuildingsPlacedPayload);
         })
         .on('broadcast', { event: S2C.BUILDING_DEMOLISHED }, (msg) => {
           this.callbacks.onBuildingDemolished(msg.payload as BuildingDemolishedPayload);
@@ -213,6 +221,28 @@ export class GameClient {
     const result = await this.post('/api/building/place', { position, type, playerId, density, orientation });
     if (!result.success) {
       this.callbacks.onError({ message: result.error || 'Placement failed', code: 'PLACEMENT_FAILED' });
+    }
+  }
+
+  async paintBuildings(stroke: PlaceBuildingsPayload, playerId: string): Promise<void> {
+    const channel = this.joinedCityChannel;
+    if (!channel) return;
+
+    try {
+      const result = await this.post('/api/building/place-batch', { ...stroke, playerId });
+      if (this.joinedCityChannel !== channel) return;
+      // Apply the committed stroke even if realtime delivery is delayed.
+      if (result.placement) this.callbacks.onBuildingsPlaced(result.placement);
+      if (!result.success || result.error) {
+        const message = !result.success && result.error === 'Cell occupied'
+          ? 'The selected tiles are occupied'
+          : result.error || 'Placement failed';
+        this.callbacks.onError({ message, code: 'PLACEMENT_FAILED' });
+      }
+    } catch {
+      if (this.joinedCityChannel === channel) {
+        this.callbacks.onError({ message: 'Could not confirm the build stroke', code: 'PLACEMENT_FAILED' });
+      }
     }
   }
 

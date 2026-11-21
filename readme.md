@@ -80,7 +80,7 @@ CityZen/
 ### Controls
 
 - **Left click**: Place selected building
-- **Left click + drag**: Continuously draw roads
+- **Left click + drag**: Draw a road or paint a zone rectangle, then release to build
 - **Right click**: Demolish building under cursor
 - **WASD / Arrow keys**: Pan camera
 - **Scroll wheel**: Zoom in/out

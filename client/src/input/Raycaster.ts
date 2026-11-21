@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { CELL_SIZE, DEFAULT_GRID_SIZE, type Position } from '@cityzen/shared';
+import { CELL_SIZE, DEFAULT_GRID_SIZE, clamp, type Position } from '@cityzen/shared';
 
 export class GridRaycaster {
   private raycaster = new THREE.Raycaster();
@@ -7,7 +7,7 @@ export class GridRaycaster {
 
   constructor(private canvas: HTMLCanvasElement) {}
 
-  getGridPosition(screenX: number, screenY: number, camera: THREE.Camera): Position | null {
+  getGridPosition(screenX: number, screenY: number, camera: THREE.Camera, clampToGrid = false): Position | null {
     const bounds = this.canvas.getBoundingClientRect();
     const ndc = new THREE.Vector2(
       ((screenX - bounds.left) / bounds.width) * 2 - 1,
@@ -22,6 +22,13 @@ export class GridRaycaster {
 
     const x = Math.floor(intersection.x / CELL_SIZE);
     const z = Math.floor(intersection.z / CELL_SIZE);
+
+    if (clampToGrid) {
+      return {
+        x: clamp(x, 0, DEFAULT_GRID_SIZE - 1),
+        z: clamp(z, 0, DEFAULT_GRID_SIZE - 1),
+      };
+    }
 
     if (x < 0 || x >= DEFAULT_GRID_SIZE || z < 0 || z >= DEFAULT_GRID_SIZE) {
       return null;

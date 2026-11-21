@@ -8,6 +8,7 @@ import {
   type PopulationSummary,
   type ZonePopulationEntry,
   type RoadOrientation,
+  type PlaceBuildingsPayload,
   BuildingType,
   isZone,
   ZoneDensity,
@@ -195,6 +196,47 @@ export class GameRoom {
   }
 
   placeBuilding(playerId: string, position: Position, type: BuildingType, density?: ZoneDensity, orientation?: RoadOrientation): { success: boolean; error?: string } {
+    const result = this.addBuilding(playerId, position, type, density, orientation);
+    if (!result.success) return result;
+
+    this.broadcast(S2C.BUILDING_PLACED, { building: result.building, resources: this.state.resources });
+    this.saveAfterMutation();
+    return { success: true };
+  }
+
+  placeBuildings(playerId: string, { positions, type, density, orientation }: PlaceBuildingsPayload): {
+    success: boolean; buildings: PlacedBuilding[]; error?: string;
+  } {
+    const buildings: PlacedBuilding[] = [];
+    let error: string | undefined;
+    for (const position of positions) {
+      const result = this.addBuilding(playerId, position, type, density, orientation);
+      if (result.success) {
+        buildings.push(result.building);
+      } else if (result.error === 'Not enough money') {
+        error = result.error;
+        break;
+      } else {
+        error ??= result.error;
+      }
+    }
+
+    if (buildings.length) {
+      // Keep realtime messages small even for a stroke covering the whole city.
+      for (let start = 0; start < buildings.length; start += 128) {
+        this.broadcast(S2C.BUILDINGS_PLACED, {
+          buildings: buildings.slice(start, start + 128),
+          resources: this.state.resources,
+        });
+      }
+      this.saveAfterMutation();
+    }
+    return { success: buildings.length > 0, buildings, error };
+  }
+
+  private addBuilding(
+    playerId: string, position: Position, type: BuildingType, density?: ZoneDensity, orientation?: RoadOrientation,
+  ): { success: true; building: PlacedBuilding } | { success: false; error?: string } {
     const result = canPlaceBuilding(
       this.state.grid, position, type, this.state.resources,
       this.unlimitedMoney, this.state.buildings, density, orientation,
@@ -230,14 +272,7 @@ export class GameRoom {
     }
     this.state.updatedAt = Date.now();
 
-    // Broadcast to all players in room
-    this.broadcast(S2C.BUILDING_PLACED, {
-      building,
-      resources: this.state.resources,
-    });
-
-    this.saveAfterMutation();
-    return { success: true };
+    return { success: true, building };
   }
 
   demolishBuilding(position: Position): { success: boolean; error?: string } {

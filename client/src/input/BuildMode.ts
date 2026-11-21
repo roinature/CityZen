@@ -5,6 +5,7 @@ import {
   type CityState,
   type EdgeDirection,
   type PlacedBuilding,
+  type PlaceBuildingsPayload,
   type RoadOrientation,
   type ZoneDensity,
   isRoad,
@@ -103,6 +104,7 @@ export class BuildMode {
   // Previews are only rebuilt when something relevant changes (see previewKey)
   private lastPreviewKey: string | null = null;
 
+  onPaint: ((stroke: PlaceBuildingsPayload) => void) | null = null;
   onPlace: ((pos: Position, type: BuildingType, density?: ZoneDensity, orientation?: RoadOrientation) => void) | null = null;
   onDemolish: ((pos: Position) => void) | null = null;
   onEdgeRoadClick: ((direction: EdgeDirection, position: number) => void) | null = null;
@@ -246,68 +248,56 @@ export class BuildMode {
     this.onDragCostUpdate?.(unitCost, this.canAfford(state, unitCost));
   }
 
-  /**
-   * Split the dragged rectangle into cells that will be zoned and cells that
-   * won't (occupied, or beyond what the treasury can pay for).
-   */
-  private computeRectPlacements(state: CityState | null): { placeable: Position[]; blocked: Position[]; cost: number } {
-    const placeable: Position[] = [];
-    const blocked: Position[] = [];
-    let cost = 0;
-    if (!this.rectDragStart || !this.currentHoverPos || !this.selectedType) {
-      return { placeable, blocked, cost };
-    }
-
-    const minX = Math.min(this.rectDragStart.x, this.currentHoverPos.x);
-    const maxX = Math.max(this.rectDragStart.x, this.currentHoverPos.x);
-    const minZ = Math.min(this.rectDragStart.z, this.currentHoverPos.z);
-    const maxZ = Math.max(this.rectDragStart.z, this.currentHoverPos.z);
-    const unitCost = this.getUnitCost();
-
-    for (let x = minX; x <= maxX; x++) {
-      for (let z = minZ; z <= maxZ; z++) {
-        const pos: Position = { x, z };
-        if (!state) {
-          placeable.push(pos);
-          continue;
-        }
-        // Occupancy/bounds only here; the budget is tracked cumulatively below
-        const free = canPlaceBuilding(
-          state.grid, pos, this.selectedType, state.resources, true, state.buildings,
-        ).valid;
-        if (free && this.canAfford(state, cost + unitCost)) {
-          placeable.push(pos);
-          cost += unitCost;
-        } else {
-          blocked.push(pos);
-        }
+  private getRectanglePositions(start: Position, end: Position): Position[] {
+    const positions: Position[] = [];
+    for (let x = Math.min(start.x, end.x); x <= Math.max(start.x, end.x); x++) {
+      for (let z = Math.min(start.z, end.z); z <= Math.max(start.z, end.z); z++) {
+        positions.push({ x, z });
       }
     }
-
-    return { placeable, blocked, cost };
+    return positions;
   }
 
   private updateRectPreview(state: CityState): void {
     this.clearRectPreview();
     if (!this.rectDragStart || !this.currentHoverPos || !this.selectedType) return;
 
-    const { placeable, blocked, cost } = this.computeRectPlacements(state);
+    const placeable: Position[] = [];
+    const blocked: Position[] = [];
+    const unitCost = this.getUnitCost();
+    let cost = 0;
+    let outOfMoney = false;
+    for (const position of this.getRectanglePositions(this.rectDragStart, this.currentHoverPos)) {
+      const free = canPlaceBuilding(state.grid, position, this.selectedType, state.resources, true).valid;
+      if (free && this.canAfford(state, cost + unitCost)) {
+        placeable.push(position);
+        cost += unitCost;
+      } else {
+        blocked.push(position);
+        outOfMoney ||= free;
+      }
+    }
     this.rectPreviewGroup = new THREE.Group();
-    const half = CELL_SIZE / 2;
-
-    const addCell = (pos: Position, valid: boolean) => {
-      const cellPreview = this.factory.createPreview(this.selectedType!, valid);
-      cellPreview.position.set(pos.x * CELL_SIZE + half, 0, pos.z * CELL_SIZE + half);
-      this.rectPreviewGroup!.add(cellPreview);
-    };
-    for (const pos of placeable) addCell(pos, true);
-    for (const pos of blocked) addCell(pos, false);
+    for (const [positions, valid] of [[placeable, true], [blocked, false]] as const) {
+      if (!positions.length) continue;
+      const geometry = new THREE.BoxGeometry(CELL_SIZE * 0.85, 0.3, CELL_SIZE * 0.85);
+      const material = new THREE.MeshLambertMaterial({
+        color: valid ? 0x00ff00 : 0xff0000,
+        transparent: true,
+        opacity: 0.5,
+      });
+      const tiles = new THREE.InstancedMesh(geometry, material, positions.length);
+      const transform = new THREE.Matrix4();
+      positions.forEach(({ x, z }, index) => {
+        transform.makeTranslation((x + 0.5) * CELL_SIZE, 0.15, (z + 0.5) * CELL_SIZE);
+        tiles.setMatrixAt(index, transform);
+      });
+      tiles.instanceMatrix.needsUpdate = true;
+      this.rectPreviewGroup.add(tiles);
+    }
 
     this.scene.add(this.rectPreviewGroup);
 
-    // Warn when part of the area was dropped because the money ran out
-    const unitCost = this.getUnitCost();
-    const outOfMoney = blocked.length > 0 && !this.canAfford(state, cost + unitCost);
     this.onDragCostUpdate?.(cost, !outOfMoney);
   }
 
@@ -317,7 +307,7 @@ export class BuildMode {
   }
 
   hover(x: number, y: number): void {
-    this.currentHoverPos = this.raycaster.getGridPosition(x, y, this.camera);
+    this.currentHoverPos = this.raycaster.getGridPosition(x, y, this.camera, this.isDragging);
   }
 
   clearHover(): void {
@@ -341,23 +331,16 @@ export class BuildMode {
 
   finishDraw(x: number, y: number): void {
     this.hover(x, y);
-    // Line drag release — place all roads along the straight line
-    if (this.isDragging && this.lineDragStart && this.selectedType && isLineDragType(this.selectedType) && this.onPlace && this.currentHoverPos) {
-      const orientation = computeLineDragOrientation(this.lineDragStart, this.currentHoverPos);
-      const { w, d } = getEffectiveSize(this.selectedType, orientation);
-      const positions = computeStraightLine(this.lineDragStart, this.currentHoverPos, w, d);
-      for (const pos of positions) {
-        this.onPlace(pos, this.selectedType, undefined, orientation);
-      }
-    }
-
-    // Rectangle drag release — place all zones in the rectangle
-    if (this.isDragging && this.rectDragStart && this.selectedType && isRectDragType(this.selectedType) && this.onPlace && this.currentHoverPos) {
-      // Only send cells that are free and affordable, instead of spamming the
-      // server with requests it will reject
-      const { placeable } = this.computeRectPlacements(this.currentCityState);
-      for (const pos of placeable) {
-        this.onPlace(pos, this.selectedType, this.selectedDensity ?? undefined);
+    if (this.isDragging && this.selectedType && this.currentHoverPos) {
+      const type = this.selectedType;
+      if (this.lineDragStart && isLineDragType(type)) {
+        const orientation = computeLineDragOrientation(this.lineDragStart, this.currentHoverPos);
+        const { w, d } = getEffectiveSize(type, orientation);
+        const positions = computeStraightLine(this.lineDragStart, this.currentHoverPos, w, d);
+        this.onPaint?.({ positions, type, orientation });
+      } else if (this.rectDragStart && isRectDragType(type)) {
+        const positions = this.getRectanglePositions(this.rectDragStart, this.currentHoverPos);
+        this.onPaint?.({ positions, type, density: this.selectedDensity ?? undefined });
       }
     }
 
@@ -561,6 +544,7 @@ export class BuildMode {
       this.scene.remove(this.rectPreviewGroup);
       this.rectPreviewGroup.traverse((child) => {
         if (child instanceof THREE.Mesh) {
+          if (child instanceof THREE.InstancedMesh) child.dispose();
           child.geometry.dispose();
           if (child.material instanceof THREE.Material) {
             child.material.dispose();

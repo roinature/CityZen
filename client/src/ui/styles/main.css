@@ -9,6 +9,11 @@ body {
   font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
 }
 
+/* The city camera owns pinch zoom. Keep native scrolling in HUD panels. */
+body.in-city {
+  touch-action: pan-x pan-y;
+}
+
 #game-canvas {
   display: block;
   position: fixed;

@@ -27,6 +27,7 @@ export const S2C = {
   CITY_STATE: 'city:state',
   WORLD_STATE: 'world:state',
   BUILDING_PLACED: 'building:placed',
+  BUILDINGS_PLACED: 'buildings:placed',
   BUILDING_DEMOLISHED: 'building:demolished',
   RESOURCES_UPDATE: 'city:resources',
   ZONE_GROWTH: 'zone:growth',
@@ -69,6 +70,10 @@ export interface PlaceBuildingPayload {
   orientation?: RoadOrientation;
 }
 
+export interface PlaceBuildingsPayload extends Omit<PlaceBuildingPayload, 'position'> {
+  positions: Position[];
+}
+
 export interface DemolishPayload {
   position: Position;
 }
@@ -106,6 +111,11 @@ export interface WorldStatePayload {
 
 export interface BuildingPlacedPayload {
   building: PlacedBuilding;
+  resources: ResourceState;
+}
+
+export interface BuildingsPlacedPayload {
+  buildings: PlacedBuilding[];
   resources: ResourceState;
 }
 

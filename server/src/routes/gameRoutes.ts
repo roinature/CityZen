@@ -2,12 +2,17 @@ import { Router, type Request, type Response } from 'express';
 import { v4 as uuid } from 'uuid';
 import {
   S2C,
+  DEFAULT_GRID_SIZE,
+  ZoneDensity,
   isRoad,
+  isZone,
   calculateEdgeConnections,
   type ClaimPlotPayload,
   type CreateCityPayload,
   type JoinCityPayload,
   type PlaceBuildingPayload,
+  type PlaceBuildingsPayload,
+  type BuildingsPlacedPayload,
   type DemolishPayload,
   type SetTaxRatePayload,
   type SetUnlimitedMoneyPayload,
@@ -29,6 +34,7 @@ interface CityActionResult {
   error?: string;
   code?: string;
   roadsChanged?: boolean;
+  placement?: BuildingsPlacedPayload;
 }
 
 export function createGameRoutes(roomManager: RoomManager, worldManager: WorldManager): Router {
@@ -283,6 +289,27 @@ export function createGameRoutes(roomManager: RoomManager, worldManager: WorldMa
     const result = room.placeBuilding(playerId, position, type, density, orientation);
     return result.success ? { success: true, roadsChanged: isRoad(type) } :
       { ...result, code: 'PLACEMENT_FAILED' };
+  }));
+
+  router.post('/building/place-batch', cityAction((room, body: PlaceBuildingsPayload & { playerId: string }) => {
+    const { positions, type, density, orientation, playerId } = body;
+    if (
+      (!isRoad(type) && !isZone(type)) ||
+      (density !== undefined && !Object.values(ZoneDensity).includes(density)) ||
+      (orientation !== undefined && orientation !== 'NS' && orientation !== 'EW') ||
+      !Array.isArray(positions) || positions.length === 0 || positions.length > DEFAULT_GRID_SIZE ** 2 ||
+      positions.some(pos => !Number.isInteger(pos?.x) || !Number.isInteger(pos?.z) ||
+        pos.x < 0 || pos.z < 0 || pos.x >= DEFAULT_GRID_SIZE || pos.z >= DEFAULT_GRID_SIZE)
+    ) {
+      return { success: false, error: 'Invalid build stroke', code: 'PLACEMENT_FAILED' };
+    }
+
+    const { success, buildings, error } = room.placeBuildings(playerId, body);
+    return {
+      success, error,
+      roadsChanged: success && isRoad(type),
+      placement: success ? { buildings, resources: room.state.resources } : undefined,
+    };
   }));
 
   router.post('/building/demolish', cityAction((room, body: DemolishPayload) => {

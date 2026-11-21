@@ -341,14 +341,18 @@ GameClient.create(SERVER_URL, {
     console.log(`Joined city: ${city.name} with ${players.length} players`);
   },
 
-  onBuildingPlaced: (payload) => {
+  onBuildingsPlaced: (payload) => {
     if (!cityState) return;
-    cityState.buildings.push(payload.building);
-
-    const { w, d } = getEffectiveSize(payload.building.type, payload.building.orientation);
-    for (let dx = 0; dx < w; dx++) {
-      for (let dz = 0; dz < d; dz++) {
-        cityState.grid[payload.building.position.x + dx][payload.building.position.z + dz].buildingId = payload.building.id;
+    const existingIds = new Set(cityState.buildings.map(building => building.id));
+    const additions = payload.buildings.filter(building => !existingIds.has(building.id));
+    if (!additions.length) return;
+    for (const building of additions) {
+      cityState.buildings.push(building);
+      const { w, d } = getEffectiveSize(building.type, building.orientation);
+      for (let dx = 0; dx < w; dx++) {
+        for (let dz = 0; dz < d; dz++) {
+          cityState.grid[building.position.x + dx][building.position.z + dz].buildingId = building.id;
+        }
       }
     }
 
@@ -515,6 +519,10 @@ resourceBar.onGameSpeedChange = (speed) => {
 
 buildMode.onPlace = (pos, type, density, orientation) => {
   gameClient.placeBuilding(pos, type, playerId, density, orientation);
+};
+
+buildMode.onPaint = (stroke) => {
+  void gameClient.paintBuildings(stroke, playerId);
 };
 
 buildMode.onDemolish = (pos) => {
