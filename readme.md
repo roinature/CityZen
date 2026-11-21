@@ -2,6 +2,12 @@
 
 A real-time multiplayer 3D city builder game. Players collaborate to build and manage a shared city on a grid, placing buildings, laying roads, and watching their city come to life with animated traffic.
 
+## Play Now
+
+**[city-zen3.vercel.app](https://city-zen3.vercel.app)** — or scan to play on your phone:
+
+<a href="https://city-zen3.vercel.app"><img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&margin=10&data=https%3A%2F%2Fcity-zen3.vercel.app" alt="QR code linking to CityZen" width="200" height="200"></a>
+
 ## Tech Stack
 
 - **Client**: Three.js (3D rendering), Vite (bundler), Socket.IO Client
