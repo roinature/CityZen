@@ -21,6 +21,8 @@ function createInstances(geometry: THREE.BufferGeometry, instances: Instance[], 
     transparent: opacity !== 1,
     opacity,
     depthWrite: opacity === 1,
+    emissive: 0xcfd8ff,
+    emissiveIntensity: 0,
   });
   const mesh = new THREE.InstancedMesh(geometry, material, instances.length);
   const transform = new THREE.Matrix4();
@@ -40,6 +42,7 @@ export function createCityOverview(buildings: PlacedBuilding[], zonesHighlighted
   const zones: Instance[] = [];
   const structures: Instance[] = [];
   const trees: Instance[] = [];
+  const roofTint = new THREE.Color(0xd4cec0);
 
   for (const building of buildings) {
     const { type, position } = building;
@@ -61,7 +64,7 @@ export function createCityOverview(buildings: PlacedBuilding[], zonesHighlighted
         const defLevel = getZoneLevelDef(type, building.density, level);
         const heightScale = building.density === 'high' ? 0.83 : 0.7;
         const h = defLevel.height * heightScale;
-        const color = new THREE.Color(def.color).lerp(new THREE.Color(0xd4cec0), 0.67);
+        const color = new THREE.Color(def.color).lerp(roofTint, 0.67);
         structures.push({ x, y: h / 2, z, w: w * 0.72, h, d: d * 0.72, color });
       }
     } else {
@@ -82,9 +85,19 @@ export function createCityOverview(buildings: PlacedBuilding[], zonesHighlighted
     overview.add(lots);
   }
   if (boxes) {
+    boxes.name = 'overview-buildings';
     boxes.castShadow = true;
     overview.add(boxes);
   }
   if (canopies) overview.add(canopies);
   return overview;
+}
+
+/** A small fill keeps the map legible at night without lighting each lot. */
+export function setCityOverviewNight(overview: THREE.Group, night: boolean): void {
+  for (const mesh of overview.children) {
+    if (mesh instanceof THREE.InstancedMesh && mesh.material instanceof THREE.MeshLambertMaterial) {
+      mesh.material.emissiveIntensity = night ? (mesh.name === 'overview-buildings' ? 0.09 : 0.035) : 0;
+    }
+  }
 }

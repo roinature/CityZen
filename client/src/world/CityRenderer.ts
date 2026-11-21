@@ -4,7 +4,7 @@ import { BUILDING_DEFS, CELL_SIZE, DEFAULT_GRID_SIZE, isRoad, isStarterEntranceR
 import { calculateCityScore } from '@cityzen/shared';
 import { BuildingFactory, type RoadNeighbors } from './BuildingFactory.js';
 import { createStreetscape } from './Streetscape.js';
-import { createCityOverview } from './CityOverview.js';
+import { createCityOverview, setCityOverviewNight } from './CityOverview.js';
 
 const GROW_SECONDS = 0.45;
 const CHUNK_SIZE = 4;
@@ -41,6 +41,7 @@ export class CityRenderer {
   private needsSync = false;
   private detailKey = '';
   private overview: THREE.Group | null = null;
+  private overviewNight = false;
   private frustum = new THREE.Frustum();
   private projectionView = new THREE.Matrix4();
   private previousProjectionView = new THREE.Matrix4();
@@ -59,6 +60,10 @@ export class CityRenderer {
   /** Advance construction animations. Call once per frame. */
   update(deltaTime: number, camera: THREE.Camera, night: boolean): void {
     this.updateView(camera);
+    if (this.overview && this.overviewNight !== night) {
+      setCityOverviewNight(this.overview, night);
+      this.overviewNight = night;
+    }
     this.updateNightLights(camera, night);
     if (this.pendingStreetscapeSize !== null) {
       this.clearStreetscape();
@@ -136,6 +141,7 @@ export class CityRenderer {
         this.detailKey = '';
         this.overview = createCityOverview(state.buildings, this.zonesHighlighted);
         this.scene.add(this.overview);
+        this.overviewNight = false;
         this.newlyPlaced.clear();
       }
       return;
@@ -181,9 +187,14 @@ export class CityRenderer {
       }
       // Use conservative bounds so roof details stay visible as the camera moves.
       const level = building.developmentLevel ?? 0;
-      const height = isZone(building.type)
-        ? (level > 0 ? getZoneLevelDef(building.type, building.density, level).height + 0.6 : 0.1)
-        : isRoad(building.type) ? 0.4 : (BUILDING_DEFS[building.type].height ?? 1) + 2;
+      let height = BUILDING_DEFS[building.type].height + 2;
+      if (isRoad(building.type)) {
+        height = 0.4;
+      } else if (isZone(building.type)) {
+        // Account for the height variation and roof geometry used by BuildingFactory.
+        const scale = building.density === 'high' ? 0.95 : 0.76;
+        height = level > 0 ? getZoneLevelDef(building.type, building.density, level).height * scale + 0.6 : 0.1;
+      }
       const margin = 0.6;
       const bounds = new THREE.Box3(
         new THREE.Vector3((x - margin) * CELL_SIZE, 0, (z - margin) * CELL_SIZE),
