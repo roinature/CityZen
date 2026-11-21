@@ -1,4 +1,3 @@
-import * as THREE from 'three';
 import {
   type CityState,
   type BuildingType,
@@ -103,7 +102,8 @@ const entranceRoad = createTerrain(sceneManager.scene);
 const gridHelper = createGridOverlay(sceneManager.scene);
 const edgeRoadIndicator = new EdgeRoadIndicator(sceneManager.scene);
 
-const cityRenderer = new CityRenderer(sceneManager.scene, entranceRoad);
+const touchDisplay = matchMedia('(pointer: coarse)').matches;
+const cityRenderer = new CityRenderer(sceneManager.scene, entranceRoad, touchDisplay ? 180 : 280);
 const carManager = new CarManager(sceneManager.scene);
 const buildMode = new BuildMode(sceneManager.scene, sceneManager.camera, canvas);
 const soundManager = new SoundManager();
@@ -690,15 +690,6 @@ function applyOptions(options: GameOptions): void {
 
   // Shadows
   sceneManager.renderer.shadowMap.enabled = options.shadowsEnabled;
-  sceneManager.scene.traverse((obj) => {
-    if (obj instanceof THREE.Mesh) {
-      obj.castShadow = options.shadowsEnabled;
-      obj.receiveShadow = options.shadowsEnabled;
-    }
-    if (obj instanceof THREE.DirectionalLight) {
-      obj.castShadow = options.shadowsEnabled;
-    }
-  });
 
   // Sound
   soundManager.setEnabled(options.soundEnabled);
@@ -787,7 +778,7 @@ function gameLoop(): void {
 
   cameraController.update(deltaTime);
   lighting.update(deltaTime);
-  cityRenderer.update(deltaTime);
+  cityRenderer.update(deltaTime, sceneManager.camera, isNight);
   // Paused (speed 0) freezes all simulated movement; camera/UI stay live
   const paused = cityState?.clock?.speed === 0;
   if (!paused) carManager.update(deltaTime, cityState);

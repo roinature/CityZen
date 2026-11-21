@@ -25,7 +25,8 @@ export class SceneManager {
     this.camera.lookAt(32, 0, 32); // Center of 64x64 grid
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    const maxPixelRatio = matchMedia('(pointer: coarse)').matches ? 1.5 : 2;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxPixelRatio));
     this.onResize();
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;

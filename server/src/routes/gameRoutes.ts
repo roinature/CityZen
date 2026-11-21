@@ -345,8 +345,8 @@ export function createGameRoutes(roomManager: RoomManager, worldManager: WorldMa
 
   // POST /api/city/game-speed — game speed is now world-level
   router.post('/city/game-speed', (req: Request, res: Response) => {
-    const { speed } = req.body as SetGameSpeedPayload;
-    const result = worldManager.setGameSpeed(speed);
+    const { speed, worldId = 'default' } = req.body as SetGameSpeedPayload & { worldId?: string };
+    const result = worldManager.setGameSpeed(speed, worldId);
     res.json(result.success ? { success: true } : { success: false, error: result.error });
   });
 

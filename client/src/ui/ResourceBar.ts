@@ -19,6 +19,7 @@ export class ResourceBar {
   private clockEl: HTMLSpanElement;
   private speedSelect: HTMLSelectElement;
   private speedBtns: HTMLButtonElement[] = [];
+  private requestedSpeed: { speed: number; expiresAt: number } | null = null;
 
   onGameSpeedChange: ((speed: number) => void) | null = null;
   onOpenAdvisor: (() => void) | null = null;
@@ -91,7 +92,7 @@ export class ResourceBar {
 
     // Build speed control buttons
     this.speedSelect = this.container.querySelector('.speed-select')!;
-    this.speedSelect.addEventListener('change', () => this.onGameSpeedChange?.(Number(this.speedSelect.value)));
+    this.speedSelect.addEventListener('change', () => this.requestGameSpeed(Number(this.speedSelect.value)));
     const speedContainer = this.container.querySelector('#speed-controls')!;
     for (let i = 0; i <= MAX_GAME_SPEED; i++) {
       this.speedSelect.add(new Option(i === 0 ? 'Paused' : SPEED_LABELS[i], String(i)));
@@ -100,9 +101,7 @@ export class ResourceBar {
       btn.textContent = SPEED_LABELS[i];
       btn.setAttribute('aria-label', i === 0 ? 'Pause' : `${i}× speed`);
       const speed = i;
-      btn.addEventListener('click', () => {
-        this.onGameSpeedChange?.(speed);
-      });
+      btn.addEventListener('click', () => this.requestGameSpeed(speed));
       speedContainer.appendChild(btn);
       this.speedBtns.push(btn);
     }
@@ -114,10 +113,24 @@ export class ResourceBar {
 
   updateClock(clock: GameClock): void {
     this.clockEl.textContent = `Day ${clock.gameDay + 1}, Year ${clock.gameYear}`;
-    this.speedSelect.value = String(clock.speed);
-    for (let i = 0; i < this.speedBtns.length; i++) {
-      this.speedBtns[i].setAttribute('aria-pressed', String(i === clock.speed));
+    if (this.requestedSpeed && (this.requestedSpeed.speed === clock.speed || Date.now() >= this.requestedSpeed.expiresAt)) {
+      this.requestedSpeed = null;
     }
+    const selectedSpeed = this.requestedSpeed?.speed ?? clock.speed;
+    this.speedSelect.value = String(selectedSpeed);
+    for (let i = 0; i < this.speedBtns.length; i++) {
+      this.speedBtns[i].setAttribute('aria-pressed', String(i === selectedSpeed));
+    }
+  }
+
+  private requestGameSpeed(speed: number): void {
+    // Reflect the click immediately; the server clock is broadcast every 2s.
+    this.requestedSpeed = { speed, expiresAt: Date.now() + 5000 };
+    this.speedSelect.value = String(speed);
+    for (let i = 0; i < this.speedBtns.length; i++) {
+      this.speedBtns[i].setAttribute('aria-pressed', String(i === speed));
+    }
+    this.onGameSpeedChange?.(speed);
   }
 
   update(resources: ResourceState, state?: CityState): void {

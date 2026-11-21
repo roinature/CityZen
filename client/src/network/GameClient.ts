@@ -281,7 +281,7 @@ export class GameClient {
   }
 
   async setGameSpeed(speed: number, playerId?: string): Promise<void> {
-    await this.post('/api/city/game-speed', { speed, playerId });
+    await this.post('/api/city/game-speed', { speed, playerId, worldId: this.currentWorldId });
   }
 
   async leave(playerId?: string): Promise<void> {
