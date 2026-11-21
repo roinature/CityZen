@@ -44,18 +44,22 @@ function randomAge(): number {
 // [id, age, cityId, p, s, l, e, c, a, sa, birthTick, residenceZoneId?]
 type SerializedPerson = [string, number, string | null, number, number, number, number, number, number, number, number, string | null | undefined];
 
+// Two decimals is plenty for 0–100 satisfaction scores and keeps the saved
+// JSON small (full-precision floats, and especially tiny ones, bloat it).
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
 function serializePerson(p: Person): SerializedPerson {
   return [
     p.id,
     p.age,
     p.cityId,
-    p.maslow[MaslowNeed.PHYSIOLOGICAL],
-    p.maslow[MaslowNeed.SAFETY],
-    p.maslow[MaslowNeed.LOVE_BELONGING],
-    p.maslow[MaslowNeed.ESTEEM],
-    p.maslow[MaslowNeed.COGNITIVE],
-    p.maslow[MaslowNeed.AESTHETIC],
-    p.maslow[MaslowNeed.SELF_ACTUALIZATION],
+    round2(p.maslow[MaslowNeed.PHYSIOLOGICAL]),
+    round2(p.maslow[MaslowNeed.SAFETY]),
+    round2(p.maslow[MaslowNeed.LOVE_BELONGING]),
+    round2(p.maslow[MaslowNeed.ESTEEM]),
+    round2(p.maslow[MaslowNeed.COGNITIVE]),
+    round2(p.maslow[MaslowNeed.AESTHETIC]),
+    round2(p.maslow[MaslowNeed.SELF_ACTUALIZATION]),
     p.birthTick,
     p.residenceZoneId ?? null,
   ];
@@ -338,8 +342,11 @@ export class PopulationManager {
       for (const need of MASLOW_NEEDS_ORDERED) {
         const current = person.maslow[need];
         const target = targets[need];
-        // Lerp toward target
-        person.maslow[need] = current + (target - current) * MASLOW_LERP_RATE;
+        // Lerp toward target, snapping once close. Without the snap, needs whose
+        // target is 0 decay into subnormal floats (e.g. 5e-324) that Postgres
+        // JSONB stores as ~1,000-digit decimals, bloating the saved population.
+        const next = current + (target - current) * MASLOW_LERP_RATE;
+        person.maslow[need] = Math.abs(target - next) < 0.01 ? target : next;
       }
     }
   }
