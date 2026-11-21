@@ -1,7 +1,25 @@
+import { execFileSync } from 'node:child_process';
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
+import rootPackage from '../package.json';
 
-export default defineConfig({
+function getCommitId(): string {
+  const deploymentCommit = process.env.VERCEL_GIT_COMMIT_SHA ?? process.env.GITHUB_SHA;
+  if (deploymentCommit) return deploymentCommit.slice(0, 7);
+
+  try {
+    return execFileSync('git', ['rev-parse', '--short=7', 'HEAD'], { encoding: 'utf8' }).trim();
+  } catch {
+    return 'local';
+  }
+}
+
+const commitId = getCommitId();
+
+export default defineConfig(({ mode }) => ({
+  define: {
+    __APP_VERSION__: JSON.stringify(`v${rootPackage.version} · ${commitId}${mode === 'development' ? ' · dev' : ''}`),
+  },
   server: {
     port: 5173,
     proxy: {
@@ -57,4 +75,4 @@ export default defineConfig({
       },
     }),
   ],
-});
+}));

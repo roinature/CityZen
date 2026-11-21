@@ -88,6 +88,15 @@ body.in-city {
   padding: 9px 12px 9px 16px;
 }
 
+.app-version {
+  margin-left: auto;
+  color: var(--hud-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  opacity: 0.8;
+}
+
 .resource-identity {
   display: contents;
 }

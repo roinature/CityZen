@@ -57,6 +57,7 @@ export class ResourceBar {
           <select class="speed-select" aria-label="Game speed"></select>
         </div>
       </div>
+      <span class="app-version" title="Client build version">${__APP_VERSION__}</span>
     `;
     this.actions = this.container.querySelector('.resource-actions')!;
     parent.appendChild(this.container);
