@@ -43,6 +43,7 @@ import { FinancePanel } from './ui/FinancePanel.js';
 import { MaslowPanel } from './ui/MaslowPanel.js';
 import { FooterIndicator } from './ui/FooterIndicator.js';
 import { CompassIndicator } from './ui/CompassIndicator.js';
+import { ZoomControl } from './ui/ZoomControl.js';
 import { MessageManager } from './ui/MessageManager.js';
 import { GameClient } from './network/GameClient.js';
 import { SoundManager } from './audio/SoundManager.js';
@@ -163,6 +164,7 @@ window.addEventListener('keydown', resumeAudio);
 const resourceBar = new ResourceBar(uiRoot);
 const footerIndicator = new FooterIndicator(uiRoot);
 const compassIndicator = new CompassIndicator(uiRoot);
+const zoomControl = new ZoomControl(uiRoot, cameraController);
 
 // --- Message System ---
 const messageManager = new MessageManager(uiRoot, {
@@ -714,6 +716,7 @@ function gameLoop(): void {
   if (!paused) carManager.update(deltaTime, cityState);
   buildMode.updatePreview(cityState);
   compassIndicator.update(cameraController.getRotationAngle());
+  zoomControl.update();
 
   // Update sound system
   soundManager.updateZoom(sceneManager.getFrustumSize());

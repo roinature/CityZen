@@ -40,6 +40,7 @@ body {
 .resource-bar,
 .build-bar,
 .build-pane,
+.zoom-control,
 .density-picker {
   color: var(--hud-text);
   background: var(--hud-surface);
@@ -1629,6 +1630,61 @@ body {
   border-radius: 1px;
 }
 
+.zoom-control {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  z-index: 24;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px;
+  border-radius: 10px;
+}
+
+.zoom-control .hud-button {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  font-size: 20px;
+  line-height: 1;
+  touch-action: manipulation;
+}
+
+.zoom-control-track {
+  display: grid;
+  justify-items: center;
+  width: 96px;
+  color: var(--hud-muted);
+  font-size: 11px;
+}
+
+.zoom-control-track input {
+  width: 100%;
+  height: 24px;
+  accent-color: var(--hud-accent);
+  cursor: pointer;
+  touch-action: pan-y;
+}
+
+.zoom-control-track input:focus-visible {
+  outline: 2px solid var(--hud-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (max-width: 900px) {
+  .zoom-control {
+    top: 77px;
+    bottom: auto;
+    right: 12px;
+  }
+}
+
+@media (max-width: 800px) {
+  .zoom-control { top: 108px; }
+}
+
 /* --- HUD feedback --- */
 /* Keep placement feedback below the city HUD. */
 .footer-indicator {
@@ -1640,8 +1696,13 @@ body {
 
 @media (max-width: 800px) {
   .footer-indicator { top: 108px; }
-  .message-notifications { top: 108px; }
+  .message-notifications { top: 162px; }
   .compass-indicator { bottom: 124px; transform: scale(0.75); transform-origin: bottom left; }
+}
+
+@media (max-width: 600px) {
+  .footer-indicator, body.in-city .footer-toast { top: 164px; }
+  .message-notifications { top: 206px; }
 }
 
 .footer-indicator.warn {
@@ -1713,6 +1774,7 @@ body {
 body:not(.in-city) .resource-bar,
 body:not(.in-city) .build-dock,
 body:not(.in-city) .compass-indicator,
+body:not(.in-city) .zoom-control,
 body:not(.in-city) .footer-indicator,
 body:not(.in-city) .density-picker,
 body:not(.in-city) .message-notifications,

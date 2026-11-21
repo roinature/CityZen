@@ -1,8 +1,9 @@
 import * as THREE from 'three';
-import type { CityState, PlacedBuilding, ZoneType } from '@cityzen/shared';
+import type { BuildingType, CityState, PlacedBuilding, ZoneType } from '@cityzen/shared';
 import { DEFAULT_GRID_SIZE, isRoad, isStarterEntranceRoad, isZone, getZoneLevelDef, getEffectiveSize } from '@cityzen/shared';
 import { calculateCityScore } from '@cityzen/shared';
 import { BuildingFactory, type RoadNeighbors } from './BuildingFactory.js';
+import { createStreetscape } from './Streetscape.js';
 
 const GROW_SECONDS = 0.45;
 
@@ -17,6 +18,9 @@ export class CityRenderer {
   private scene: THREE.Scene;
   private factory: BuildingFactory;
   private zonesHighlighted = false;
+  private roadTiles = new Map<string, BuildingType>();
+  private pendingStreetscapeSize: number | null = null;
+  private streetscape: THREE.Group | null = null;
   private meshes: Map<string, THREE.Group> = new Map();
   private buildingLevels: Map<string, number> = new Map();
   private zonePopRatios: Map<string, number> = new Map();
@@ -30,6 +34,13 @@ export class CityRenderer {
 
   /** Advance construction animations. Call once per frame. */
   update(deltaTime: number): void {
+    if (this.pendingStreetscapeSize !== null) {
+      this.clearStreetscape();
+      this.streetscape = createStreetscape(this.roadTiles, this.pendingStreetscapeSize);
+      this.scene.add(this.streetscape);
+      this.pendingStreetscapeSize = null;
+    }
+
     if (this.growAnims.size === 0) return;
     for (const [id, progress] of this.growAnims) {
       const mesh = this.meshes.get(id);
@@ -83,44 +94,39 @@ export class CityRenderer {
       }
     }
 
-    // Build a set of road positions for neighbor detection (all cells of multi-cell roads)
-    const roadPositions = new Set<string>();
-    for (const b of state.buildings) {
-      if (isRoad(b.type)) {
-        const { w, d } = getEffectiveSize(b.type, b.orientation);
-        for (let dx = 0; dx < w; dx++) {
-          for (let dz = 0; dz < d; dz++) {
-            roadPositions.add(`${b.position.x + dx},${b.position.z + dz}`);
-          }
-        }
-      }
-    }
-
-    // Build a lookup from position key to building for quick neighbor refresh (all cells)
+    // Index full footprints for road adjacency and sidewalk placement.
+    const roadTiles = new Map<string, BuildingType>();
     const buildingByPos = new Map<string, PlacedBuilding>();
-    for (const b of state.buildings) {
-      const { w, d } = getEffectiveSize(b.type, b.orientation);
+    for (const building of state.buildings) {
+      const { w, d } = getEffectiveSize(building.type, building.orientation);
+      const road = isRoad(building.type);
       for (let dx = 0; dx < w; dx++) {
         for (let dz = 0; dz < d; dz++) {
-          buildingByPos.set(`${b.position.x + dx},${b.position.z + dz}`, b);
+          const key = `${building.position.x + dx},${building.position.z + dz}`;
+          buildingByPos.set(key, building);
+          if (road) roadTiles.set(key, building.type);
         }
       }
     }
 
-    // Collect positions that changed (added/removed) so we can refresh adjacent roads
-    const changedPositions: { x: number; z: number }[] = [];
+    const changedRoadTiles = new Set<string>();
+    for (const [tile, type] of this.roadTiles) {
+      if (roadTiles.get(tile) !== type) changedRoadTiles.add(tile);
+    }
+    for (const tile of roadTiles.keys()) {
+      if (!this.roadTiles.has(tile)) changedRoadTiles.add(tile);
+    }
+
+    if (changedRoadTiles.size > 0) {
+      this.roadTiles = roadTiles;
+      // Coalesce rapid placement events into one rebuild per frame.
+      this.pendingStreetscapeSize = state.grid.length;
+    }
 
     // Remove demolished buildings
     for (const id of currentIds) {
       if (!newIds.has(id)) {
         const mesh = this.meshes.get(id)!;
-        const ud = mesh.userData as { buildingType?: string };
-        if (ud.buildingType && isRoad(ud.buildingType as any)) {
-          const pos = mesh.position;
-          const gx = Math.floor(pos.x);
-          const gz = Math.floor(pos.z);
-          changedPositions.push({ x: gx, z: gz });
-        }
         this.scene.remove(mesh);
         this.disposeMesh(mesh);
         this.meshes.delete(id);
@@ -133,8 +139,7 @@ export class CityRenderer {
       if (!currentIds.has(building.id)) {
         let neighbors: RoadNeighbors | undefined;
         if (isRoad(building.type)) {
-          neighbors = this.getRoadNeighbors(building, roadPositions);
-          changedPositions.push({ x: building.position.x, z: building.position.z });
+          neighbors = this.getRoadNeighbors(building, roadTiles);
         }
 
         const ratio = newZonePopRatios.get(building.id);
@@ -194,33 +199,34 @@ export class CityRenderer {
     const refreshed = new Set<string>();
     const offsets = [{ dx: 0, dz: -1 }, { dx: 0, dz: 1 }, { dx: 1, dz: 0 }, { dx: -1, dz: 0 }];
 
-    for (const pos of changedPositions) {
+    for (const tile of changedRoadTiles) {
+      const [x, z] = tile.split(',').map(Number);
       for (const { dx, dz } of offsets) {
-        const nx = pos.x + dx;
-        const nz = pos.z + dz;
+        const nx = x + dx;
+        const nz = z + dz;
         const key = `${nx},${nz}`;
         const neighbor = buildingByPos.get(key);
-        if (neighbor && isRoad(neighbor.type) && !refreshed.has(neighbor.id)) {
+        if (neighbor && isRoad(neighbor.type) && currentIds.has(neighbor.id) && !refreshed.has(neighbor.id)) {
           refreshed.add(neighbor.id);
-          this.refreshRoad(neighbor, roadPositions);
+          this.refreshRoad(neighbor, roadTiles);
         }
       }
     }
   }
 
-  private refreshRoad(building: PlacedBuilding, roadPositions: Set<string>): void {
+  private refreshRoad(building: PlacedBuilding, roadTiles: ReadonlyMap<string, BuildingType>): void {
     const existing = this.meshes.get(building.id);
     if (existing) {
       this.scene.remove(existing);
       this.disposeMesh(existing);
     }
-    const neighbors = this.getRoadNeighbors(building, roadPositions);
+    const neighbors = this.getRoadNeighbors(building, roadTiles);
     const mesh = this.factory.createBuilding(building, neighbors);
     this.scene.add(mesh);
     this.meshes.set(building.id, mesh);
   }
 
-  private getRoadNeighbors(building: PlacedBuilding, roadPositions: Set<string>): RoadNeighbors {
+  private getRoadNeighbors(building: PlacedBuilding, roadTiles: ReadonlyMap<string, BuildingType>): RoadNeighbors {
     const { x, z } = building.position;
     const { w, d } = getEffectiveSize(building.type, building.orientation);
 
@@ -236,12 +242,12 @@ export class CityRenderer {
     let hasNorth = false, hasEast = false, hasWest = false;
     let hasSouth = isStarterEntranceRoad(building, DEFAULT_GRID_SIZE);
     for (let dx = 0; dx < w; dx++) {
-      if (!ownCells.has(`${x + dx},${z - 1}`) && roadPositions.has(`${x + dx},${z - 1}`)) hasNorth = true;
-      if (!ownCells.has(`${x + dx},${z + d}`) && roadPositions.has(`${x + dx},${z + d}`)) hasSouth = true;
+      if (!ownCells.has(`${x + dx},${z - 1}`) && roadTiles.has(`${x + dx},${z - 1}`)) hasNorth = true;
+      if (!ownCells.has(`${x + dx},${z + d}`) && roadTiles.has(`${x + dx},${z + d}`)) hasSouth = true;
     }
     for (let dz = 0; dz < d; dz++) {
-      if (!ownCells.has(`${x - 1},${z + dz}`) && roadPositions.has(`${x - 1},${z + dz}`)) hasWest = true;
-      if (!ownCells.has(`${x + w},${z + dz}`) && roadPositions.has(`${x + w},${z + dz}`)) hasEast = true;
+      if (!ownCells.has(`${x - 1},${z + dz}`) && roadTiles.has(`${x - 1},${z + dz}`)) hasWest = true;
+      if (!ownCells.has(`${x + w},${z + dz}`) && roadTiles.has(`${x + w},${z + dz}`)) hasEast = true;
     }
 
     return { hasNorth, hasSouth, hasEast, hasWest };
@@ -253,8 +259,18 @@ export class CityRenderer {
     return Math.min(Math.max(1, Math.ceil(ratio * levelDef.maxBuildings)), levelDef.maxBuildings);
   }
 
+  private clearStreetscape(): void {
+    if (!this.streetscape) return;
+    this.scene.remove(this.streetscape);
+    this.disposeMesh(this.streetscape);
+    this.streetscape = null;
+  }
+
   clear(): void {
     this.entranceRoad.visible = false;
+    this.clearStreetscape();
+    this.pendingStreetscapeSize = null;
+    this.roadTiles.clear();
     for (const [, mesh] of this.meshes) {
       this.scene.remove(mesh);
       this.disposeMesh(mesh);
@@ -268,6 +284,7 @@ export class CityRenderer {
   private disposeMesh(group: THREE.Group): void {
     group.traverse((child) => {
       if (child instanceof THREE.Mesh) {
+        if (child instanceof THREE.InstancedMesh) child.dispose();
         child.geometry.dispose();
         if (child.material instanceof THREE.Material) {
           child.material.dispose();

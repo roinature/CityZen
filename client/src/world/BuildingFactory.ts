@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { type PlacedBuilding, BUILDING_DEFS, CELL_SIZE, BuildingType, isZone, isRoad, getZoneLevelDef, getEffectiveSize, type ZoneType, ZoneDensity } from '@cityzen/shared';
 
+import { addZoneRoof } from './ZoneRoofs.js';
+
 export interface RoadNeighbors {
   hasNorth: boolean;
   hasSouth: boolean;
@@ -474,9 +476,9 @@ export class BuildingFactory {
       // Backward compat: single building rendering
       const levelDef = getZoneLevelDef(building.type as ZoneType, building.density, level);
       // Slightly different logic for width/depth to match original visuals
-      const bw = w * (0.8 + level * 0.05); // Make them fill more of the lot
-      const bd = d * (0.8 + level * 0.05);
-      const h = levelDef.height;
+      const bw = w * 0.84;
+      const bd = d * 0.84;
+      const h = levelDef.height * 0.76;
 
       const geometry = new THREE.BoxGeometry(bw, h, bd);
 
@@ -589,6 +591,8 @@ export class BuildingFactory {
       meshNight.layers.set(2); // Layer 2 = Night
       group.add(meshNight);
 
+      addZoneRoof(group, building.type, { x: 0, y: h, z: 0, width: bw, depth: bd, tall: h > 4 }, this.hashString(building.id));
+
       // --- Add Building Lights (Layer 2) ---
       // Add a point light for developed zones to simulate window/building glow on surrounding area
       if (level > 0) {
@@ -660,7 +664,9 @@ export class BuildingFactory {
     return { facade, roof };
   }
 
-  private createMultiZoneBuildings(group: THREE.Group, building: PlacedBuilding, level: number, populationRatio: number): void {
+  private createMultiZoneBuildings(
+    group: THREE.Group, building: PlacedBuilding, level: number, populationRatio: number,
+  ): void {
     const density = building.density ?? ZoneDensity.MEDIUM;
     const levelDef = getZoneLevelDef(building.type as ZoneType, density, level);
     const maxBuildings = levelDef.maxBuildings;
@@ -668,6 +674,10 @@ export class BuildingFactory {
 
     // Calculate visible count from population ratio
     const visibleCount = Math.min(Math.max(1, Math.ceil(populationRatio * maxBuildings)), slots.length);
+    // At street scale, a lone building can occupy more of its lot without
+    // obscuring neighbors. Multi-building lots still need all their slots.
+    const fillLot = visibleCount === 1;
+    const buildingHeightScale = density === ZoneDensity.HIGH ? 0.83 : 0.62;
 
     for (let i = 0; i < visibleCount; i++) {
       const slot = slots[i];
@@ -677,19 +687,21 @@ export class BuildingFactory {
       const textures = this.getZoneTexturePaths(building, subSeed);
 
       // Sub-building dimensions with slight random height variation
-      const subW = slot.w * CELL_SIZE;
-      const subD = slot.d * CELL_SIZE;
+      const subW = (fillLot ? 0.71 : slot.w) * CELL_SIZE;
+      const subD = (fillLot ? 0.66 : slot.d) * CELL_SIZE;
       const heightVariation = 0.85 + (subSeed % 30) / 100;
-      const subH = levelDef.height * slot.heightScale * heightVariation;
+      const subH = levelDef.height * slot.heightScale * heightVariation * buildingHeightScale;
 
       // Position within cell
-      const subX = slot.x * CELL_SIZE;
-      const subZ = slot.z * CELL_SIZE;
+      const subX = fillLot ? 0 : slot.x * CELL_SIZE;
+      const subZ = fillLot ? 0 : slot.z * CELL_SIZE;
 
       // Weathering: older buildings (lower index) are slightly darker
       const weatherFactor = 0.85 + 0.15 * (i / Math.max(1, maxBuildings - 1));
 
-      this.createTexturedBox(group, subX, subZ, subW, subD, subH, textures.facade, textures.roof, building.type, weatherFactor);
+      this.createTexturedBox(
+        group, subX, subZ, subW, subD, subH, textures.facade, textures.roof, building.type, weatherFactor,
+      );
     }
   }
 
@@ -699,7 +711,7 @@ export class BuildingFactory {
     width: number, depth: number, height: number,
     facadeTexPath: string, roofTexPath: string,
     buildingType: BuildingType,
-    weatherFactor = 1.0,
+    weatherFactor: number,
   ): void {
     // --- Setback: tall buildings get a stepped upper portion ---
     const setbackThreshold = 4.0;
@@ -849,60 +861,10 @@ export class BuildingFactory {
       }
     }
 
-    // --- Roof parapet ---
-    const roofY = hasSetback ? mainHeight + upperHeight : height;
-    const parapetH = Math.min(height * 0.04, 0.12);
-    const parapetThickness = 0.04;
-    const parapetW = hasSetback ? width * upperInset : width;
-    const parapetD = hasSetback ? depth * upperInset : depth;
-
-    const addParapetSegment = (pw: number, pd: number, px: number, pz: number) => {
-      const geo = new THREE.BoxGeometry(pw, parapetH, pd);
-      const dayMesh = new THREE.Mesh(geo, matConcreteDayLambert);
-      dayMesh.position.set(x + px, roofY + parapetH / 2, z + pz);
-      dayMesh.castShadow = true;
-      dayMesh.layers.set(1);
-      group.add(dayMesh);
-      const nightMesh = new THREE.Mesh(geo, matConcreteNightBasic);
-      nightMesh.position.set(x + px, roofY + parapetH / 2, z + pz);
-      nightMesh.layers.set(2);
-      group.add(nightMesh);
-    };
-    // Front and back parapet walls
-    addParapetSegment(parapetW, parapetThickness, 0, parapetD / 2);
-    addParapetSegment(parapetW, parapetThickness, 0, -parapetD / 2);
-    // Left and right parapet walls
-    addParapetSegment(parapetThickness, parapetD, parapetW / 2, 0);
-    addParapetSegment(parapetThickness, parapetD, -parapetW / 2, 0);
-
-    // --- Rooftop equipment (AC units, water tanks) — only for taller buildings ---
-    if (height > 2.5) {
-      const seed = this.hashString(facadeTexPath + width.toFixed(2) + depth.toFixed(2));
-      const numEquip = 1 + (seed % 3); // 1–3 pieces of equipment
-      const equipColor = new THREE.Color(0.50 * weatherFactor, 0.50 * weatherFactor, 0.52 * weatherFactor);
-      const matEquipDay = new THREE.MeshLambertMaterial({ color: equipColor });
-      const matEquipNight = new THREE.MeshBasicMaterial({ color: 0x1a1a1c });
-
-      for (let i = 0; i < numEquip; i++) {
-        const eSeed = this.hashString(facadeTexPath + i.toString());
-        const ew = 0.08 + (eSeed % 10) / 100;
-        const ed = 0.08 + ((eSeed >> 4) % 10) / 100;
-        const eh = 0.06 + ((eSeed >> 8) % 8) / 100;
-        // Spread equipment within inner 60% of roof area
-        const ex = ((eSeed % 100) / 100 - 0.5) * parapetW * 0.6;
-        const ez = (((eSeed >> 3) % 100) / 100 - 0.5) * parapetD * 0.6;
-        const eGeo = new THREE.BoxGeometry(ew, eh, ed);
-        const eDay = new THREE.Mesh(eGeo, matEquipDay);
-        eDay.position.set(x + ex, roofY + eh / 2, z + ez);
-        eDay.castShadow = true;
-        eDay.layers.set(1);
-        group.add(eDay);
-        const eNight = new THREE.Mesh(eGeo, matEquipNight);
-        eNight.position.set(x + ex, roofY + eh / 2, z + ez);
-        eNight.layers.set(2);
-        group.add(eNight);
-      }
-    }
+    const roofSize = hasSetback ? upperInset : 1;
+    addZoneRoof(group, buildingType, {
+      x, y: height, z, width: width * roofSize, depth: depth * roofSize, tall: hasSetback,
+    }, this.hashString(facadeTexPath));
 
     // --- Point Light (Night, Layer 2) ---
     let lightColor = 0xffaa00;

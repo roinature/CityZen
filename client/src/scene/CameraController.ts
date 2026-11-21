@@ -173,6 +173,21 @@ export class CameraController {
     this.leftClickPanEnabled = enabled;
   }
 
+  // Map equal slider steps to equal changes in magnification.
+  getZoomPercent(): number {
+    const limit = this.getZoomOutLimit();
+    return Math.round(100 * Math.log(limit / this.targetZoom) / Math.log(limit / this.minZoom));
+  }
+
+  setZoomPercent(percent: number): void {
+    const limit = this.getZoomOutLimit();
+    this.targetZoom = limit * Math.pow(this.minZoom / limit, clamp(percent, 0, 100) / 100);
+  }
+
+  private getZoomOutLimit(): number {
+    return Math.max(this.maxZoom, this.openingZoom);
+  }
+
   private onWheel(e: WheelEvent): void {
     if ((e.target as HTMLElement).closest('#ui-root')) return;
     e.preventDefault();
@@ -180,7 +195,7 @@ export class CameraController {
     // zoom level, and trackpads (many small deltas) stay smooth.
     const pixels = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
     const factor = Math.exp(clamp(pixels, -200, 200) * 0.0015);
-    this.targetZoom = clamp(this.targetZoom * factor, this.minZoom, Math.max(this.maxZoom, this.openingZoom));
+    this.targetZoom = clamp(this.targetZoom * factor, this.minZoom, this.getZoomOutLimit());
   }
 
   private onMouseDown(e: MouseEvent): void {
