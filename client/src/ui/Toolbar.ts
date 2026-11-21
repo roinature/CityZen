@@ -78,7 +78,7 @@ export class Toolbar {
     bar.append(this.controls, categories, demand);
     dock.appendChild(bar);
     parent.appendChild(dock);
-    this.densityPicker = new DensityPicker(parent);
+    this.densityPicker = new DensityPicker(this.pane);
   }
 
   private renderServices(): void {
@@ -154,8 +154,12 @@ export class Toolbar {
     }
   }
 
+  dismissPicker(): boolean {
+    return this.densityPicker.hide();
+  }
+
   close(): boolean {
-    const pickerWasOpen = this.densityPicker.hide();
+    const pickerWasOpen = this.dismissPicker();
     if (!this.openCategory) return pickerWasOpen;
     this.openCategory = null;
     this.pane.hidden = true;

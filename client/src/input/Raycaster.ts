@@ -5,10 +5,13 @@ export class GridRaycaster {
   private raycaster = new THREE.Raycaster();
   private groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
+  constructor(private canvas: HTMLCanvasElement) {}
+
   getGridPosition(screenX: number, screenY: number, camera: THREE.Camera): Position | null {
+    const bounds = this.canvas.getBoundingClientRect();
     const ndc = new THREE.Vector2(
-      (screenX / window.innerWidth) * 2 - 1,
-      -(screenY / window.innerHeight) * 2 + 1,
+      ((screenX - bounds.left) / bounds.width) * 2 - 1,
+      -((screenY - bounds.top) / bounds.height) * 2 + 1,
     );
 
     this.raycaster.setFromCamera(ndc, camera);

@@ -12,7 +12,8 @@ export class WorldMap {
   private callbacks: WorldMapCallbacks;
   private world: WorldState | null = null;
   private selectedPlot: WorldPosition | null = null;
-  private claimDialog: HTMLDivElement;
+  private claimDialog: HTMLFormElement;
+  private nameInput: HTMLInputElement;
 
   constructor(parent: HTMLElement, callbacks: WorldMapCallbacks) {
     this.callbacks = callbacks;
@@ -23,32 +24,35 @@ export class WorldMap {
     this.overlay.innerHTML = `
       <div class="worldmap-panel">
         <h2>World Map</h2>
-        <p class="worldmap-subtitle">Click an empty plot to start your city, or click an existing city to join it.</p>
+        <p class="worldmap-subtitle">Select an empty plot to start a city, or select an existing city to join it.</p>
         <div class="worldmap-grid"></div>
-        <div class="worldmap-claim-dialog" style="display:none">
-          <input type="text" class="worldmap-city-name" placeholder="City name" value="New City" />
+        <form class="worldmap-claim-dialog" hidden>
+          <input type="text" class="worldmap-city-name" aria-label="City name" placeholder="City name" value="New City" />
           <div class="worldmap-claim-buttons">
-            <button class="worldmap-claim-btn">Claim Plot</button>
-            <button class="worldmap-cancel-btn">Cancel</button>
+            <button type="submit" class="worldmap-claim-btn">Claim Plot</button>
+            <button type="button" class="worldmap-cancel-btn">Cancel</button>
           </div>
-        </div>
+        </form>
       </div>
     `;
     parent.appendChild(this.overlay);
 
     this.gridContainer = this.overlay.querySelector('.worldmap-grid')!;
     this.claimDialog = this.overlay.querySelector('.worldmap-claim-dialog')!;
+    this.nameInput = this.overlay.querySelector('.worldmap-city-name')!;
 
-    this.overlay.querySelector('.worldmap-claim-btn')!.addEventListener('click', () => {
+    this.claimDialog.addEventListener('submit', (event) => {
+      event.preventDefault();
       if (!this.selectedPlot) return;
-      const nameInput = this.overlay.querySelector('.worldmap-city-name') as HTMLInputElement;
-      const cityName = nameInput.value.trim() || 'New City';
+      const cityName = this.nameInput.value.trim() || 'New City';
       this.callbacks.onClaimPlot(this.selectedPlot, cityName);
       this.hideClaimDialog();
     });
 
     this.overlay.querySelector('.worldmap-cancel-btn')!.addEventListener('click', () => {
+      const plot = this.gridContainer.querySelector<HTMLButtonElement>('[aria-pressed="true"]');
       this.hideClaimDialog();
+      plot?.focus();
     });
 
     this.buildGrid();
@@ -58,17 +62,24 @@ export class WorldMap {
     this.gridContainer.innerHTML = '';
     for (let wz = 0; wz < WORLD_MAP_SIZE; wz++) {
       for (let wx = 0; wx < WORLD_MAP_SIZE; wx++) {
-        const cell = document.createElement('div');
+        const cell = document.createElement('button');
+        cell.type = 'button';
         cell.className = 'worldmap-cell worldmap-cell-empty';
         cell.dataset.wx = String(wx);
         cell.dataset.wz = String(wz);
-        cell.addEventListener('click', () => this.onCellClick(wx, wz));
+        cell.setAttribute('aria-label', `Empty plot ${wx + 1}, ${wz + 1}`);
+        cell.setAttribute('aria-pressed', 'false');
+        cell.addEventListener('click', (event) => {
+          const touch = event.pointerType === 'touch' ||
+            (!event.pointerType && event.detail > 0 && matchMedia('(pointer: coarse)').matches);
+          this.onCellClick(wx, wz, touch);
+        });
         this.gridContainer.appendChild(cell);
       }
     }
   }
 
-  private onCellClick(wx: number, wz: number): void {
+  private onCellClick(wx: number, wz: number, touch: boolean): void {
     const city = this.world?.cities.find(c => c.position.wx === wx && c.position.wz === wz);
     if (city) {
       // Enter existing city
@@ -76,21 +87,35 @@ export class WorldMap {
     } else {
       // Select empty plot for claiming
       this.selectedPlot = { wx, wz };
-      this.showClaimDialog();
+      this.showClaimDialog(touch);
     }
   }
 
-  private showClaimDialog(): void {
-    this.claimDialog.style.display = 'flex';
-    const nameInput = this.overlay.querySelector('.worldmap-city-name') as HTMLInputElement;
-    nameInput.value = 'New City';
-    nameInput.focus();
-    nameInput.select();
+  private showClaimDialog(touch: boolean): void {
+    this.claimDialog.hidden = false;
+    this.nameInput.value = 'New City';
+    this.updatePlotSelection();
+    if (touch) {
+      this.claimDialog.scrollIntoView({ block: 'nearest' });
+    } else {
+      this.nameInput.focus();
+      this.nameInput.select();
+    }
   }
 
   private hideClaimDialog(): void {
-    this.claimDialog.style.display = 'none';
+    this.claimDialog.hidden = true;
     this.selectedPlot = null;
+    this.updatePlotSelection();
+  }
+
+  private updatePlotSelection(): void {
+    this.gridContainer.querySelectorAll('.worldmap-cell-empty').forEach(cell => {
+      const plot = cell as HTMLButtonElement;
+      const selected = this.selectedPlot?.wx === Number(plot.dataset.wx) &&
+        this.selectedPlot.wz === Number(plot.dataset.wz);
+      plot.setAttribute('aria-pressed', String(selected));
+    });
   }
 
   updateWorld(world: WorldState): void {
@@ -103,28 +128,37 @@ export class WorldMap {
 
     const cells = this.gridContainer.querySelectorAll('.worldmap-cell');
     cells.forEach(cell => {
-      const el = cell as HTMLDivElement;
+      const el = cell as HTMLButtonElement;
       const wx = parseInt(el.dataset.wx!, 10);
       const wz = parseInt(el.dataset.wz!, 10);
       const city = this.world!.cities.find(c => c.position.wx === wx && c.position.wz === wz);
 
       if (city) {
         el.className = 'worldmap-cell worldmap-cell-occupied';
+        el.removeAttribute('aria-pressed');
+        el.setAttribute('aria-label', `Enter ${city.name}, owned by ${city.ownerName}, population ${city.population}`);
 
         // Check for edge connections and render indicators
         const connectionIndicators = this.getConnectionIndicators(city);
 
-        el.innerHTML = `
-          ${connectionIndicators}
-          <div class="worldmap-city-label">${city.name}</div>
-          <div class="worldmap-city-owner">${city.ownerName}</div>
-          <div class="worldmap-city-pop">Pop: ${city.population}</div>
-        `;
+        el.innerHTML = connectionIndicators;
+        const label = document.createElement('span');
+        label.className = 'worldmap-city-label';
+        label.textContent = city.name;
+        const owner = document.createElement('span');
+        owner.className = 'worldmap-city-owner';
+        owner.textContent = city.ownerName;
+        const population = document.createElement('span');
+        population.className = 'worldmap-city-pop';
+        population.textContent = `Pop: ${city.population}`;
+        el.append(label, owner, population);
       } else {
         el.className = 'worldmap-cell worldmap-cell-empty';
+        el.setAttribute('aria-label', `Empty plot ${wx + 1}, ${wz + 1}`);
         el.innerHTML = '';
       }
     });
+    this.updatePlotSelection();
   }
 
   /**
@@ -149,7 +183,7 @@ export class WorldMap {
         ? `worldmap-connection worldmap-connection-${direction} worldmap-connection-matched`
         : `worldmap-connection worldmap-connection-${direction} worldmap-connection-unmatched`;
 
-      indicators.push(`<div class="${indicatorClass}"></div>`);
+      indicators.push(`<span class="${indicatorClass}" aria-hidden="true"></span>`);
     }
 
     return indicators.join('');

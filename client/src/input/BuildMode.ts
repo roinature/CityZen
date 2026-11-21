@@ -109,20 +109,11 @@ export class BuildMode {
   /** Reports the cost of what is about to be placed (null = nothing), and whether the city can afford it. */
   onDragCostUpdate: ((cost: number | null, affordable?: boolean) => void) | null = null;
 
-  constructor(scene: THREE.Scene, camera: THREE.Camera) {
+  constructor(scene: THREE.Scene, camera: THREE.Camera, canvas: HTMLCanvasElement) {
     this.scene = scene;
     this.camera = camera;
-    this.raycaster = new GridRaycaster();
+    this.raycaster = new GridRaycaster(canvas);
     this.factory = new BuildingFactory();
-
-    window.addEventListener('mousemove', (e) => this.onMouseMove(e));
-    window.addEventListener('mousedown', (e) => this.onMouseDown(e));
-    window.addEventListener('mouseup', () => this.onMouseUp());
-    window.addEventListener('click', (e) => this.onClick(e));
-    window.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      this.onRightClick(e);
-    });
   }
 
   select(type: BuildingType): void {
@@ -140,15 +131,8 @@ export class BuildMode {
   deselect(): void {
     this.selectedType = null;
     this.selectedDensity = null;
-    this.isDragging = false;
-    this.lineDragStart = null;
-    this.rectDragStart = null;
-    this.lastPreviewKey = null;
-    this.clearPreview();
-    this.clearLineDragPreview();
-    this.clearRectPreview();
-    this.clearBulldozePreview();
-    this.onDragCostUpdate?.(null);
+    this.cancelInteraction();
+    this.clearHover();
   }
 
   getSelectedType(): BuildingType | null {
@@ -327,40 +311,36 @@ export class BuildMode {
     this.onDragCostUpdate?.(cost, !outOfMoney);
   }
 
-  private onMouseMove(e: MouseEvent): void {
-    this.currentHoverPos = (e.target as HTMLElement).closest('#ui-root')
-      ? null
-      : this.raycaster.getGridPosition(e.clientX, e.clientY, this.camera);
+  canDraw(): boolean {
+    return this.toolMode === 'build' && this.selectedType !== null &&
+      (isLineDragType(this.selectedType) || isRectDragType(this.selectedType));
   }
 
-  private onMouseDown(e: MouseEvent): void {
-    if (e.button !== 0) return; // Left click only
-    if (this.toolMode !== 'build') return;
-    if (!this.selectedType || !this.onPlace) return;
-    if ((e.target as HTMLElement).closest('#ui-root')) return;
+  hover(x: number, y: number): void {
+    this.currentHoverPos = this.raycaster.getGridPosition(x, y, this.camera);
+  }
 
-    const pos = this.raycaster.getGridPosition(e.clientX, e.clientY, this.camera);
+  clearHover(): void {
+    this.currentHoverPos = null;
+    this.clearPreview();
+    this.clearBulldozePreview();
+    this.lastPreviewKey = null;
+    this.onDragCostUpdate?.(null);
+  }
 
-    // Rectangle drag for zones
+  startDraw(x: number, y: number): void {
+    this.hover(x, y);
+    if (!this.currentHoverPos || !this.selectedType) return;
+    this.isDragging = true;
     if (isRectDragType(this.selectedType)) {
-      this.isDragging = true;
-      if (pos) {
-        this.rectDragStart = { ...pos };
-      }
-      return;
-    }
-
-    // Line drag for roads
-    if (isLineDragType(this.selectedType)) {
-      this.isDragging = true;
-      if (pos) {
-        this.lineDragStart = { ...pos };
-      }
-      return;
+      this.rectDragStart = this.currentHoverPos;
+    } else {
+      this.lineDragStart = this.currentHoverPos;
     }
   }
 
-  private onMouseUp(): void {
+  finishDraw(x: number, y: number): void {
+    this.hover(x, y);
     // Line drag release — place all roads along the straight line
     if (this.isDragging && this.lineDragStart && this.selectedType && isLineDragType(this.selectedType) && this.onPlace && this.currentHoverPos) {
       const orientation = computeLineDragOrientation(this.lineDragStart, this.currentHoverPos);
@@ -381,6 +361,10 @@ export class BuildMode {
       }
     }
 
+    this.cancelInteraction();
+  }
+
+  cancelInteraction(): void {
     this.isDragging = false;
     this.lineDragStart = null;
     this.rectDragStart = null;
@@ -389,35 +373,15 @@ export class BuildMode {
     this.clearRectPreview();
   }
 
-  private onClick(e: MouseEvent): void {
-    if ((e.target as HTMLElement).closest('#ui-root')) return;
-
-    // Bulldoze mode: left-click demolishes
-    if (this.toolMode === 'bulldoze' && e.button === 0) {
-      const pos = this.raycaster.getGridPosition(e.clientX, e.clientY, this.camera);
-      if (pos && this.onDemolish) {
-        this.demolishArea(pos);
-      }
-      return;
-    }
-
-    // Pointer mode: check for edge road click to enter adjacent city
-    if (this.toolMode === 'pointer') {
-      const pos = this.raycaster.getGridPosition(e.clientX, e.clientY, this.camera);
-      if (pos && this.onEdgeRoadClick) {
-        this.checkEdgeRoadClick(pos);
-      }
-      return;
-    }
-
-    if (!this.selectedType || !this.onPlace) return;
-
-    // Skip click handler for line-drag and rect-drag types — handled by mousedown/move/up
-    if (isLineDragType(this.selectedType) || isRectDragType(this.selectedType)) return;
-
-    const pos = this.raycaster.getGridPosition(e.clientX, e.clientY, this.camera);
-    if (pos) {
-      this.onPlace(pos, this.selectedType, this.selectedDensity ?? undefined);
+  tap(x: number, y: number): void {
+    const pos = this.raycaster.getGridPosition(x, y, this.camera);
+    if (!pos) return;
+    if (this.toolMode === 'bulldoze') {
+      this.demolishArea(pos);
+    } else if (this.toolMode === 'pointer') {
+      this.checkEdgeRoadClick(pos);
+    } else if (this.selectedType && !this.canDraw()) {
+      this.onPlace?.(pos, this.selectedType, this.selectedDensity ?? undefined);
     }
   }
 
@@ -431,13 +395,9 @@ export class BuildMode {
     }
   }
 
-  private onRightClick(e: MouseEvent): void {
-    if ((e.target as HTMLElement).closest('#ui-root')) return;
-
-    const pos = this.raycaster.getGridPosition(e.clientX, e.clientY, this.camera);
-    if (pos && this.onDemolish) {
-      this.onDemolish(pos);
-    }
+  demolishAt(x: number, y: number): void {
+    const pos = this.raycaster.getGridPosition(x, y, this.camera);
+    if (pos) this.onDemolish?.(pos);
   }
 
   /**

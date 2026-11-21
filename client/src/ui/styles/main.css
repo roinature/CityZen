@@ -11,20 +11,38 @@ body {
 
 #game-canvas {
   display: block;
-  width: 100vw;
-  height: 100vh;
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 #ui-root {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
+  position: fixed;
+  inset: 0;
   pointer-events: none;
 }
 
 #ui-root > * {
+  pointer-events: auto;
+}
+
+#game-canvas.panning {
+  cursor: grabbing;
+}
+
+.city-hud {
+  display: contents;
+}
+
+#ui-root > .city-hud {
+  pointer-events: none;
+}
+
+.city-hud > :is(.resource-bar, .zoom-control, .message-banner) {
   pointer-events: auto;
 }
 
@@ -35,6 +53,10 @@ body {
   --hud-text: #f1f3e9;
   --hud-muted: #b9c9be;
   --hud-accent: #a7dfb8;
+  --ui-top: max(8px, env(safe-area-inset-top));
+  --ui-right: max(8px, env(safe-area-inset-right));
+  --ui-bottom: max(8px, env(safe-area-inset-bottom));
+  --ui-left: max(8px, env(safe-area-inset-left));
 }
 
 .resource-bar,
@@ -50,7 +72,7 @@ body {
 
 .resource-bar {
   position: absolute;
-  top: 12px;
+  top: max(12px, var(--ui-top));
   left: 50%;
   transform: translateX(-50%);
   width: min(1120px, calc(100% - 24px));
@@ -747,6 +769,7 @@ body {
   background: #1a1a2e;
   border-radius: 12px;
   padding: 28px 36px;
+  width: 552px;
   color: white;
   text-align: center;
 }
@@ -764,10 +787,11 @@ body {
 
 .worldmap-grid {
   display: grid;
-  grid-template-columns: repeat(8, 1fr);
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  grid-template-rows: repeat(8, minmax(0, 1fr));
   gap: 3px;
-  width: 480px;
-  height: 480px;
+  width: 100%;
+  aspect-ratio: 1;
 }
 
 .worldmap-cell {
@@ -777,8 +801,10 @@ body {
   justify-content: center;
   border-radius: 4px;
   cursor: pointer;
-  transition: all 0.15s ease;
-  font-size: 10px;
+  transition: background 0.15s, border-color 0.15s;
+  color: inherit;
+  font: inherit;
+  touch-action: manipulation;
   overflow: hidden;
   padding: 2px;
 }
@@ -788,7 +814,13 @@ body {
   border: 1px dashed rgba(255, 255, 255, 0.12);
 }
 
-.worldmap-cell-empty:hover {
+.worldmap-cell:focus-visible {
+  outline: 2px solid var(--hud-accent);
+  outline-offset: -2px;
+}
+
+.worldmap-cell-empty:hover,
+.worldmap-cell-empty[aria-pressed="true"] {
   background: rgba(76, 175, 80, 0.2);
   border-color: rgba(76, 175, 80, 0.5);
 }
@@ -833,6 +865,10 @@ body {
   justify-content: center;
 }
 
+.worldmap-claim-dialog[hidden] {
+  display: none;
+}
+
 .worldmap-city-name {
   padding: 8px 12px;
   border-radius: 6px;
@@ -841,6 +877,7 @@ body {
   color: white;
   font-size: 14px;
   width: 200px;
+  min-width: 0;
 }
 
 .worldmap-city-name:focus {
@@ -1095,7 +1132,7 @@ body {
 /* Build dock */
 .build-dock {
   position: absolute;
-  bottom: 12px;
+  bottom: max(12px, var(--ui-bottom));
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -1171,6 +1208,7 @@ body {
   width: 100%;
   min-width: 0;
   overflow-x: auto;
+  overscroll-behavior-x: contain;
 }
 
 .build-item {
@@ -1220,90 +1258,6 @@ body {
 .finance-tax-controls p {
   color: var(--hud-muted);
   font-size: 12px;
-}
-
-@media (max-width: 800px) {
-  .resource-bar {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 8px;
-  }
-
-  .resource-identity,
-  .resource-metrics {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-  }
-
-  .resource-actions {
-    order: 0;
-  }
-
-  .clock-item {
-    justify-items: end;
-  }
-}
-
-@media (max-width: 480px) {
-  .resource-bar {
-    top: 8px;
-    width: calc(100% - 16px);
-    padding: 7px 8px;
-    gap: 6px;
-  }
-
-  .resource-city strong {
-    font-size: 15px;
-  }
-
-  .resource-actions .hud-button {
-    padding: 6px;
-    font-size: 11px;
-  }
-
-  .resource-actions {
-    gap: 3px;
-  }
-
-  .resource-stats {
-    gap: clamp(6px, 2vw, 10px);
-  }
-
-  .resource-label {
-    font-size: 10px;
-  }
-
-  .build-dock {
-    bottom: 8px;
-    max-width: calc(100% - 16px);
-  }
-
-  .build-controls {
-    padding-right: 0;
-    border: 0;
-  }
-
-  .build-bar {
-    column-gap: 6px;
-  }
-
-  .build-bar .demand-bar {
-    grid-auto-flow: column;
-    padding: 0 2px;
-    border: 0;
-  }
-
-  .demand-meter-track {
-    width: 18px;
-  }
-}
-
-@media (max-width: 350px) {
-  .resource-actions .hud-button {
-    padding-inline: 4px;
-  }
 }
 
 /* ==============================
@@ -1766,10 +1720,6 @@ body {
   }
 }
 
-@media (max-width: 800px) {
-  .zoom-control { top: 108px; }
-}
-
 /* --- HUD feedback --- */
 /* Keep placement feedback below the city HUD. */
 .footer-indicator {
@@ -1777,17 +1727,6 @@ body {
   bottom: auto;
   z-index: 40;
   pointer-events: none !important;
-}
-
-@media (max-width: 800px) {
-  .footer-indicator { top: 108px; }
-  .message-notifications { top: 162px; }
-  .compass-indicator { bottom: 124px; transform: scale(0.75); transform-origin: bottom left; }
-}
-
-@media (max-width: 600px) {
-  .footer-indicator, body.in-city .footer-toast { top: 164px; }
-  .message-notifications { top: 206px; }
 }
 
 .footer-indicator.warn {
@@ -1856,14 +1795,9 @@ body {
 }
 
 /* --- Game HUD is only shown while a city is on screen (body.in-city) --- */
-body:not(.in-city) .resource-bar,
+body:not(.in-city) .city-hud,
 body:not(.in-city) .build-dock,
-body:not(.in-city) .compass-indicator,
-body:not(.in-city) .zoom-control,
-body:not(.in-city) .footer-indicator,
-body:not(.in-city) .density-picker,
-body:not(.in-city) .message-notifications,
-body:not(.in-city) .message-banner {
+body:not(.in-city) .density-picker {
   display: none !important;
 }
 
@@ -1902,11 +1836,6 @@ body:not(.in-city) .message-banner {
 
 @keyframes city-loading-spin {
   to { transform: rotate(360deg); }
-}
-
-/* Keep all 8 world-map rows the same height, with or without cities in them */
-.worldmap-grid {
-  grid-template-rows: repeat(8, minmax(0, 1fr));
 }
 
 /* --- Finance panel: loans --- */
@@ -2074,4 +2003,256 @@ body:not(.in-city) .message-banner {
 
 .finance-loan-status.error {
   color: #ff8a80;
+}
+
+/* Keep dialogs within the usable viewport and scroll long panels internally. */
+:is(.lobby-overlay, .worldmap-overlay, .menu-overlay, .finance-overlay, .maslow-overlay) {
+  padding: var(--ui-top) var(--ui-right) var(--ui-bottom) var(--ui-left);
+}
+
+:is(.lobby-panel, .worldmap-panel, .menu-panel, .options-panel, .finance-panel, .maslow-panel) {
+  min-width: 0;
+  max-width: 100%;
+  max-height: 100%;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.lobby-panel {
+  width: min(500px, 100%);
+}
+
+:is(.menu-panel, .options-panel, .maslow-panel) {
+  width: 380px;
+}
+
+.lobby-create-world input,
+.option-row input[type="range"] {
+  min-width: 0;
+}
+
+.speed-select,
+.hud-label-compact,
+.zoom-control .rotate-map {
+  display: none;
+}
+
+@media (max-width: 800px), (pointer: coarse) {
+  .city-hud {
+    position: absolute;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 6px;
+    top: var(--ui-top);
+    right: var(--ui-right);
+    left: var(--ui-left);
+  }
+
+  .resource-bar {
+    position: static;
+    grid-column: 1 / -1;
+    transform: none;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 4px 12px;
+    width: 100%;
+    padding: 5px 8px;
+  }
+
+  .resource-identity,
+  .resource-metrics {
+    display: flex;
+    flex: 1 0 auto;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .resource-identity {
+    flex-basis: min(100%, 290px);
+  }
+
+  .resource-metrics {
+    flex-basis: min(100%, 285px);
+  }
+
+  .resource-stats { gap: clamp(6px, 2vw, 16px); }
+  .resource-city strong { font-size: 15px; }
+  .resource-actions { order: 0; gap: 3px; }
+  .resource-actions .hud-button { padding-inline: 6px; font-size: 11px; }
+  .resource-label { font-size: 10px; }
+  .happiness-advisor { align-content: center; }
+  .clock-item { display: flex; align-items: center; gap: 5px; }
+  #res-clock { max-width: 54px; white-space: normal; font-size: 11px; }
+  .speed-controls { display: none; }
+
+  .speed-select {
+    display: block;
+    padding: 0 4px;
+    border: 1px solid var(--hud-edge);
+    border-radius: 7px;
+    background: var(--hud-surface);
+    color: var(--hud-text);
+    color-scheme: dark;
+    font-size: 16px;
+  }
+
+  .compass-indicator {
+    position: static;
+    grid-row: 2;
+    grid-column: 1;
+    width: 42px;
+    height: 42px;
+  }
+
+  .compass-rose { width: 42px; height: 42px; }
+  .compass-label { font-size: 9px; line-height: 11px; }
+  .compass-n { top: 0; }
+  .compass-s { bottom: 0; }
+  .compass-e { right: -2px; }
+  .compass-w { left: -2px; }
+  .compass-needle { top: 9px; height: 11px; }
+
+  .zoom-control {
+    position: static;
+    grid-row: 2;
+    grid-column: 3;
+    gap: 3px;
+    padding: 3px;
+  }
+
+  .zoom-control-track { display: none; }
+  .zoom-control .rotate-map { display: block; }
+  .zoom-control .hud-button { width: 44px; height: 44px; }
+
+  .footer-indicator {
+    position: static;
+    grid-row: 2;
+    grid-column: 2;
+    justify-self: start;
+    transform: none;
+    padding: 6px 8px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    font-size: 12px;
+  }
+
+  .footer-toast {
+    width: max-content;
+    max-width: calc(100% - var(--ui-left) - var(--ui-right));
+    top: max(120px, calc(var(--ui-top) + 56px));
+    white-space: normal;
+    text-align: center;
+  }
+
+  .message-notifications { position: absolute; top: calc(100% + 6px); right: 0; }
+  .message-banner.active { border-radius: 10px; }
+  .message-banner-content { padding-inline: 16px 56px; gap: 10px; }
+  .message-banner-icon { font-size: 32px; }
+  .message-notification { padding-right: 56px; }
+
+  .message-banner-close,
+  .notification-close {
+    width: 44px;
+    height: 44px;
+    opacity: 1;
+  }
+
+  .build-dock {
+    bottom: var(--ui-bottom);
+    left: var(--ui-left);
+    right: var(--ui-right);
+    transform: none;
+    max-width: none;
+  }
+
+  .build-bar { gap: 4px 10px; padding: 5px; }
+
+  .build-controls {
+    padding-right: 0;
+    border: 0;
+  }
+
+  .build-bar .demand-bar {
+    grid-auto-flow: column;
+    padding: 0 2px;
+    border: 0;
+  }
+
+  .demand-meter-track { width: 18px; }
+  .build-item-preview { flex: 0 0 32px; }
+
+  .density-picker {
+    position: static;
+    grid-row: 1;
+    flex-direction: row;
+    max-width: 100%;
+    padding: 0;
+    border: 0;
+    box-shadow: none;
+  }
+
+  .density-option {
+    min-width: 0;
+    gap: 3px;
+    padding-inline: 7px;
+  }
+
+  :is(.hud-button, .speed-select, .happiness-advisor, .build-service-select, .density-option,
+      .lobby-panel button, .menu-btn, .worldmap-claim-dialog button) {
+    min-height: 44px;
+    touch-action: manipulation;
+  }
+
+  .brush-size-control .hud-button { min-width: 44px; }
+  :is(.lobby-panel, .worldmap-panel, .menu-panel, .options-panel, .finance-panel, .maslow-panel) { padding: 16px; }
+  .worldmap-panel { width: min(100%, 512px); }
+  .worldmap-subtitle { margin-bottom: 12px; }
+  .worldmap-claim-dialog { flex-wrap: wrap; }
+  .worldmap-city-name { min-height: 44px; }
+  :is(.worldmap-city-name, .lobby-panel input, .build-service-select) { font-size: 16px; }
+}
+
+@media (max-width: 480px) {
+  .build-bar { width: 100%; }
+  .build-categories { order: 1; flex: 0 0 100%; }
+  .build-categories .hud-button { flex: 1; padding-inline: 4px; }
+  .build-pane { width: 100%; }
+  .worldmap-panel { padding-inline: 8px; }
+  .worldmap-cell { padding: 1px; }
+  .worldmap-city-label { font-size: 10px; }
+  .worldmap-city-owner, .worldmap-city-pop { font-size: 8px; }
+}
+
+@media (max-width: 350px) {
+  .hud-label-full { display: none; }
+  .hud-label-compact { display: inline; }
+
+  .footer-indicator {
+    grid-row: 3;
+    grid-column: 1 / -1;
+  }
+
+  .clock-item {
+    display: grid;
+    justify-items: end;
+    gap: 2px;
+  }
+
+  #res-clock {
+    max-width: none;
+    white-space: nowrap;
+  }
+
+  .resource-stats {
+    min-width: 0;
+  }
+
+  .resource-value {
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }

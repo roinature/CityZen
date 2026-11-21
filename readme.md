@@ -89,6 +89,12 @@ CityZen/
 - **B**: Toggle bulldozer
 - **ESC**: Open/close game menu (or deselect building)
 
+On a touchscreen:
+
+- **Tap** a plot with a tool selected to build or bulldoze.
+- **Drag** to move the map. With a road or zone selected, a one-finger drag draws a road or fills a rectangle.
+- **Use two fingers** to move or pinch-zoom the map with any tool selected. The camera buttons also zoom and rotate.
+
 ### Resources
 
 Resources update every 2-second server tick:

@@ -28,6 +28,7 @@ import { EdgeRoadIndicator } from './scene/EdgeRoadIndicator.js';
 import { createTerrain } from './world/Terrain.js';
 import { CityRenderer } from './world/CityRenderer.js';
 import { BuildMode } from './input/BuildMode.js';
+import { MapInput } from './input/MapInput.js';
 import { ResourceBar } from './ui/ResourceBar.js';
 import { CityAdvisor } from './ui/CityAdvisor.js';
 import { getHappinessAdvice, needsHappinessAdvice } from './ui/happinessAdvice.js';
@@ -104,7 +105,7 @@ const edgeRoadIndicator = new EdgeRoadIndicator(sceneManager.scene);
 
 const cityRenderer = new CityRenderer(sceneManager.scene, entranceRoad);
 const carManager = new CarManager(sceneManager.scene);
-const buildMode = new BuildMode(sceneManager.scene, sceneManager.camera);
+const buildMode = new BuildMode(sceneManager.scene, sceneManager.camera, canvas);
 const soundManager = new SoundManager();
 
 // --- HUD visibility ---
@@ -161,13 +162,16 @@ window.addEventListener('click', resumeAudio);
 window.addEventListener('keydown', resumeAudio);
 
 // --- UI ---
-const resourceBar = new ResourceBar(uiRoot);
-const footerIndicator = new FooterIndicator(uiRoot);
-const compassIndicator = new CompassIndicator(uiRoot);
-const zoomControl = new ZoomControl(uiRoot, cameraController);
+const cityHud = document.createElement('div');
+cityHud.className = 'city-hud';
+uiRoot.appendChild(cityHud);
+const resourceBar = new ResourceBar(cityHud);
+const footerIndicator = new FooterIndicator(uiRoot, cityHud);
+const compassIndicator = new CompassIndicator(cityHud);
+const zoomControl = new ZoomControl(cityHud, cameraController);
 
 // --- Message System ---
-const messageManager = new MessageManager(uiRoot, {
+const messageManager = new MessageManager(cityHud, {
   onMessageRead: (messageId) => {
     console.log(`Message read: ${messageId}`);
   },
@@ -188,12 +192,12 @@ const toolbar = new Toolbar(uiRoot, resourceBar.demand, (type: BuildingType, den
   cityRenderer.highlightZones(isZone(type));
 });
 const buildTools = new BuildTools(toolbar.controls, setToolMode, (size) => buildMode.setBrushSize(size));
-cameraController.setLeftClickPanEnabled(true);
+const mapInput = new MapInput(canvas, cameraController, buildMode, () => toolbar.dismissPicker());
 
 function setToolMode(mode: ToolMode): void {
+  mapInput.cancel();
   buildMode.setToolMode(mode);
   buildTools.setActiveMode(mode);
-  cameraController.setLeftClickPanEnabled(mode === 'pointer');
   setGridEditing(gridHelper, mode !== 'pointer');
   if (mode !== 'build') {
     toolbar.setActive(null);
@@ -259,10 +263,20 @@ function refreshCityAdvisor(city: CityState): void {
   soundManager.triggerNotification();
 }
 
-function addHudAction(label: string, onClick: () => void): HTMLButtonElement {
+function addHudAction(label: string, onClick: () => void, compactLabel?: string): HTMLButtonElement {
   const button = document.createElement('button');
   button.className = 'hud-button';
   button.textContent = label;
+  if (compactLabel) {
+    const full = document.createElement('span');
+    full.className = 'hud-label-full';
+    full.textContent = label;
+    const compact = document.createElement('span');
+    compact.className = 'hud-label-compact';
+    compact.textContent = compactLabel;
+    button.replaceChildren(full, compact);
+    button.setAttribute('aria-label', label);
+  }
   button.addEventListener('click', onClick);
   resourceBar.actions.appendChild(button);
   return button;
@@ -279,13 +293,13 @@ addHudAction('City Needs', () => {
   toolbar.close();
   if (cityState.resources.populationSummary) maslowPanel.update(cityState.resources.populationSummary);
   maslowPanel.toggle();
-});
+}, 'Needs');
 const nightButton = addHudAction('Night View', () => {
   isNight = !isNight;
   lighting.setNight(isNight);
   sceneManager.setDayNight(isNight);
   nightButton.setAttribute('aria-pressed', String(isNight));
-});
+}, 'Night');
 nightButton.setAttribute('aria-pressed', 'false');
 
 // --- Session ---

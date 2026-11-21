@@ -17,6 +17,7 @@ export class ResourceBar {
   private demandComEl: HTMLDivElement;
   private demandIndEl: HTMLDivElement;
   private clockEl: HTMLSpanElement;
+  private speedSelect: HTMLSelectElement;
   private speedBtns: HTMLButtonElement[] = [];
 
   onGameSpeedChange: ((speed: number) => void) | null = null;
@@ -52,6 +53,7 @@ export class ResourceBar {
         <div class="resource-item clock-item">
           <span class="resource-value" id="res-clock"></span>
           <div class="speed-controls" id="speed-controls" role="group" aria-label="Game speed"></div>
+          <select class="speed-select" aria-label="Game speed"></select>
         </div>
       </div>
     `;
@@ -88,8 +90,11 @@ export class ResourceBar {
     this.demandIndEl = this.demand.querySelector('#demand-ind')!;
 
     // Build speed control buttons
+    this.speedSelect = this.container.querySelector('.speed-select')!;
+    this.speedSelect.addEventListener('change', () => this.onGameSpeedChange?.(Number(this.speedSelect.value)));
     const speedContainer = this.container.querySelector('#speed-controls')!;
     for (let i = 0; i <= MAX_GAME_SPEED; i++) {
+      this.speedSelect.add(new Option(i === 0 ? 'Paused' : SPEED_LABELS[i], String(i)));
       const btn = document.createElement('button');
       btn.className = 'speed-btn';
       btn.textContent = SPEED_LABELS[i];
@@ -109,6 +114,7 @@ export class ResourceBar {
 
   updateClock(clock: GameClock): void {
     this.clockEl.textContent = `Day ${clock.gameDay + 1}, Year ${clock.gameYear}`;
+    this.speedSelect.value = String(clock.speed);
     for (let i = 0; i < this.speedBtns.length; i++) {
       this.speedBtns[i].setAttribute('aria-pressed', String(i === clock.speed));
     }

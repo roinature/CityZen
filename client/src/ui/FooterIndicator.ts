@@ -5,11 +5,11 @@ export class FooterIndicator {
   private toastEl: HTMLDivElement;
   private toastTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(parent: HTMLElement) {
+  constructor(parent: HTMLElement, hud: HTMLElement) {
     this.container = document.createElement('div');
     this.container.className = 'footer-indicator';
     this.container.style.display = 'none';
-    parent.appendChild(this.container);
+    hud.appendChild(this.container);
 
     this.toastEl = document.createElement('div');
     this.toastEl.className = 'footer-toast';

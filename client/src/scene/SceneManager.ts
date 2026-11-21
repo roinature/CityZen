@@ -7,11 +7,11 @@ export class SceneManager {
 
   private frustumSize = 50;
 
-  constructor(canvas: HTMLCanvasElement) {
+  constructor(private canvas: HTMLCanvasElement) {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x87ceeb);
 
-    const aspect = window.innerWidth / window.innerHeight;
+    const aspect = canvas.clientWidth / canvas.clientHeight;
     this.camera = new THREE.OrthographicCamera(
       (-this.frustumSize * aspect) / 2,
       (this.frustumSize * aspect) / 2,
@@ -25,8 +25,8 @@ export class SceneManager {
     this.camera.lookAt(32, 0, 32); // Center of 64x64 grid
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.onResize();
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -35,16 +35,16 @@ export class SceneManager {
     this.camera.layers.enable(1);
     this.camera.layers.disable(2);
 
-    window.addEventListener('resize', () => this.onResize());
+    new ResizeObserver(() => this.onResize()).observe(canvas);
   }
 
   private onResize(): void {
     this.updateProjection();
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.renderer.setSize(this.canvas.clientWidth, this.canvas.clientHeight, false);
   }
 
   private updateProjection(): void {
-    const aspect = window.innerWidth / window.innerHeight;
+    const aspect = this.canvas.clientWidth / this.canvas.clientHeight;
     this.camera.left = (-this.frustumSize * aspect) / 2;
     this.camera.right = (this.frustumSize * aspect) / 2;
     this.camera.top = this.frustumSize / 2;
