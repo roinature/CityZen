@@ -2,6 +2,8 @@
 
 A real-time multiplayer 3D city builder game. Players collaborate to build and manage a shared city on a grid, placing buildings, laying roads, and watching their city come to life with animated traffic.
 
+Players found cities on one shared Earth. The first three sites are in California. Each site covers 3.2 km × 3.2 km, sampled at 50 m per cell. The playable map uses elevation shading, with open sea and slopes above a 40% grade closed to construction. Terrain is bundled with the game. [Mapzen elevation data and attribution](https://registry.opendata.aws/terrain-tiles/)
+
 ## Play Now
 
 **[city-zen3.vercel.app](https://city-zen3.vercel.app)** — or scan to play on your phone:
@@ -30,6 +32,8 @@ npm run dev
 ```
 
 This starts both the server (port 3030) and the Vite dev server (port 5173). Open `http://localhost:5173` in your browser.
+
+Existing installations need the 20261121000000_earth_sites database migration before running this version. It brings cities from older worlds into Earth as original cities and preserves their building layouts.
 
 ### Build for Production
 

@@ -1,3 +1,5 @@
+import { getSite } from '@cityzen/shared';
+import { drawSiteMap } from './SiteMap.js';
 import * as THREE from 'three';
 import { BUILDING_DEFS, BuildingType, DEFAULT_GRID_SIZE, CELL_SIZE, getStarterEntranceX } from '@cityzen/shared';
 
@@ -179,7 +181,7 @@ function createGrassTexture(base: string, speckles: string[]): THREE.CanvasTextu
   return texture;
 }
 
-export function createTerrain(scene: THREE.Scene): THREE.Group {
+export function createTerrain(scene: THREE.Scene) {
   const size = DEFAULT_GRID_SIZE * CELL_SIZE;
 
   // Playable plot
@@ -223,5 +225,20 @@ export function createTerrain(scene: THREE.Scene): THREE.Group {
   const entranceRoad = createEntranceRoad(entranceX, size, (size + outerSize) / 2);
   scene.add(entranceRoad);
 
-  return entranceRoad;
+  let activeSite: string | undefined;
+  let siteTexture: THREE.CanvasTexture | undefined;
+  function setSite(siteId?: string) {
+    if (activeSite === siteId) return;
+    activeSite = siteId;
+    siteTexture?.dispose();
+    const site = getSite(siteId);
+    siteTexture = site ? new THREE.CanvasTexture(drawSiteMap(site.id).canvas) : undefined;
+    if (siteTexture) {
+      siteTexture.magFilter = THREE.NearestFilter;
+      siteTexture.colorSpace = THREE.SRGBColorSpace;
+    }
+    mesh.material.map = siteTexture ?? grass;
+    mesh.material.needsUpdate = true;
+  }
+  return { entranceRoad, setSite };
 }

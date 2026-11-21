@@ -48,6 +48,9 @@ export function canPlaceBuilding(
         return { valid: false, reason: 'Out of bounds' };
       }
 
+      const terrain = grid[cx][cz].terrain;
+      if (terrain) return { valid: false, reason: terrain === 'water' ? 'Open water' : 'Slope too steep' };
+
       if (grid[cx][cz].buildingId !== null) {
         return { valid: false, reason: 'Cell occupied' };
       }

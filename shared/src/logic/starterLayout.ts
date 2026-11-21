@@ -2,6 +2,8 @@ import { DEFAULT_GRID_SIZE } from '../constants/grid.js';
 import { BuildingType, type PlacedBuilding } from '../types/building.js';
 import { createEmptyGrid } from './placement.js';
 
+import { applySiteTerrain } from '../terrain/sites.js';
+
 export function getStarterEntranceX(gridSize: number): number {
   return Math.floor(gridSize * 0.56);
 }
@@ -12,8 +14,9 @@ export function isStarterEntranceRoad(building: PlacedBuilding, gridSize: number
     && building.position.z === gridSize - 1;
 }
 
-export function createStarterLayout(cityId: string, ownerId: string) {
+export function createStarterLayout(cityId: string, ownerId: string, siteId?: string) {
   const grid = createEmptyGrid();
+  applySiteTerrain(grid, siteId);
   const buildings: PlacedBuilding[] = [];
   const x = getStarterEntranceX(DEFAULT_GRID_SIZE);
 

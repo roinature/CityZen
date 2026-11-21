@@ -15,6 +15,7 @@ export interface EdgeConnection {
 }
 
 export interface WorldCityEntry {
+  siteId?: string;
   cityId: string;
   ownerId: string;
   ownerName: string;

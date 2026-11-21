@@ -1,8 +1,8 @@
 import prisma from './prismaClient.js';
 import type { Prisma } from '../generated/prisma/index.js';
 import { writeWorldCityEdges } from './worldStore.js';
-import type { CityState, PlacedBuilding, RoadOrientation, Loan } from '@cityzen/shared';
-import { createEmptyGrid, BUILDING_DEFS, MaslowNeed, getEffectiveSize, BuildingType, calculateEdgeConnections } from '@cityzen/shared';
+import type { WorldCityEntry, CityState, PlacedBuilding, RoadOrientation, Loan } from '@cityzen/shared';
+import { applySiteTerrain, createEmptyGrid, BUILDING_DEFS, MaslowNeed, getEffectiveSize, BuildingType, calculateEdgeConnections } from '@cityzen/shared';
 
 // Loans are stored in City.loans (JSONB), added by the 20261114000000_city_loans
 // migration. Until that migration has been applied the column doesn't exist, so
@@ -54,6 +54,19 @@ export async function saveCityState(cityId: string, state: CityState, expectedRe
   }, cityTransactionOptions);
 }
 
+/** Commit the site claim and its playable city together, including across workers. */
+export async function foundEarthCity(state: CityState, entry: WorldCityEntry): Promise<number | null> {
+  const persistLoans = await hasLoansColumn();
+  return prisma.$transaction(async tx => {
+    const count = await tx.$executeRaw`
+      UPDATE "World" SET "cities" = "cities" || ${JSON.stringify([entry])}::jsonb, "updatedAt" = NOW()
+      WHERE "id" = 'default' AND NOT ("cities" @> ${JSON.stringify([{ siteId: entry.siteId }])}::jsonb)
+    `;
+    if (!count) return null;
+    return writeCityState(tx, state.id, state, persistLoans);
+  }, cityTransactionOptions);
+}
+
 async function lockCity(tx: Prisma.TransactionClient, cityId: string): Promise<number | null> {
   const [row] = await tx.$queryRaw<Array<{ updatedAt: Date }>>`
     SELECT "updatedAt" FROM "City" WHERE "id" = ${cityId} FOR UPDATE
@@ -67,6 +80,7 @@ async function writeCityState(
 ): Promise<number> {
   const updatedAt = new Date(Math.max(Date.now(), (previousRevision ?? 0) + 1));
   const cityData = {
+    siteId: state.siteId,
     name: state.name,
     ownerId: state.ownerId || '',
     money: state.resources.money,
@@ -187,6 +201,7 @@ async function readCityState(cityId: string, db: Prisma.TransactionClient, persi
 
   // Reconstruct grid from buildings (no empty cells stored)
   const grid = createEmptyGrid();
+  applySiteTerrain(grid, city.siteId);
   for (const b of buildings) {
     const { w, d } = getEffectiveSize(b.type as BuildingType, b.orientation);
     for (let dx = 0; dx < w; dx++) {
@@ -197,6 +212,7 @@ async function readCityState(cityId: string, db: Prisma.TransactionClient, persi
   }
 
   return {
+    siteId: city.siteId ?? undefined,
     id: city.id,
     name: city.name,
     ownerId: city.ownerId,

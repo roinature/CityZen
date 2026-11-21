@@ -4,6 +4,7 @@ export interface Position {
 }
 
 export interface GridCell {
+  terrain?: 'water' | 'steep';
   buildingId: string | null;
 }
 

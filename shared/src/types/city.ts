@@ -4,6 +4,7 @@ import type { ResourceState } from './resources.js';
 import type { GameClock } from './time.js';
 
 export interface CityState {
+  siteId?: string;
   id: string;
   name: string;
   ownerId: string;

@@ -8,7 +8,6 @@ import {
   isZone,
   calculateEdgeConnections,
   type ClaimPlotPayload,
-  type CreateCityPayload,
   type JoinCityPayload,
   type PlaceBuildingPayload,
   type PlaceBuildingsPayload,
@@ -135,7 +134,6 @@ export function createGameRoutes(roomManager: RoomManager, worldManager: WorldMa
   router.get('/world/state', async (req: Request, res: Response) => {
     const worldId = (req.query.worldId as string) || 'default';
     try {
-      // Worlds other than the default are loaded on first use
       const world = await worldManager.loadWorld(worldId);
       if (!world) {
         res.status(404).json({ error: 'World not found' });
@@ -172,13 +170,7 @@ export function createGameRoutes(roomManager: RoomManager, worldManager: WorldMa
         return;
       }
 
-      const result = await worldManager.claimPlot(
-        payload.position,
-        payload.cityName,
-        playerId,
-        payload.playerName,
-        worldId,
-      );
+      const result = await worldManager.claimSite(payload.siteId, payload.cityName, playerId, payload.playerName);
 
       if (!result.success) {
         res.json({ success: false, error: result.error });
@@ -197,50 +189,11 @@ export function createGameRoutes(roomManager: RoomManager, worldManager: WorldMa
       const room = roomManager.getRoom(result.cityId!);
       if (room) {
         joinRoom(res, room, playerId, payload.playerName);
-        console.log(`Plot claimed at (${payload.position.wx}, ${payload.position.wz}) - City "${payload.cityName}" by ${payload.playerName}`);
       }
 
       res.json({ success: true, cityId: result.cityId });
     } catch (err) {
       res.json({ success: false, error: 'Failed to claim plot' });
-    }
-  });
-
-  // POST /api/city/create
-  router.post('/city/create', async (req: Request, res: Response) => {
-    try {
-      const payload = req.body as CreateCityPayload;
-      const playerId = payload.playerId || uuid();
-
-      // Leave current room if any
-      leaveCurrentRoom(playerId);
-
-      const profile = await loadPlayerProfile(playerId);
-      if (!profile) {
-        await savePlayerProfile({
-          id: playerId,
-          name: payload.playerName,
-          ownedCityId: null,
-          createdAt: Date.now(),
-        });
-      }
-
-      const room = await roomManager.createRoom(payload.cityName, playerId, payload.playerName);
-
-      // Update player profile with owned city
-      await savePlayerProfile({
-        id: playerId,
-        name: payload.playerName,
-        ownedCityId: room.id,
-        createdAt: profile?.createdAt ?? Date.now(),
-      });
-
-      joinRoom(res, room, playerId, payload.playerName);
-
-      console.log(`City created: "${payload.cityName}" (${room.id}) by ${payload.playerName}`);
-      res.json({ success: true, cityId: room.id });
-    } catch (err) {
-      res.json({ success: false, error: 'Failed to create city' });
     }
   });
 

@@ -21,7 +21,6 @@ import {
   type GameClock,
   type Player,
   type WorldState,
-  type WorldPosition,
   type PopulationSummary,
 } from '@cityzen/shared';
 
@@ -48,7 +47,6 @@ export class GameClient {
   private worldChannel!: RealtimeChannel;
   private cityChannel: RealtimeChannel | null = null;
   private joinedCityChannel: RealtimeChannel | null = null;
-  private currentWorldId = 'default';
 
   static async create(serverUrl: string, callbacks: GameCallbacks): Promise<GameClient> {
     const client = new GameClient(serverUrl, callbacks);
@@ -73,7 +71,7 @@ export class GameClient {
       .on('broadcast', { event: S2C.WORLD_STATE }, (msg) => {
         const payload = msg.payload as WorldStatePayload;
         // The channel carries every world's updates; only show the one we're in
-        if (payload.world.id !== this.currentWorldId) return;
+        if (payload.world.id !== 'default') return;
         this.callbacks.onWorldState(payload.world);
       })
       .on('broadcast', { event: S2C.WORLD_TICK }, (msg) => {
@@ -85,9 +83,9 @@ export class GameClient {
     await this.fetchWorldState();
   }
 
-  private async fetchWorldState(): Promise<boolean> {
+  async fetchWorldState(): Promise<boolean> {
     try {
-      const res = await fetch(`${this.serverUrl}/api/world/state?worldId=${encodeURIComponent(this.currentWorldId)}`);
+      const res = await fetch(`${this.serverUrl}/api/world/state`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json() as WorldStatePayload;
       this.callbacks.onWorldState(data.world);
@@ -96,12 +94,6 @@ export class GameClient {
       console.error('Failed to fetch world state:', err);
       return false;
     }
-  }
-
-  /** Switch to the world picked in the lobby and load its map. */
-  async setWorld(worldId: string): Promise<boolean> {
-    this.currentWorldId = worldId;
-    return this.fetchWorldState();
   }
 
   private async subscribeToCityChannel(cityId: string): Promise<void> {
@@ -175,9 +167,9 @@ export class GameClient {
     return res.json();
   }
 
-  async claimPlot(position: WorldPosition, cityName: string, playerName: string, playerId?: string): Promise<void> {
+  async claimPlot(siteId: string, cityName: string, playerName: string, playerId?: string): Promise<void> {
     const result = await this.post('/api/world/claim', {
-      position, cityName, playerName, playerId, worldId: this.currentWorldId,
+      siteId, cityName, playerName, playerId,
     });
     if (result.success && result.cityId) {
       // The server broadcasts the new city's state before we can subscribe to
@@ -185,16 +177,8 @@ export class GameClient {
       // then ask for the state again) or the player is left on the world map.
       await this.joinCity(result.cityId, playerName, playerId);
     } else if (!result.success) {
+      await this.fetchWorldState();
       this.callbacks.onError({ message: result.error || 'Failed to claim plot', code: 'CLAIM_FAILED' });
-    }
-  }
-
-  async createCity(cityName: string, playerName: string, playerId?: string): Promise<void> {
-    const result = await this.post('/api/city/create', { cityName, playerName, playerId });
-    if (result.success && result.cityId) {
-      await this.joinCity(result.cityId, playerName, playerId);
-    } else if (!result.success) {
-      this.callbacks.onError({ message: result.error || 'Failed to create city', code: 'CREATE_FAILED' });
     }
   }
 
@@ -281,7 +265,7 @@ export class GameClient {
   }
 
   async setGameSpeed(speed: number, playerId?: string): Promise<void> {
-    await this.post('/api/city/game-speed', { speed, playerId, worldId: this.currentWorldId });
+    await this.post('/api/city/game-speed', { speed, playerId });
   }
 
   async leave(playerId?: string): Promise<void> {

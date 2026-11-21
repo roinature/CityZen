@@ -55,7 +55,7 @@ export class GameRoom {
   private persistedRevision?: number;
 
   constructor(id: string, name: string, ownerId: string, ownerName: string, existingState?: CityState,
-    private collectBroadcast?: CityBroadcast,
+    private collectBroadcast?: CityBroadcast, siteId?: string,
   ) {
     this.id = id;
     this.ownerName = ownerName;
@@ -64,7 +64,8 @@ export class GameRoom {
       id,
       name,
       ownerId,
-      ...createStarterLayout(id, ownerId),
+      siteId,
+      ...createStarterLayout(id, ownerId, siteId),
       resources: { ...INITIAL_RESOURCES },
       clock: createInitialClock(),
       tick: 0,
@@ -392,7 +393,7 @@ export class GameRoom {
   restart(): void {
     this.state = {
       ...this.state,
-      ...createStarterLayout(this.id, this.state.ownerId),
+      ...createStarterLayout(this.id, this.state.ownerId, this.state.siteId),
       resources: { ...INITIAL_RESOURCES },
       clock: createInitialClock(),
       tick: 0,

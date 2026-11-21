@@ -39,6 +39,7 @@ model World {
 
 /// City - metadata, resources, and clock (no grid blob)
 model City {
+  siteId      String?  @unique
   id        String   @id
   name      String
   ownerId   String

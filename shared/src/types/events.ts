@@ -5,7 +5,7 @@ import type { ResourceState, PopulationSummary } from './resources.js';
 import type { PlacedBuilding } from './building.js';
 import type { Player } from './player.js';
 import type { GameClock } from './time.js';
-import type { WorldState, WorldPosition } from './world.js';
+import type { WorldState } from './world.js';
 
 // Client -> Server event names
 export const C2S = {
@@ -55,11 +55,11 @@ export interface CreateCityPayload {
 }
 
 export interface ClaimPlotPayload {
-  position: WorldPosition;
+  siteId: string;
   cityName: string;
   playerName: string;
   playerId?: string;
-  /** World to claim the plot in (defaults to the default world). */
+  /** Older clients may explicitly request the default world. */
   worldId?: string;
 }
 

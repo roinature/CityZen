@@ -127,3 +127,4 @@ export {
   findMatchingConnections,
   findAdjacentCity
 } from './logic/edgeConnections.js';
+export * from './terrain/sites.js';

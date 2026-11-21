@@ -1,12 +1,10 @@
-import { v4 as uuid } from 'uuid';
 import { Router, type Request, type Response } from 'express';
 import { adminAuth } from '../middleware/adminAuth.js';
 import { ADMIN_PASSWORD } from '../config.js';
 import type { RoomManager } from '../game/RoomManager.js';
 import type { WorldManager } from '../game/WorldManager.js';
 import type { PrismaClient } from '../generated/prisma/index.js';
-import { generateCityName, type CitySize } from '../game/CityGenerator.js';
-import { WORLD_MAP_SIZE, calculateEdgeConnections, createStarterLayout, type WorldPosition } from '@cityzen/shared';
+import { calculateEdgeConnections, createStarterLayout } from '@cityzen/shared';
 
 function paramId(req: Request): string {
   return req.params.id as string;
@@ -67,7 +65,7 @@ export function createAdminRoutes(
       const [playerCount, cityCount, worldCount, messageCount, buildingCount] = await Promise.all([
         prisma.player.count(),
         prisma.city.count(),
-        prisma.world.count(),
+        prisma.world.count({ where: { id: 'default' } }),
         prisma.gameMessage.count(),
         prisma.building.count(),
       ]);
@@ -293,18 +291,20 @@ export function createAdminRoutes(
       // Stop active room first
       roomManager.removeRoom(cityId);
 
-      // Remove from world state
+      await prisma.$transaction(async tx => {
+        await tx.$executeRaw`
+          UPDATE "World" SET cities = (
+            SELECT COALESCE(jsonb_agg(entry ORDER BY ord), '[]'::jsonb)
+            FROM jsonb_array_elements(cities) WITH ORDINALITY AS c(entry, ord)
+            WHERE entry->>'cityId' <> ${cityId}
+          ) WHERE cities @> ${JSON.stringify([{ cityId }])}::jsonb
+        `;
+        await tx.city.delete({ where: { id: cityId } });
+      });
       const worldInstance = worldManager.findWorldForCity(cityId);
       if (worldInstance) {
-        worldInstance.state.cities = worldInstance.state.cities.filter(
-          (c) => c.cityId !== cityId
-        );
-        worldInstance.state.updatedAt = Date.now();
-        await worldManager.save(worldInstance.state.id);
+        worldInstance.state.cities = worldInstance.state.cities.filter(city => city.cityId !== cityId);
       }
-
-      // Delete from DB (buildings cascade)
-      await prisma.city.delete({ where: { id: cityId } });
 
       res.json({ success: true });
     } catch {
@@ -316,142 +316,10 @@ export function createAdminRoutes(
 
   router.get('/worlds', async (_req: Request, res: Response) => {
     try {
-      const worlds = await prisma.world.findMany({ orderBy: { createdAt: 'desc' } });
+      const worlds = await prisma.world.findMany({ where: { id: 'default' } });
       res.json({ worlds });
     } catch {
       res.status(500).json({ error: 'Failed to fetch worlds' });
-    }
-  });
-
-  router.patch('/worlds/:id', async (req: Request, res: Response) => {
-    try {
-      const data: Record<string, any> = {};
-      if (req.body.name !== undefined) data.name = String(req.body.name);
-      if (req.body.gridSize !== undefined) data.gridSize = Number(req.body.gridSize);
-      if (req.body.maxCities !== undefined) data.maxCities = Number(req.body.maxCities);
-
-      const world = await prisma.world.update({ where: { id: paramId(req) }, data });
-      res.json({ success: true, world });
-    } catch {
-      res.status(500).json({ error: 'Failed to update world' });
-    }
-  });
-
-  // ── World Generation ───────────────────────────────────
-
-  const generationProgress = new Map<string, {
-    status: 'running' | 'completed' | 'failed';
-    total: number;
-    completed: number;
-    currentCity: string;
-    error?: string;
-    startedAt: number;
-  }>();
-
-  router.post('/generate-world', async (req: Request, res: Response) => {
-    try {
-      const { worldId, cityCount, cityNames, pattern, clearExisting, citySize } = req.body;
-      const targetWorldId = worldId || 'default';
-      const validSizes: CitySize[] = ['small', 'medium', 'large'];
-      const resolvedSize: CitySize = validSizes.includes(citySize) ? citySize : 'medium';
-      const count = Math.min(Math.max(1, cityCount || 4), 64);
-
-      // Clear existing cities if requested
-      if (clearExisting) {
-        await worldManager.clearWorldCities(targetWorldId);
-      }
-
-      // Find available plots
-      const available: WorldPosition[] = [];
-      for (let wx = 0; wx < WORLD_MAP_SIZE; wx++) {
-        for (let wz = 0; wz < WORLD_MAP_SIZE; wz++) {
-          if (worldManager.isPlotAvailable({ wx, wz }, targetWorldId)) {
-            available.push({ wx, wz });
-          }
-        }
-      }
-
-      if (available.length === 0) {
-        res.json({ success: false, error: 'No available plots in world' });
-        return;
-      }
-
-      // Sort by pattern
-      const center = Math.floor(WORLD_MAP_SIZE / 2);
-      if (pattern === 'cluster') {
-        available.sort((a, b) => {
-          const distA = Math.abs(a.wx - center) + Math.abs(a.wz - center);
-          const distB = Math.abs(b.wx - center) + Math.abs(b.wz - center);
-          return distA - distB;
-        });
-      } else if (pattern === 'spread') {
-        // Shuffle for spread distribution
-        for (let i = available.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [available[i], available[j]] = [available[j], available[i]];
-        }
-      }
-
-      // Build city configs
-      const parsedNames: string[] = Array.isArray(cityNames) ? cityNames : [];
-      const toGenerate = Math.min(count, available.length);
-      const cityConfigs: Array<{ position: WorldPosition; name: string; citySize?: CitySize }> = [];
-      for (let i = 0; i < toGenerate; i++) {
-        cityConfigs.push({
-          position: available[i],
-          name: parsedNames[i] || generateCityName(),
-          citySize: resolvedSize,
-        });
-      }
-
-      const generationId = uuid();
-      generationProgress.set(generationId, {
-        status: 'running',
-        total: cityConfigs.length,
-        completed: 0,
-        currentCity: cityConfigs[0].name,
-        startedAt: Date.now(),
-      });
-
-      res.json({ success: true, generationId, totalCities: cityConfigs.length });
-
-      // Run generation in background
-      worldManager.generateWorld(
-        targetWorldId,
-        cityConfigs,
-        (completed, total, cityName) => {
-          const progress = generationProgress.get(generationId);
-          if (progress) {
-            progress.completed = completed;
-            progress.currentCity = cityName;
-            if (completed >= total) {
-              progress.status = 'completed';
-            }
-          }
-        },
-      ).catch(err => {
-        const progress = generationProgress.get(generationId);
-        if (progress) {
-          progress.status = 'failed';
-          progress.error = String(err);
-        }
-      });
-    } catch {
-      res.status(500).json({ error: 'Failed to start world generation' });
-    }
-  });
-
-  router.get('/generate-world/progress/:id', (req: Request, res: Response) => {
-    const progress = generationProgress.get(paramId(req));
-    if (!progress) {
-      res.status(404).json({ error: 'Generation not found' });
-      return;
-    }
-    res.json(progress);
-
-    // Clean up completed/failed entries after 5 minutes
-    if (progress.status !== 'running') {
-      setTimeout(() => generationProgress.delete(paramId(req)), 300000);
     }
   });
 

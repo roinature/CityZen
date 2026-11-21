@@ -98,7 +98,7 @@ const uiRoot = document.getElementById('ui-root')!;
 const sceneManager = new SceneManager(canvas);
 const cameraController = new CameraController(sceneManager);
 const lighting = setupLighting(sceneManager.scene);
-const entranceRoad = createTerrain(sceneManager.scene);
+const { entranceRoad, setSite } = createTerrain(sceneManager.scene);
 const gridHelper = createGridOverlay(sceneManager.scene);
 const edgeRoadIndicator = new EdgeRoadIndicator(sceneManager.scene);
 
@@ -323,6 +323,7 @@ GameClient.create(SERVER_URL, {
     if (cityState?.id !== city.id || (city.tick === 0 && cityState.tick > 0)) {
       cameraController.frameCity(city);
     }
+    setSite(city.siteId);
     cityState = city;
     buildMode.setCityState(city);
     cityRenderer.syncState(city);
@@ -573,45 +574,27 @@ buildMode.onEdgeRoadClick = (direction: EdgeDirection, position: number) => {
   }
 };
 
-// --- Lobby (name entry + world selection) ---
+// --- Earth lobby ---
 const lobby = new Lobby(uiRoot, {
-  onEnterWorld: async (playerName, worldId) => {
+  onEnterWorld: async (playerName) => {
     currentPlayerName = playerName;
     if (!gameClient) {
       throw new Error('Game client is not connected yet');
     }
-    // Load the map of the world that was actually selected
-    const loaded = await gameClient.setWorld(worldId);
+    const loaded = await gameClient.fetchWorldState();
     if (!loaded) {
-      throw new Error(`Could not load world ${worldId}`);
+      throw new Error('Could not load Earth');
     }
     lobby.hide();
     worldMap.show();
   },
-  fetchWorlds: async () => {
-    const res = await fetch(`${SERVER_URL}/api/worlds`);
-    return res.json();
-  },
-  onCreateWorld: async (name) => {
-    const res = await fetch(`${SERVER_URL}/api/worlds/create`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name }),
-    });
-    const data = await res.json();
-    if (data.success) return { worldId: data.worldId };
-    console.error('Create world failed:', data.error);
-    return null;
-  },
 });
-
-lobby.refreshWorlds();
 
 // --- World Map ---
 const worldMap = new WorldMap(uiRoot, {
-  onClaimPlot: (position, cityName) => {
+  onClaimPlot: (siteId, cityName) => {
     beginCityLoad(`Founding ${cityName}…`);
-    gameClient.claimPlot(position, cityName, currentPlayerName, playerId).catch((err) => {
+    gameClient.claimPlot(siteId, cityName, currentPlayerName, playerId).catch((err) => {
       console.error('Claim failed:', err);
       abortCityLoad('Could not reach the server');
     });
