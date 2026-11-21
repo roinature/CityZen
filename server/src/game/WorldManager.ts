@@ -29,6 +29,9 @@ interface WorldInstance {
   populationManager: PopulationManager;
   saveInterval?: ReturnType<typeof setInterval>;
   saving?: boolean;
+  /** False while the residents are still loading from the database. */
+  populationLoaded: boolean;
+  stopped?: boolean;
 }
 
 export class WorldManager {
@@ -47,51 +50,6 @@ export class WorldManager {
 
   private async startWorldInstance(state: WorldState, isNew: boolean): Promise<WorldInstance> {
     const populationManager = new PopulationManager();
-
-    if (isNew) {
-      populationManager.initWorldPopulation(
-        state.initialPopulation,
-        state.clock.gameTimeMs,
-      );
-      state.totalPopulation = populationManager.getTotalPopulation();
-    } else {
-      const popData = await loadPopulationData(state.id);
-      if (popData && popData.length > 0) {
-        const restored = PopulationManager.deserialize(popData);
-        // Copy restored data into our instance
-        Object.assign(populationManager, restored);
-        state.totalPopulation = populationManager.getTotalPopulation();
-        console.log(`Restored ${populationManager.getTotalPopulation()} persons for world "${state.name}"`);
-      } else {
-        populationManager.initWorldPopulation(
-          state.initialPopulation,
-          state.clock.gameTimeMs,
-        );
-        state.totalPopulation = populationManager.getTotalPopulation();
-      }
-    }
-
-    // Pre-load rooms for existing cities so the tick engine can update them.
-    // Also re-seed any cities that lost their population assignments
-    // (e.g. populationData column was added after cities were created).
-    if (!isNew) {
-      // Load the cities in the background. Waiting for all of them here made
-      // start-up take about a minute on a remote database, and every request
-      // hung until it finished. A city someone joins before its turn is loaded
-      // on demand (getOrLoadRoom de-duplicates), and the tick engine simply
-      // picks rooms up as they arrive.
-      void this.preloadRooms(state);
-      for (const city of state.cities) {
-        if (populationManager.getCityPopulationCount(city.cityId) === 0 && populationManager.getUnassignedCount() > 0) {
-          const seeded = populationManager.seedCity(city.cityId, INITIAL_CITY_SEED);
-          city.population = seeded.length;
-          if (seeded.length > 0) {
-            console.log(`Re-seeded city "${city.name}" with ${seeded.length} people`);
-          }
-        }
-      }
-    }
-
     const tickEngine = new WorldTickEngine(
       state,
       () => this.roomManager.getActiveRooms().filter(r => {
@@ -100,10 +58,26 @@ export class WorldManager {
       }),
       populationManager,
     );
-    tickEngine.start();
-
-    const instance: WorldInstance = { state, tickEngine, populationManager };
+    const instance: WorldInstance = { state, tickEngine, populationManager, populationLoaded: false };
     this.worlds.set(state.id, instance);
+
+    if (isNew) {
+      populationManager.initWorldPopulation(state.initialPopulation, state.clock.gameTimeMs);
+      state.totalPopulation = populationManager.getTotalPopulation();
+      this.finishPopulationLoad(instance);
+    } else {
+      // Load the cities in the background. Waiting for all of them here made
+      // start-up take about a minute on a remote database, and every request
+      // hung until it finished. A city someone joins before its turn is loaded
+      // on demand (getOrLoadRoom de-duplicates), and the tick engine simply
+      // picks rooms up as they arrive.
+      void this.preloadRooms(state);
+      // The residents are one large JSON value that can take minutes to arrive
+      // over a slow link, so they load in the background too. Until then the
+      // world (cities, clock, total population) is served from the world row,
+      // the tick engine stays paused, and saves leave the stored people alone.
+      void this.loadPopulationInBackground(instance);
+    }
 
     // Persist the people and the world clock while someone is playing. Cities
     // auto-save themselves, but the residents live in the world record: without
@@ -116,12 +90,58 @@ export class WorldManager {
       if (hasPlayers && !instance.saving) void this.save(state.id, IS_SERVERLESS);
     }, AUTO_SAVE_INTERVAL_MS);
 
-    console.log(
-      `World loaded: "${state.name}" (${state.id}) with ${state.cities.length} cities, ` +
-      `${populationManager.getTotalPopulation()} people (${populationManager.getUnassignedCount()} unassigned)`,
-    );
-
+    console.log(`World loaded: "${state.name}" (${state.id}) with ${state.cities.length} cities`);
     return instance;
+  }
+
+  private async loadPopulationInBackground(instance: WorldInstance): Promise<void> {
+    const { state, populationManager } = instance;
+    const started = Date.now();
+    for (let attempt = 1; !instance.stopped; attempt++) {
+      try {
+        const popData = await loadPopulationData(state.id);
+        if (instance.stopped) return;
+        if (popData && popData.length > 0) {
+          // Copy restored data into the instance the tick engine already holds
+          Object.assign(populationManager, PopulationManager.deserialize(popData));
+          console.log(
+            `Restored ${populationManager.getTotalPopulation()} persons for world "${state.name}" ` +
+            `in ${((Date.now() - started) / 1000).toFixed(1)}s`,
+          );
+        } else {
+          populationManager.initWorldPopulation(state.initialPopulation, state.clock.gameTimeMs);
+        }
+        this.finishPopulationLoad(instance);
+        return;
+      } catch (err) {
+        const delayMs = Math.min(60_000, 5_000 * attempt);
+        console.error(`Failed to load population for world "${state.name}" (retrying in ${delayMs / 1000}s):`, err);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+
+  private finishPopulationLoad(instance: WorldInstance): void {
+    const { state, populationManager } = instance;
+    // Re-seed cities that have no residents: ones founded while the people
+    // were still loading, or ones that lost their population assignments
+    // (e.g. populationData column was added after cities were created).
+    for (const city of state.cities) {
+      if (populationManager.getCityPopulationCount(city.cityId) === 0 && populationManager.getUnassignedCount() > 0) {
+        const seeded = populationManager.seedCity(city.cityId, INITIAL_CITY_SEED);
+        city.population = seeded.length;
+        if (seeded.length > 0) {
+          console.log(`Re-seeded city "${city.name}" with ${seeded.length} people`);
+        }
+      }
+    }
+    state.totalPopulation = populationManager.getTotalPopulation();
+    instance.populationLoaded = true;
+    if (!instance.stopped) instance.tickEngine.start();
+    console.log(
+      `Population ready for world "${state.name}": ${populationManager.getTotalPopulation()} people ` +
+      `(${populationManager.getUnassignedCount()} unassigned)`,
+    );
   }
 
   private async preloadRooms(state: WorldState): Promise<void> {
@@ -215,7 +235,11 @@ export class WorldManager {
     if (revision === null) return { success: false, error: 'Another city already occupies this site' };
     room.syncPersistedState({ ...room.state, updatedAt: revision });
     this.roomManager.activate(room);
-    entry.population = instance.populationManager.seedCity(room.id, INITIAL_CITY_SEED).length;
+    // While the people are still loading the city starts empty; it is seeded
+    // as soon as they arrive (see finishPopulationLoad).
+    entry.population = instance.populationLoaded
+      ? instance.populationManager.seedCity(room.id, INITIAL_CITY_SEED).length
+      : 0;
     instance.state.cities = [...instance.state.cities.filter(city => city.cityId !== entry.cityId), entry];
     instance.state.updatedAt = Date.now();
     await this.save('default', IS_SERVERLESS);
@@ -266,7 +290,9 @@ export class WorldManager {
     // Explicit saves (plot claims etc.) always go through; overlapping ones just queue in the DB.
     instance.saving = true;
     try {
-      const populationData = instance.populationManager.serialize();
+      // Never overwrite the stored people with the empty placeholder that
+      // exists while they are still loading.
+      const populationData = instance.populationLoaded ? instance.populationManager.serialize() : undefined;
       await saveWorldState(instance.state, populationData, preserveCities);
     } catch (err) {
       console.error(`Failed to save world state (${worldId}):`, err);
@@ -277,6 +303,7 @@ export class WorldManager {
 
   shutdown(): void {
     for (const instance of this.worlds.values()) {
+      instance.stopped = true;
       instance.tickEngine.stop();
       if (instance.saveInterval) clearInterval(instance.saveInterval);
     }

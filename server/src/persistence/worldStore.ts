@@ -14,7 +14,8 @@ export async function saveWorldState(
       data: {
         totalPopulation: state.totalPopulation,
         clock: state.clock as unknown as Prisma.InputJsonValue,
-        populationData: (populationData ?? []) as unknown as Prisma.InputJsonValue,
+        // Omitted while the people are still loading, so the stored ones are kept
+        ...(populationData && { populationData: populationData as unknown as Prisma.InputJsonValue }),
       },
     });
     // Keep sites claimed by another request while this snapshot was in flight.
@@ -53,6 +54,8 @@ export async function writeWorldCityEdges(
 export async function loadWorldState(worldId: string): Promise<WorldState | null> {
   const world = await prisma.world.findUnique({
     where: { id: worldId },
+    // The residents are large and slow to fetch; loadPopulationData gets them separately.
+    omit: { populationData: true },
   });
 
   if (!world) return null;
