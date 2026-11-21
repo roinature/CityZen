@@ -1,6 +1,8 @@
 import * as THREE from 'three';
-import { clamp } from '@cityzen/shared';
+import { CELL_SIZE, DEFAULT_GRID_SIZE, clamp, getEffectiveSize, getStarterEntranceX, type CityState } from '@cityzen/shared';
 import type { SceneManager } from './SceneManager.js';
+
+const START_ANGLE = Math.PI / 4;
 
 export class CameraController {
   private sceneManager: SceneManager;
@@ -8,17 +10,19 @@ export class CameraController {
   private panSpeed = 30;
   private minZoom = 5;
   private maxZoom = 120;
+  private openingZoom = 50;
   private targetZoom: number;
   private readonly zoomAnimSpeed = 12;
 
   // Camera target (the point the camera looks at)
-  private target = new THREE.Vector3(32, 0, 32);
+  private target = new THREE.Vector3(DEFAULT_GRID_SIZE * CELL_SIZE / 2, 0, DEFAULT_GRID_SIZE * CELL_SIZE / 2);
+  private plotSize = DEFAULT_GRID_SIZE * CELL_SIZE;
   // Camera offset from target (computed from rotation)
   private offset = new THREE.Vector3(50, 50, 50);
 
   // Rotation around Y axis (radians). PI/4 = initial isometric view
-  private rotationAngle = Math.PI / 4;
-  private targetRotation = Math.PI / 4;
+  private rotationAngle = START_ANGLE;
+  private targetRotation = START_ANGLE;
   private readonly rotationAnimSpeed = 5;
   private readonly orbitRadius = 50 * Math.SQRT2; // ~70.71, same XZ distance as original (50,50)
   private readonly orbitHeight = 50;
@@ -37,6 +41,7 @@ export class CameraController {
     this.targetZoom = sceneManager.getFrustumSize();
 
     window.addEventListener('keydown', (e) => {
+      if (e.target instanceof Element && e.target.closest('input, select, textarea, [contenteditable="true"]')) return;
       this.keys.add(e.code);
       if (!e.repeat) {
         if (e.code === 'KeyQ') this.targetRotation -= Math.PI / 2;
@@ -55,6 +60,41 @@ export class CameraController {
       // Prevent context menu on right-click when used for panning
       if (this.isPanning) e.preventDefault();
     });
+  }
+
+  frameCity(city: CityState): void {
+    this.plotSize = city.grid.length * CELL_SIZE;
+    this.keys.clear();
+    this.stopPanning();
+    this.rotationAngle = START_ANGLE;
+    this.targetRotation = START_ANGLE;
+
+    let span = 0;
+    if (city.buildings.length === 0) {
+      // Start near the foreground edge with space to lay out the first streets.
+      const entranceX = (getStarterEntranceX(city.grid.length) + 0.5) * CELL_SIZE;
+      this.target.set(entranceX, 0, this.plotSize * 0.87);
+    } else {
+      let minX = this.plotSize, minZ = this.plotSize, maxX = 0, maxZ = 0;
+      for (const building of city.buildings) {
+        const { x, z } = building.position;
+        const { w, d } = getEffectiveSize(building.type, building.orientation);
+        minX = Math.min(minX, x * CELL_SIZE);
+        minZ = Math.min(minZ, z * CELL_SIZE);
+        maxX = Math.max(maxX, (x + w) * CELL_SIZE);
+        maxZ = Math.max(maxZ, (z + d) * CELL_SIZE);
+      }
+      this.target.set((minX + maxX) / 2, 0, (minZ + maxZ) / 2);
+      span = ((maxX - minX) + (maxZ - minZ)) / Math.SQRT2;
+    }
+
+    const aspect = window.innerWidth / window.innerHeight;
+    const groundTilt = this.orbitHeight / Math.hypot(this.orbitRadius, this.orbitHeight);
+    // Reserve room for the status bar, dock, and the tops of buildings.
+    this.openingZoom = Math.max(30, span * groundTilt + 16, (span + 10) / aspect);
+    this.targetZoom = this.openingZoom;
+    this.sceneManager.setFrustumSize(this.targetZoom);
+    this.update(0);
   }
 
   update(deltaTime: number): void {
@@ -85,6 +125,8 @@ export class CameraController {
       this.orbitHeight,
       this.orbitRadius * Math.cos(this.rotationAngle),
     );
+    // Keep the orthographic camera above the ground across the whole viewport at wide zooms.
+    this.offset.multiplyScalar(Math.max(1, this.sceneManager.getFrustumSize() / 90));
 
     // Pan directions relative to current camera rotation
     const forward = new THREE.Vector3(
@@ -109,13 +151,14 @@ export class CameraController {
     }
 
     // Clamp target to grid bounds (with some margin)
-    this.target.x = clamp(this.target.x, -10, 74);
-    this.target.z = clamp(this.target.z, -10, 74);
+    this.target.x = clamp(this.target.x, -10, this.plotSize + 10);
+    this.target.z = clamp(this.target.z, -10, this.plotSize + 10);
 
     // Update camera position and lookAt
     const camera = this.sceneManager.camera;
     camera.position.copy(this.target).add(this.offset);
     camera.lookAt(this.target);
+    camera.updateMatrixWorld();
   }
 
   setPanSpeed(speed: number): void {
@@ -131,12 +174,13 @@ export class CameraController {
   }
 
   private onWheel(e: WheelEvent): void {
+    if ((e.target as HTMLElement).closest('#ui-root')) return;
     e.preventDefault();
     // Proportional zoom: each notch scales the view by the same factor at any
     // zoom level, and trackpads (many small deltas) stay smooth.
     const pixels = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
     const factor = Math.exp(clamp(pixels, -200, 200) * 0.0015);
-    this.targetZoom = clamp(this.targetZoom * factor, this.minZoom, this.maxZoom);
+    this.targetZoom = clamp(this.targetZoom * factor, this.minZoom, Math.max(this.maxZoom, this.openingZoom));
   }
 
   private onMouseDown(e: MouseEvent): void {
@@ -172,13 +216,13 @@ export class CameraController {
       Math.cos(this.rotationAngle), 0, -Math.sin(this.rotationAngle),
     );
 
-    // Move in opposite direction of drag
+    // Move the camera so the board follows the pointer in screen space.
     this.target.addScaledVector(right, -deltaX * panAmount);
-    this.target.addScaledVector(forward, -deltaY * panAmount);
+    this.target.addScaledVector(forward, deltaY * panAmount);
 
     // Clamp target to grid bounds
-    this.target.x = clamp(this.target.x, -10, 74);
-    this.target.z = clamp(this.target.z, -10, 74);
+    this.target.x = clamp(this.target.x, -10, this.plotSize + 10);
+    this.target.z = clamp(this.target.z, -10, this.plotSize + 10);
   }
 
   private onMouseUp(e: MouseEvent): void {

@@ -6,7 +6,7 @@ import type { RoomManager } from '../game/RoomManager.js';
 import type { WorldManager } from '../game/WorldManager.js';
 import type { PrismaClient } from '../generated/prisma/index.js';
 import { generateCityName, type CitySize } from '../game/CityGenerator.js';
-import { WORLD_MAP_SIZE, type WorldPosition } from '@cityzen/shared';
+import { WORLD_MAP_SIZE, calculateEdgeConnections, createStarterLayout, type WorldPosition } from '@cityzen/shared';
 
 function paramId(req: Request): string {
   return req.params.id as string;
@@ -248,18 +248,37 @@ export function createAdminRoutes(
       const room = roomManager.getRoom(id);
       if (room) {
         room.restart();
+        worldManager.updateCityEdgeConnections(id, calculateEdgeConnections(room.state.buildings));
         res.json({ success: true, method: 'room' });
       } else {
-        await prisma.city.update({
-          where: { id },
-          data: {
-            money: 5000, population: 0, happiness: 50, taxRate: 10,
-            demandResidential: 0.5, demandCommercial: 0, demandIndustrial: 0.3,
-            clockGameTimeMs: 0, clockSpeed: 1, clockGameDay: 0, clockGameYear: 1,
-            tick: 0,
-          },
+        const buildings = await prisma.$transaction(async (tx) => {
+          const { ownerId } = await tx.city.update({
+            where: { id },
+            data: {
+              money: 5000, population: 0, happiness: 50, taxRate: 10,
+              demandResidential: 0.5, demandCommercial: 0, demandIndustrial: 0.3,
+              clockGameTimeMs: 0, clockSpeed: 1, clockGameDay: 0, clockGameYear: 1,
+              tick: 0,
+            },
+            select: { ownerId: true },
+          });
+          const { buildings } = createStarterLayout(id, ownerId);
+          await tx.building.deleteMany({ where: { cityId: id } });
+          await tx.building.createMany({
+            data: buildings.map(building => ({
+              id: building.id,
+              cityId: id,
+              type: building.type,
+              positionX: building.position.x,
+              positionZ: building.position.z,
+              placedBy: building.placedBy,
+              placedAt: building.placedAt,
+              orientation: building.orientation,
+            })),
+          });
+          return buildings;
         });
-        await prisma.building.deleteMany({ where: { cityId: id } });
+        worldManager.updateCityEdgeConnections(id, calculateEdgeConnections(buildings));
         res.json({ success: true, method: 'db' });
       }
     } catch {

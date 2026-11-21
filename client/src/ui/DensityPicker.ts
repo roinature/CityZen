@@ -3,13 +3,16 @@ import { ZoneDensity, ZONE_DENSITY_COSTS } from '@cityzen/shared';
 export class DensityPicker {
   private container: HTMLDivElement;
   private onPick: ((density: ZoneDensity) => void) | null = null;
-  private closeHandler: ((e: MouseEvent) => void) | null = null;
+  private onOutsideClick = (event: MouseEvent): void => {
+    if (!this.container.contains(event.target as Node)) this.hide();
+  };
 
   constructor(parent: HTMLElement) {
     this.container = document.createElement('div');
     this.container.className = 'density-picker';
     parent.appendChild(this.container);
     this.render();
+    window.addEventListener('resize', () => this.hide());
   }
 
   private render(): void {
@@ -47,28 +50,19 @@ export class DensityPicker {
     this.onPick = onPick;
     this.container.style.display = 'flex';
 
-    // Position to the left of the anchor button
     const rect = anchorElement.getBoundingClientRect();
-    this.container.style.top = `${rect.top}px`;
-    this.container.style.right = `${window.innerWidth - rect.left + 8}px`;
-
-    // Close on outside click (delayed to avoid immediate close from the triggering click)
-    requestAnimationFrame(() => {
-      this.closeHandler = (e: MouseEvent) => {
-        if (!this.container.contains(e.target as Node)) {
-          this.hide();
-        }
-      };
-      document.addEventListener('click', this.closeHandler);
-    });
+    const width = this.container.offsetWidth;
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+    this.container.style.left = `${left}px`;
+    this.container.style.bottom = `${window.innerHeight - rect.top + 8}px`;
+    document.addEventListener('click', this.onOutsideClick);
   }
 
-  hide(): void {
+  hide(): boolean {
+    if (!this.onPick) return false;
     this.container.style.display = 'none';
     this.onPick = null;
-    if (this.closeHandler) {
-      document.removeEventListener('click', this.closeHandler);
-      this.closeHandler = null;
-    }
+    document.removeEventListener('click', this.onOutsideClick);
+    return true;
   }
 }

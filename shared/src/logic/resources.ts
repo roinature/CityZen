@@ -2,30 +2,51 @@ import type { CityState } from '../types/city.js';
 import { BUILDING_DEFS, getZoneLevelDef } from '../constants/buildings.js';
 import { isZone, type ZoneType } from '../types/building.js';
 import {
-  TAX_PER_PERSON, DEFICIT_MASLOW_PENALTY_RATE, MIN_BUDGET_MULTIPLIER,
+  TAX_PER_PERSON, TAX_PER_PERSON_FALLBACK, DEFICIT_MASLOW_PENALTY_RATE, MIN_BUDGET_MULTIPLIER,
   TAX_COMFORT_RATE, TAX_MASLOW_PENALTY_PER_POINT,
+  UNEMPLOYED_INCOME_SHARE, BUSINESS_INCOME_PER_JOB,
 } from '../constants/economy.js';
 import { LifeStage } from '../types/person.js';
+import { calculateLaborStats } from './labor.js';
 
-export function calculateTaxRevenue(state: CityState): number {
-  const summary = state.resources.populationSummary;
-  if (summary) {
-    // Demographic-based tax: each life stage contributes differently
-    const taxableIncome =
-      summary.children * TAX_PER_PERSON[LifeStage.CHILD] +
-      summary.teens * TAX_PER_PERSON[LifeStage.TEEN] +
-      summary.youngAdults * TAX_PER_PERSON[LifeStage.YOUNG_ADULT] +
-      summary.adults * TAX_PER_PERSON[LifeStage.ADULT] +
-      summary.elders * TAX_PER_PERSON[LifeStage.ELDER];
-    return Math.floor(taxableIncome * (state.resources.taxRate / 100));
-  }
-
-  // Legacy fallback
-  return Math.floor(state.resources.population * (state.resources.taxRate / 100));
+export interface TaxBreakdown {
+  /** Income tax paid by residents. */
+  residents: number;
+  /** Tax paid by shops and factories, per filled job. */
+  businesses: number;
+  total: number;
 }
 
 /**
- * Calculate budget penalty multiplier (0.2–1.0).
+ * Where the tax money comes from this tick.
+ *
+ * Residents pay on their income, which drops when they can't find work.
+ * Businesses pay per filled job, so commercial and industrial zones earn
+ * money directly once they have staff.
+ */
+export function calculateTaxBreakdown(state: CityState): TaxBreakdown {
+  const rate = state.resources.taxRate / 100;
+  const { employed, employmentRate } = calculateLaborStats(state);
+  const incomeFactor = UNEMPLOYED_INCOME_SHARE + (1 - UNEMPLOYED_INCOME_SHARE) * employmentRate;
+
+  const summary = state.resources.populationSummary;
+  const residentIncome = summary
+    ? (summary.youngAdults * TAX_PER_PERSON[LifeStage.YOUNG_ADULT] +
+        summary.adults * TAX_PER_PERSON[LifeStage.ADULT]) * incomeFactor +
+      summary.elders * TAX_PER_PERSON[LifeStage.ELDER]
+    : state.resources.population * TAX_PER_PERSON_FALLBACK * incomeFactor;
+
+  const residents = residentIncome * rate;
+  const businesses = employed * BUSINESS_INCOME_PER_JOB * rate;
+  return { residents, businesses, total: Math.floor(residents + businesses) };
+}
+
+export function calculateTaxRevenue(state: CityState): number {
+  return calculateTaxBreakdown(state).total;
+}
+
+/**
+ * Calculate budget penalty multiplier (0.5–1.0).
  * When money hits 0, infrastructure starts degrading.
  * Deeper deficit = lower multiplier = lower Maslow targets.
  */
@@ -37,7 +58,7 @@ export function calculateBudgetPenalty(money: number): number {
 }
 
 /**
- * Tax penalty multiplier (0.7–1.0) applied to Maslow targets.
+ * Tax penalty multiplier (0.55–1.0) applied to Maslow targets.
  * Taxes at or below the comfort rate are free; above it citizens get unhappier.
  */
 export function calculateTaxPenalty(taxRate: number): number {
@@ -46,7 +67,8 @@ export function calculateTaxPenalty(taxRate: number): number {
 }
 
 export function calculateMaintenance(state: CityState): number {
-  return state.buildings.reduce((sum, b) => {
+  // Road upkeep is fractional per tile; the city is billed in whole dollars.
+  return Math.round(state.buildings.reduce((sum, b) => {
     const def = BUILDING_DEFS[b.type];
     let maint = def?.effects?.maintenance ?? 0;
 
@@ -56,7 +78,7 @@ export function calculateMaintenance(state: CityState): number {
     }
 
     return sum + maint;
-  }, 0);
+  }, 0));
 }
 
 export function calculateNetIncome(state: CityState): number {

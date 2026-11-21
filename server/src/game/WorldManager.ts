@@ -9,6 +9,8 @@ import {
   INITIAL_CITY_SEED,
   DEFAULT_GRID_SIZE,
   INITIAL_RESOURCES,
+  AUTO_SAVE_INTERVAL_MS,
+  calculateEdgeConnections,
 } from '@cityzen/shared';
 import { RoomManager } from './RoomManager.js';
 import { WorldTickEngine } from './WorldTickEngine.js';
@@ -28,6 +30,8 @@ interface WorldInstance {
   state: WorldState;
   tickEngine: WorldTickEngine;
   populationManager: PopulationManager;
+  saveInterval?: ReturnType<typeof setInterval>;
+  saving?: boolean;
 }
 
 export class WorldManager {
@@ -74,8 +78,13 @@ export class WorldManager {
     // Also re-seed any cities that lost their population assignments
     // (e.g. populationData column was added after cities were created).
     if (!isNew) {
+      // Load the cities in the background. Waiting for all of them here made
+      // start-up take about a minute on a remote database, and every request
+      // hung until it finished. A city someone joins before its turn is loaded
+      // on demand (getOrLoadRoom de-duplicates), and the tick engine simply
+      // picks rooms up as they arrive.
+      void this.preloadRooms(state);
       for (const city of state.cities) {
-        await this.roomManager.getOrLoadRoom(city.cityId);
         if (populationManager.getCityPopulationCount(city.cityId) === 0 && populationManager.getUnassignedCount() > 0) {
           const seeded = populationManager.seedCity(city.cityId, INITIAL_CITY_SEED);
           city.population = seeded.length;
@@ -99,12 +108,40 @@ export class WorldManager {
     const instance: WorldInstance = { state, tickEngine, populationManager };
     this.worlds.set(state.id, instance);
 
+    // Persist the people and the world clock while someone is playing. Cities
+    // auto-save themselves, but the residents live in the world record: without
+    // this, everyone who moved in since the last plot claim was lost on restart
+    // and cities fell back to their founding population.
+    instance.saveInterval = setInterval(() => {
+      const hasPlayers = this.roomManager.getActiveRooms().some(
+        r => r.players.size > 0 && state.cities.some(c => c.cityId === r.id),
+      );
+      if (hasPlayers && !instance.saving) void this.save(state.id);
+    }, AUTO_SAVE_INTERVAL_MS);
+
     console.log(
       `World loaded: "${state.name}" (${state.id}) with ${state.cities.length} cities, ` +
       `${populationManager.getTotalPopulation()} people (${populationManager.getUnassignedCount()} unassigned)`,
     );
 
     return instance;
+  }
+
+  private async preloadRooms(state: WorldState): Promise<void> {
+    const LOAD_BATCH = 4;
+    const cityIds = state.cities.map(c => c.cityId);
+    const started = Date.now();
+    for (let i = 0; i < cityIds.length; i += LOAD_BATCH) {
+      await Promise.all(
+        cityIds.slice(i, i + LOAD_BATCH).map(id =>
+          this.roomManager.getOrLoadRoom(id).catch((err) => {
+            console.error(`Failed to preload city ${id} (will load when someone joins):`, err);
+            return null;
+          }),
+        ),
+      );
+    }
+    console.log(`Preloaded ${cityIds.length} cities for world "${state.name}" in ${((Date.now() - started) / 1000).toFixed(1)}s`);
   }
 
   // ── World CRUD ──────────────────────────────────────────────
@@ -222,6 +259,7 @@ export class WorldManager {
       position,
       population: seeded.length,
       happiness: 50,
+      edgeConnections: calculateEdgeConnections(room.state.buildings),
     };
     instance.state.cities.push(entry);
     instance.state.updatedAt = Date.now();
@@ -267,11 +305,15 @@ export class WorldManager {
   async save(worldId = 'default'): Promise<void> {
     const instance = this.worlds.get(worldId);
     if (!instance) return;
+    // Explicit saves (plot claims etc.) always go through; overlapping ones just queue in the DB.
+    instance.saving = true;
     try {
       const populationData = instance.populationManager.serialize();
       await saveWorldState(instance.state, populationData);
     } catch (err) {
       console.error(`Failed to save world state (${worldId}):`, err);
+    } finally {
+      instance.saving = false;
     }
   }
 
@@ -396,6 +438,7 @@ export class WorldManager {
   shutdown(): void {
     for (const instance of this.worlds.values()) {
       instance.tickEngine.stop();
+      if (instance.saveInterval) clearInterval(instance.saveInterval);
     }
   }
 }

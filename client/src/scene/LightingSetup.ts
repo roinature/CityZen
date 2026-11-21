@@ -20,10 +20,10 @@ interface LightPreset {
 }
 
 const DAY: LightPreset = {
-  sunIntensity: 1.0,
+  sunIntensity: 1.3,
   sunColor: new THREE.Color(0xffffff),
   sunHeight: 50,
-  ambientIntensity: 0.6,
+  ambientIntensity: 0.68,
   ambientColor: new THREE.Color(0x404060),
   hemiIntensity: 0.3,
   hemiSky: new THREE.Color(0x87ceeb),

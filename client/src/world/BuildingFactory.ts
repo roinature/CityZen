@@ -438,66 +438,36 @@ export class BuildingFactory {
     group.add(canopyNight);
   }
 
+  setZoneHighlight(group: THREE.Group, highlighted: boolean): void {
+    const ground = group.getObjectByName('zone-ground');
+    if (ground instanceof THREE.Mesh && ground.material instanceof THREE.MeshLambertMaterial) {
+      ground.material.opacity = highlighted ? 0.68 : 0.25;
+    }
+  }
+
   private createZone(group: THREE.Group, building: PlacedBuilding, populationRatio?: number): void {
     const def = BUILDING_DEFS[building.type];
     const w = def.size.w * CELL_SIZE;
     const d = def.size.d * CELL_SIZE;
     const level = building.developmentLevel ?? 0;
-    const zoneColor = new THREE.Color(def.color);
-
-    // Zone ground fill — darken for contrast against grass
-    const groundColor = zoneColor.clone().multiplyScalar(0.55);
     const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(w * 0.92, d * 0.92),
-      new THREE.MeshLambertMaterial({ color: groundColor, transparent: true, opacity: 0.75 }),
+      new THREE.PlaneGeometry(w * 0.98, d * 0.98),
+      new THREE.MeshLambertMaterial({
+        color: def.color,
+        transparent: true,
+        opacity: 0.25,
+        depthWrite: false,
+      }),
     );
+    ground.name = 'zone-ground';
     ground.rotation.x = -Math.PI / 2;
     ground.position.y = 0.015;
     ground.receiveShadow = true;
     group.add(ground);
 
-    // Bright colored border edges
-    const borderThickness = CELL_SIZE * 0.04;
-    const borderMat = new THREE.MeshBasicMaterial({ color: def.color });
-    const halfW = w * 0.46;
-    const halfD = d * 0.46;
-    const borderY = 0.02;
+    if (level === 0) return;
 
-    for (const side of [-1, 1]) {
-      const edgeNS = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.92, borderThickness), borderMat);
-      edgeNS.rotation.x = -Math.PI / 2;
-      edgeNS.position.set(0, borderY, side * halfD);
-      group.add(edgeNS);
-
-      const edgeEW = new THREE.Mesh(new THREE.PlaneGeometry(borderThickness, d * 0.92), borderMat);
-      edgeEW.rotation.x = -Math.PI / 2;
-      edgeEW.position.set(side * halfW, borderY, 0);
-      group.add(edgeEW);
-    }
-
-    if (level === 0) {
-      // Undeveloped: corner stakes
-      const stakeMat = new THREE.MeshLambertMaterial({ color: zoneColor.clone().multiplyScalar(0.8) });
-      const stakeH = 0.3;
-      for (const sx of [-1, 1]) {
-        for (const sz of [-1, 1]) {
-          const stake = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, stakeH, 4), stakeMat);
-          stake.position.set(sx * halfW, stakeH / 2, sz * halfD);
-          stake.castShadow = true;
-          group.add(stake);
-        }
-      }
-
-      // Diamond indicator in center
-      const indicator = new THREE.Mesh(
-        new THREE.PlaneGeometry(CELL_SIZE * 0.15, CELL_SIZE * 0.15),
-        new THREE.MeshBasicMaterial({ color: def.color }),
-      );
-      indicator.rotation.x = -Math.PI / 2;
-      indicator.rotation.z = Math.PI / 4;
-      indicator.position.y = 0.025;
-      group.add(indicator);
-    } else if (building.density) {
+    if (building.density) {
       // Multi-building rendering: multiple sub-buildings based on population
       this.createMultiZoneBuildings(group, building, level, populationRatio ?? 0);
     } else {

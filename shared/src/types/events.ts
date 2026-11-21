@@ -73,6 +73,15 @@ export interface DemolishPayload {
   position: Position;
 }
 
+export interface TakeLoanPayload {
+  amount: number;
+  termDays: number;
+}
+
+export interface RepayLoanPayload {
+  loanId: string;
+}
+
 export interface SetTaxRatePayload {
   taxRate: number;
 }

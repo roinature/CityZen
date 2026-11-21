@@ -1,8 +1,52 @@
 import prisma from './prismaClient.js';
-import type { CityState, PlacedBuilding, RoadOrientation } from '@cityzen/shared';
+import type { CityState, PlacedBuilding, RoadOrientation, Loan } from '@cityzen/shared';
 import { createEmptyGrid, BUILDING_DEFS, MaslowNeed, getEffectiveSize, BuildingType } from '@cityzen/shared';
 
+// Loans are stored in City.loans (JSONB), added by the 20261114000000_city_loans
+// migration. Until that migration has been applied the column doesn't exist, so
+// it is read and written with raw SQL behind an existence check: the game keeps
+// working either way, loans just aren't persisted across server restarts yet.
+let loansColumnExists = false;
+let loansColumnCheckedAt = 0;
+let loansColumnWarned = false;
+
+async function hasLoansColumn(): Promise<boolean> {
+  if (loansColumnExists) return true;
+  if (Date.now() - loansColumnCheckedAt < 60_000) return false;
+  loansColumnCheckedAt = Date.now();
+  try {
+    const rows = await prisma.$queryRaw<unknown[]>`
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = current_schema() AND table_name = 'City' AND column_name = 'loans'
+    `;
+    loansColumnExists = rows.length > 0;
+  } catch {
+    loansColumnExists = false;
+  }
+  if (!loansColumnExists && !loansColumnWarned) {
+    loansColumnWarned = true;
+    console.warn('City.loans column not found — loans will not survive a server restart. Run `npx prisma migrate deploy` in server/.');
+  }
+  return loansColumnExists;
+}
+
+async function loadCityLoans(cityId: string): Promise<Loan[]> {
+  if (!(await hasLoansColumn())) return [];
+  try {
+    const rows = await prisma.$queryRaw<Array<{ loans: unknown }>>`
+      SELECT "loans" FROM "City" WHERE "id" = ${cityId}
+    `;
+    const loans = rows[0]?.loans;
+    return Array.isArray(loans) ? (loans as Loan[]) : [];
+  } catch (err) {
+    console.error(`Failed to load loans for city ${cityId}:`, err);
+    return [];
+  }
+}
+
 export async function saveCityState(cityId: string, state: CityState): Promise<void> {
+  const persistLoans = await hasLoansColumn();
+
   // Use interactive transaction with increased timeout (15s) to handle large city saves
   await prisma.$transaction(async (tx) => {
     // 1. Upsert city metadata (resources, clock, tick)
@@ -58,6 +102,11 @@ export async function saveCityState(cityId: string, state: CityState): Promise<v
       },
     });
 
+    if (persistLoans) {
+      const loansJson = JSON.stringify(state.resources.loans ?? []);
+      await tx.$executeRaw`UPDATE "City" SET "loans" = ${loansJson}::jsonb WHERE "id" = ${cityId}`;
+    }
+
     // 2. Replace all buildings: delete existing, then bulk insert
     await tx.building.deleteMany({ where: { cityId } });
 
@@ -85,10 +134,13 @@ export async function saveCityState(cityId: string, state: CityState): Promise<v
 }
 
 export async function loadCityState(cityId: string): Promise<CityState | null> {
-  const city = await prisma.city.findUnique({
-    where: { id: cityId },
-    include: { buildings: true },
-  });
+  const [city, loans] = await Promise.all([
+    prisma.city.findUnique({
+      where: { id: cityId },
+      include: { buildings: true },
+    }),
+    loadCityLoans(cityId),
+  ]);
 
   if (!city) return null;
 
@@ -132,6 +184,7 @@ export async function loadCityState(cityId: string): Promise<CityState | null> {
         commercial: city.demandCommercial,
         industrial: city.demandIndustrial,
       },
+      loans,
       // Restore Maslow summary stub — full summary recomputed by PopulationManager on first tick
       populationSummary: city.population > 0 ? {
         total: city.population,

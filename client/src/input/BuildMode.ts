@@ -18,7 +18,7 @@ import {
 } from '@cityzen/shared';
 import { BuildingFactory } from '../world/BuildingFactory.js';
 import { GridRaycaster } from './Raycaster.js';
-import type { ToolMode } from '../ui/ToolSidebar.js';
+import type { ToolMode } from '../ui/BuildTools.js';
 
 function isLineDragType(type: BuildingType): boolean {
   return isRoad(type);
@@ -328,8 +328,9 @@ export class BuildMode {
   }
 
   private onMouseMove(e: MouseEvent): void {
-    const pos = this.raycaster.getGridPosition(e.clientX, e.clientY, this.camera);
-    this.currentHoverPos = pos;
+    this.currentHoverPos = (e.target as HTMLElement).closest('#ui-root')
+      ? null
+      : this.raycaster.getGridPosition(e.clientX, e.clientY, this.camera);
   }
 
   private onMouseDown(e: MouseEvent): void {

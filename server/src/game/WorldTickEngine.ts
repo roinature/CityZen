@@ -16,6 +16,10 @@ import {
   calculateBudgetPenalty,
   calculateTaxPenalty,
   calculateImmigrationCount,
+  calculateEmigrationCount,
+  WORLD_POOL_RESERVE,
+  WORLD_POOL_RESERVE_PER_CITY,
+  WORLD_POOL_GROWTH_PER_CITY,
   findConnectedCities,
   evaluateMigration,
 } from '@cityzen/shared';
@@ -78,13 +82,19 @@ export class WorldTickEngine {
       this.processYearBoundary();
     }
 
-    // On day boundary: evaluate migration between connected cities
+    // On day boundary: evaluate migration between connected cities,
+    // then let people abandon cities that are making them miserable
     if (dayChanged && clock.speed > 0) {
       this.processDailyMigration();
+      this.processDailyEmigration();
     }
 
     // Tick all active rooms: update Maslow → assign zones → compute summary → tick room
     const rooms = this.getRooms();
+
+    if (clock.speed > 0) {
+      this.growWorldPool(rooms.length);
+    }
     for (const room of rooms) {
       // Update each person's Maslow satisfaction toward city-provided targets
       if (clock.speed > 0) {
@@ -191,6 +201,37 @@ export class WorldTickEngine {
       const fromName = this.worldState.cities.find(c => c.cityId === route.fromCityId)?.name ?? route.fromCityId;
       const toName = this.worldState.cities.find(c => c.cityId === route.toCityId)?.name ?? route.toCityId;
       console.log(`Migration: ${route.count} people moved from "${fromName}" to "${toName}"`);
+    }
+  }
+
+  /**
+   * The unclaimed population grows by itself up to a reserve, so there are always
+   * newcomers for cities with vacant homes. Without this the world's starting
+   * population was a hard cap on every city in it.
+   */
+  private growWorldPool(cityCount: number): void {
+    const cities = Math.max(1, cityCount);
+    const reserve = WORLD_POOL_RESERVE + WORLD_POOL_RESERVE_PER_CITY * cities;
+    const missing = reserve - this.populationManager.getUnassignedCount();
+    if (missing <= 0) return;
+
+    this.populationManager.growWorldPool(
+      Math.min(missing, WORLD_POOL_GROWTH_PER_CITY * cities),
+      this.worldState.clock.gameTimeMs,
+    );
+  }
+
+  /** Residents of very unhappy cities move back to the world pool, a few per game day. */
+  private processDailyEmigration(): void {
+    for (const room of this.getRooms()) {
+      const population = this.populationManager.getCityPopulationCount(room.id);
+      const leaving = calculateEmigrationCount(population, room.state.resources.happiness);
+      if (leaving <= 0) continue;
+
+      const left = this.populationManager.leaveCity(room.id, leaving);
+      if (left > 0) {
+        console.log(`Emigration: ${left} people left "${room.state.name}" (happiness ${Math.round(room.state.resources.happiness)})`);
+      }
     }
   }
 

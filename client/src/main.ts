@@ -11,7 +11,13 @@ import {
   getOppositeDirection,
   isZone,
   calculateNetIncome,
+  calculateLaborStats,
+  calculateDemandTargets,
+  getZoneLevelHappinessRequirement,
   MIN_DEMAND_TO_GROW,
+  EMIGRATION_HAPPINESS_THRESHOLD,
+  MaslowNeed,
+  MASLOW_NEEDS_ORDERED,
   MessageType,
   MessageCategory,
   MessagePriority,
@@ -20,7 +26,7 @@ import {
 import { SceneManager } from './scene/SceneManager.js';
 import { CameraController } from './scene/CameraController.js';
 import { setupLighting } from './scene/LightingSetup.js';
-import { createGridOverlay } from './scene/GridOverlay.js';
+import { createGridOverlay, setGridEditing } from './scene/GridOverlay.js';
 import { EdgeRoadIndicator } from './scene/EdgeRoadIndicator.js';
 import { createTerrain } from './world/Terrain.js';
 import { CityRenderer } from './world/CityRenderer.js';
@@ -32,15 +38,15 @@ import { WorldMap } from './ui/WorldMap.js';
 import { GameMenu } from './ui/GameMenu.js';
 import { OptionsPanel, type GameOptions } from './ui/OptionsPanel.js';
 import { CarManager } from './world/CarManager.js';
-import { ToolSidebar, type ToolMode } from './ui/ToolSidebar.js';
+import { BuildTools, type ToolMode } from './ui/BuildTools.js';
 import { FinancePanel } from './ui/FinancePanel.js';
 import { MaslowPanel } from './ui/MaslowPanel.js';
 import { FooterIndicator } from './ui/FooterIndicator.js';
 import { CompassIndicator } from './ui/CompassIndicator.js';
-import { InfraToolbar } from './ui/InfraToolbar.js';
 import { MessageManager } from './ui/MessageManager.js';
 import { GameClient } from './network/GameClient.js';
 import { SoundManager } from './audio/SoundManager.js';
+import { CityLoading } from './ui/CityLoading.js';
 
 const SERVER_URL = window.location.origin;
 const SESSION_KEY = 'cityzen_session';
@@ -92,11 +98,11 @@ const uiRoot = document.getElementById('ui-root')!;
 const sceneManager = new SceneManager(canvas);
 const cameraController = new CameraController(sceneManager);
 const lighting = setupLighting(sceneManager.scene);
-createTerrain(sceneManager.scene);
+const entranceRoad = createTerrain(sceneManager.scene);
 const gridHelper = createGridOverlay(sceneManager.scene);
 const edgeRoadIndicator = new EdgeRoadIndicator(sceneManager.scene);
 
-const cityRenderer = new CityRenderer(sceneManager.scene);
+const cityRenderer = new CityRenderer(sceneManager.scene, entranceRoad);
 const carManager = new CarManager(sceneManager.scene);
 const buildMode = new BuildMode(sceneManager.scene, sceneManager.camera);
 const soundManager = new SoundManager();
@@ -106,6 +112,31 @@ const soundManager = new SoundManager();
 // CSS hides them unless <body> has the "in-city" class.
 function setInCity(inCity: boolean): void {
   document.body.classList.toggle('in-city', inCity);
+}
+
+// --- Entering a city ---
+// Switch to the city screen the instant the player picks a city; the state
+// arrives a moment later and fills it in.
+const cityLoading = new CityLoading(uiRoot);
+
+function beginCityLoad(label: string): void {
+  lobby.hide();
+  worldMap.hide();
+  cityState = null;
+  buildMode.setCityState(null);
+  setToolMode('pointer');
+  cityRenderer.clear();
+  edgeRoadIndicator.clear();
+  carManager.clear();
+  setInCity(true);
+  cityLoading.show(label, () => abortCityLoad('The city took too long to load. Please try again.'));
+}
+
+function abortCityLoad(message: string): void {
+  if (!cityLoading.isVisible()) return;
+  cityLoading.hide();
+  footerIndicator.toast(message, 4000);
+  showWorldMap();
 }
 
 // --- Notification Cooldowns ---
@@ -142,70 +173,69 @@ const messageManager = new MessageManager(uiRoot, {
     console.log(`Message clicked: ${message.title}`);
   }
 });
-const toolbar = new Toolbar(uiRoot, (type: BuildingType, density?: ZoneDensity) => {
+const toolbar = new Toolbar(uiRoot, resourceBar.demand, (type: BuildingType, density?: ZoneDensity) => {
   if (buildMode.getSelectedType() === type && !density) {
-    buildMode.deselect();
-    toolbar.setActive(null);
-  } else {
-    buildMode.setToolMode('build');
-    cameraController.setLeftClickPanEnabled(false);
-    toolSidebar.setActiveMode('build');
-    buildMode.select(type);
-    buildMode.setDensity(density ?? null);
-    toolbar.setActive(type);
-    infraToolbar.setActive(null);
+    setToolMode('pointer');
+    return;
   }
-});
 
-// --- Infrastructure Toolbar (bottom) ---
-const infraToolbar = new InfraToolbar(uiRoot, (type: BuildingType) => {
-  if (buildMode.getSelectedType() === type) {
-    buildMode.deselect();
-    infraToolbar.setActive(null);
+  setToolMode('build');
+  buildMode.select(type);
+  buildMode.setDensity(density ?? null);
+  toolbar.setActive(type);
+  cityRenderer.highlightZones(isZone(type));
+});
+const buildTools = new BuildTools(toolbar.controls, setToolMode, (size) => buildMode.setBrushSize(size));
+cameraController.setLeftClickPanEnabled(true);
+
+function setToolMode(mode: ToolMode): void {
+  buildMode.setToolMode(mode);
+  buildTools.setActiveMode(mode);
+  cameraController.setLeftClickPanEnabled(mode === 'pointer');
+  setGridEditing(gridHelper, mode !== 'pointer');
+  if (mode !== 'build') {
     toolbar.setActive(null);
-  } else {
-    buildMode.setToolMode('build');
-    cameraController.setLeftClickPanEnabled(false);
-    toolSidebar.setActiveMode('build');
-    buildMode.select(type);
-    toolbar.setActive(null);
-    infraToolbar.setActive(type);
+    toolbar.close();
+    cityRenderer.highlightZones(false);
   }
-});
+}
 
-// --- Tool Sidebar ---
 let isNight = false;
-const financePanel = new FinancePanel(uiRoot);
+const financePanel = new FinancePanel(uiRoot, {
+  onTaxRateChange: (rate) => gameClient.setTaxRate(rate, playerId),
+  onTakeLoan: (amount, termDays) => gameClient.takeLoan(amount, termDays, playerId),
+  onRepayLoan: (loanId) => gameClient.repayLoan(loanId, playerId),
+});
 const maslowPanel = new MaslowPanel(uiRoot);
 
-const toolSidebar = new ToolSidebar(uiRoot, {
-  onToolChange: (mode: ToolMode) => {
-    buildMode.setToolMode(mode);
-    cameraController.setLeftClickPanEnabled(mode === 'pointer');
-    if (mode !== 'build') {
-      toolbar.setActive(null);
-      infraToolbar.setActive(null);
-    }
-  },
-  onBrushSizeChange: (size: number) => {
-    buildMode.setBrushSize(size);
-  },
-  onDayNightToggle: () => {
-    isNight = !isNight;
-    lighting.setNight(isNight);
-    sceneManager.setDayNight(isNight);
-  },
-  onFinanceToggle: () => {
-    if (cityState) financePanel.update(cityState);
-    financePanel.toggle();
-  },
-  onMaslowToggle: () => {
-    if (cityState?.resources.populationSummary) {
-      maslowPanel.update(cityState.resources.populationSummary);
-    }
-    maslowPanel.toggle();
-  },
+function addHudAction(label: string, onClick: () => void): HTMLButtonElement {
+  const button = document.createElement('button');
+  button.className = 'hud-button';
+  button.textContent = label;
+  button.addEventListener('click', onClick);
+  resourceBar.actions.appendChild(button);
+  return button;
+}
+
+addHudAction('Finance', () => {
+  if (!cityState) return;
+  toolbar.close();
+  financePanel.update(cityState);
+  financePanel.toggle();
 });
+addHudAction('City Needs', () => {
+  if (!cityState) return;
+  toolbar.close();
+  if (cityState.resources.populationSummary) maslowPanel.update(cityState.resources.populationSummary);
+  maslowPanel.toggle();
+});
+const nightButton = addHudAction('Night View', () => {
+  isNight = !isNight;
+  lighting.setNight(isNight);
+  sceneManager.setDayNight(isNight);
+  nightButton.setAttribute('aria-pressed', String(isNight));
+});
+nightButton.setAttribute('aria-pressed', 'false');
 
 // --- Session ---
 let currentPlayerName = 'Player';
@@ -225,6 +255,9 @@ GameClient.create(SERVER_URL, {
   },
 
   onCityState: (city, players) => {
+    if (cityState?.id !== city.id || (city.tick === 0 && cityState.tick > 0)) {
+      cameraController.frameCity(city);
+    }
     cityState = city;
     buildMode.setCityState(city);
     cityRenderer.syncState(city);
@@ -233,6 +266,7 @@ GameClient.create(SERVER_URL, {
     resourceBar.update(city.resources, cityState);
     lobby.hide();
     worldMap.hide();
+    cityLoading.hide();
     setInCity(true);
     footerIndicator.hideToast();
     saveSession(city.id, currentPlayerName);
@@ -288,7 +322,9 @@ GameClient.create(SERVER_URL, {
     cityState.tick = tick;
     cityState.clock = clock;
     resourceBar.update(resources, cityState);
-    resourceBar.updateClock(clock);
+    if (financePanel.isVisible()) {
+      financePanel.update(cityState);
+    }
     if (maslowPanel.isVisible() && resources.populationSummary) {
       maslowPanel.update(resources.populationSummary);
     }
@@ -355,11 +391,17 @@ GameClient.create(SERVER_URL, {
       footerIndicator.toast(error.message);
     }
     if (error.code === 'CLAIM_FAILED' || error.code === 'JOIN_FAILED') {
-      footerIndicator.toast(error.message, 4000);
+      if (cityLoading.isVisible()) {
+        abortCityLoad(error.message);
+      } else {
+        footerIndicator.toast(error.message, 4000);
+      }
     }
     if (error.code === 'NOT_FOUND') {
       clearSession();
       cityState = null;
+      cityLoading.hide();
+      footerIndicator.toast('That city no longer exists', 4000);
       showWorldMap();
     }
   },
@@ -383,23 +425,20 @@ GameClient.create(SERVER_URL, {
   if (urlCityId) {
     // Clear the query param from URL so refreshes don't re-trigger
     window.history.replaceState({}, '', window.location.pathname);
+    beginCityLoad('Loading city…');
     gameClient.joinCity(urlCityId, currentPlayerName, playerId);
   } else {
     // Auto-rejoin saved session or show lobby
     const savedSession = loadSession();
     if (savedSession) {
       currentPlayerName = savedSession.playerName;
+      beginCityLoad('Loading your city…');
       gameClient.joinCity(savedSession.cityId, savedSession.playerName, playerId);
     }
   }
 });
 
 // --- Build mode wiring ---
-// --- Tax rate wiring ---
-resourceBar.onTaxRateChange = (rate) => {
-  gameClient.setTaxRate(rate, playerId);
-};
-
 // --- Game speed wiring ---
 resourceBar.onGameSpeedChange = (speed) => {
   gameClient.setGameSpeed(speed, playerId);
@@ -447,14 +486,11 @@ buildMode.onEdgeRoadClick = (direction: EdgeDirection, position: number) => {
 
   if (hasMatchingRoad) {
     console.log(`Traveling ${direction} to ${adjacentCity.name}`);
+    beginCityLoad(`Traveling to ${adjacentCity.name}…`);
     (async () => {
       await gameClient.leave(playerId);
-      cityState = null;
-      cityRenderer.clear();
-      edgeRoadIndicator.clear();
-      carManager.clear();
-      gameClient.joinCity(adjacentCity.cityId, currentPlayerName, playerId);
-    })();
+      await gameClient.joinCity(adjacentCity.cityId, currentPlayerName, playerId);
+    })().catch(() => abortCityLoad('Could not reach the server'));
   } else {
     console.log(`Road not connected to ${adjacentCity.name}`);
   }
@@ -497,14 +533,19 @@ lobby.refreshWorlds();
 // --- World Map ---
 const worldMap = new WorldMap(uiRoot, {
   onClaimPlot: (position, cityName) => {
-    footerIndicator.toast(`Founding ${cityName}…`, 8000);
+    beginCityLoad(`Founding ${cityName}…`);
     gameClient.claimPlot(position, cityName, currentPlayerName, playerId).catch((err) => {
       console.error('Claim failed:', err);
-      footerIndicator.toast('Could not reach the server');
+      abortCityLoad('Could not reach the server');
     });
   },
   onEnterCity: (cityId) => {
-    gameClient.joinCity(cityId, currentPlayerName, playerId);
+    const name = worldState?.cities.find(c => c.cityId === cityId)?.name ?? 'city';
+    beginCityLoad(`Loading ${name}…`);
+    gameClient.joinCity(cityId, currentPlayerName, playerId).catch((err) => {
+      console.error('Join failed:', err);
+      abortCityLoad('Could not reach the server');
+    });
   },
 });
 
@@ -515,13 +556,15 @@ const gameMenu = new GameMenu(uiRoot, {
     gameMenu.showStatus('Saving...');
   },
   onLoadCity: async (cityId: string) => {
-    await gameClient.leave(playerId);
-    cityState = null;
-    cityRenderer.clear();
-    edgeRoadIndicator.clear();
-    carManager.clear();
-    clearSession();
-    gameClient.joinCity(cityId, currentPlayerName, playerId);
+    beginCityLoad('Loading city…');
+    try {
+      await gameClient.leave(playerId);
+      clearSession();
+      await gameClient.joinCity(cityId, currentPlayerName, playerId);
+    } catch (err) {
+      console.error('Load city failed:', err);
+      abortCityLoad('Could not reach the server');
+    }
   },
   fetchCities: async () => {
     const res = await fetch(`${SERVER_URL}/api/cities`);
@@ -589,13 +632,10 @@ function applyOptions(options: GameOptions): void {
 
 const optionsPanel = new OptionsPanel(uiRoot, applyOptions);
 
-// --- Menu toggle button ---
-const menuToggle = document.createElement('button');
-menuToggle.className = 'menu-toggle';
-menuToggle.textContent = 'Menu';
-uiRoot.appendChild(menuToggle);
-menuToggle.addEventListener('click', () => {
-  if (cityState) gameMenu.show();
+addHudAction('Menu', () => {
+  if (!cityState) return;
+  toolbar.close();
+  gameMenu.show();
 });
 
 // --- ESC key handler ---
@@ -612,12 +652,9 @@ window.addEventListener('keydown', (e) => {
   } else if (gameMenu.isVisible()) {
     gameMenu.hide();
   } else if (cityState) {
-    // If a building is selected, deselect it first
-    if (buildMode.getSelectedType()) {
-      buildMode.deselect();
-      toolbar.setActive(null);
-      infraToolbar.setActive(null);
-    } else {
+    if (buildMode.getSelectedType() || buildMode.getToolMode() === 'bulldoze') {
+      setToolMode('pointer');
+    } else if (!toolbar.close()) {
       gameMenu.show();
     }
   }
@@ -631,7 +668,7 @@ window.addEventListener('keydown', (e) => {
   if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
   if (!cityState || !gameClient || gameMenu.isVisible() || optionsPanel.isVisible()) return;
 
-  if (e.code === 'Space') {
+  if (e.code === 'Space' && !el?.closest('button, select')) {
     e.preventDefault();
     const current = cityState.clock?.speed ?? 1;
     if (current > 0) {
@@ -643,22 +680,14 @@ window.addEventListener('keydown', (e) => {
   } else if (e.code === 'Digit1' || e.code === 'Digit2' || e.code === 'Digit3') {
     gameClient.setGameSpeed(Number(e.code.slice(-1)), playerId);
   } else if (e.code === 'KeyB') {
-    const mode: ToolMode = buildMode.getToolMode() === 'bulldoze' ? 'pointer' : 'bulldoze';
-    toolSidebar.setActiveMode(mode);
-    buildMode.setToolMode(mode);
-    cameraController.setLeftClickPanEnabled(mode === 'pointer');
-    toolbar.setActive(null);
-    infraToolbar.setActive(null);
+    setToolMode(buildMode.getToolMode() === 'bulldoze' ? 'pointer' : 'bulldoze');
   }
 });
 
 // --- Show world map helper ---
 function showWorldMap(): void {
   // No city on screen any more: drop the active tool and hide the HUD
-  buildMode.setToolMode('pointer');
-  toolSidebar.setActiveMode('pointer');
-  toolbar.setActive(null);
-  infraToolbar.setActive(null);
+  setToolMode('pointer');
   setInCity(false);
   worldMap.show();
 }
@@ -680,7 +709,9 @@ function gameLoop(): void {
   cameraController.update(deltaTime);
   lighting.update(deltaTime);
   cityRenderer.update(deltaTime);
-  carManager.update(deltaTime, cityState);
+  // Paused (speed 0) freezes all simulated movement; camera/UI stay live
+  const paused = cityState?.clock?.speed === 0;
+  if (!paused) carManager.update(deltaTime, cityState);
   buildMode.updatePreview(cityState);
   compassIndicator.update(cameraController.getRotationAngle());
 
@@ -693,7 +724,7 @@ function gameLoop(): void {
       roadCountLength = cityState.buildings.length;
       roadCount = cityState.buildings.filter(b => b.type.startsWith('road_')).length;
     }
-    soundManager.updateTrafficLevel(roadCount);
+    soundManager.updateTrafficLevel(paused ? 0 : roadCount);
   }
 
   sceneManager.render();
@@ -720,33 +751,76 @@ function advise(key: string, title: string, content: string, city: CityState, pr
   soundManager.triggerNotification();
 }
 
+/** What to build for each need, in the order citizens care about them. */
+const NEED_ADVICE: Record<MaslowNeed, string> = {
+  [MaslowNeed.PHYSIOLOGICAL]: 'power and water (Energy, Water & Sewage)',
+  [MaslowNeed.SAFETY]: 'police and fire stations',
+  [MaslowNeed.LOVE_BELONGING]: 'clinics, transport or parks',
+  [MaslowNeed.ESTEEM]: 'a landmark or museum (Tourism)',
+  [MaslowNeed.COGNITIVE]: 'schools or a library (Education)',
+  [MaslowNeed.AESTHETIC]: 'parks or Art & Culture buildings',
+  [MaslowNeed.SELF_ACTUALIZATION]: 'government buildings',
+};
+
+/** The most basic need that is badly met: fixing it lifts happiness the most. */
+function weakestNeed(city: CityState): MaslowNeed | null {
+  const maslow = city.resources.populationSummary?.averageMaslow;
+  if (!maslow) return null;
+  return MASLOW_NEEDS_ORDERED.find(need => maslow[need] < 50) ?? null;
+}
+
 function generateAdvisorHints(city: CityState): void {
   if (city.clock?.speed === 0) return;
   const res = city.resources;
   const zones = city.buildings.filter(b => isZone(b.type));
   const emptyOf = (type: string) => zones.some(b => b.type === type && (b.developmentLevel ?? 0) === 0);
   const hasAny = (type: string) => zones.some(b => b.type === type);
+  const happiness = Math.round(res.happiness);
+  const weakest = weakestNeed(city);
+  const fixHappiness = weakest ? ` Citizens most want ${NEED_ADVICE[weakest]}.` : '';
 
   if (res.money < 0) {
     advise('debt', 'The city is in debt',
-      `The treasury is at -$${Math.abs(Math.floor(res.money)).toLocaleString()}. Services degrade while in debt, making citizens unhappy. Raise taxes or bulldoze costly buildings.`,
+      `The treasury is at -$${Math.abs(Math.floor(res.money)).toLocaleString()}. Services degrade while in debt, making citizens unhappy. Raise taxes, bulldoze costly buildings, or take a loan from the Finance panel.`,
       city, MessagePriority.HIGH);
   } else if (res.population > 0 && calculateNetIncome(city) < 0 && res.money < 2000) {
     advise('deficit', 'Running a deficit',
-      'Upkeep costs more than taxes bring in. Grow the population with denser housing, raise the tax rate, or remove buildings you do not need.',
+      'Upkeep costs more than taxes bring in. Zone more housing and workplaces (both pay tax), raise the tax rate, or bulldoze services you cannot afford yet.',
       city);
   }
 
-  if (emptyOf('zone_residential') && res.demand && res.demand.residential < MIN_DEMAND_TO_GROW) {
-    advise('no_jobs', 'Nobody is moving in',
-      hasAny('zone_industrial') || hasAny('zone_commercial')
-        ? 'Residential zones stay empty until there are more jobs than residents. Zone more industrial or commercial land.'
-        : 'People only move in where there is work. Zone some industrial land next to your housing to create jobs.',
+  if (res.population > 0 && res.happiness < EMIGRATION_HAPPINESS_THRESHOLD) {
+    advise('exodus', 'People are leaving the city',
+      `Happiness is down to ${happiness}%. Nobody moves in and residents leave every day until it is back above ${EMIGRATION_HAPPINESS_THRESHOLD}%.${fixHappiness}`,
+      city, MessagePriority.HIGH);
+  }
+
+  const labor = calculateLaborStats(city);
+  const target = calculateDemandTargets(city);
+  const housingFull = labor.housingCapacity > 0 && res.population >= labor.housingCapacity * 0.9;
+
+  if (hasAny('zone_residential') && (emptyOf('zone_residential') || housingFull)
+    && target.residential < MIN_DEMAND_TO_GROW && labor.employmentRate < 0.9) {
+    advise('no_jobs', 'Not enough jobs',
+      `There are ${Math.round(labor.jobs)} jobs for ${Math.round(labor.workers)} workers, so nobody new wants to move in. ` +
+      (hasAny('zone_industrial') || hasAny('zone_commercial')
+        ? 'Zone more commercial or industrial land. It also pays tax once staffed.'
+        : 'Zone some commercial and industrial land next to your housing.'),
       city);
-  } else if (emptyOf('zone_commercial') && res.demand && res.demand.commercial < MIN_DEMAND_TO_GROW && city.tick > 30) {
+  } else if (emptyOf('zone_commercial') && target.commercial < MIN_DEMAND_TO_GROW && city.tick > 30) {
     advise('no_customers', 'Shops have no customers',
-      'Commercial zones develop once enough residents live nearby. Grow your residential zones first.',
+      'Commercial zones develop as the population grows. Grow your residential zones first.',
       city, MessagePriority.LOW);
+  }
+
+  // Zones that are ready to grow taller but held back by the mood of the city
+  const blockedLevel = [2, 3].find(level =>
+    res.happiness < getZoneLevelHappinessRequirement(level) &&
+    zones.some(b => (b.developmentLevel ?? 0) === level - 1));
+  if (blockedLevel && res.population > 0) {
+    advise('growth_capped', 'Buildings have stopped growing',
+      `Zones only develop to level ${blockedLevel} once happiness reaches ${getZoneLevelHappinessRequirement(blockedLevel)}% (now ${happiness}%).${fixHappiness}`,
+      city);
   }
 }
 

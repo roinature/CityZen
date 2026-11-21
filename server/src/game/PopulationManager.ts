@@ -116,6 +116,42 @@ export class PopulationManager {
     return seeded;
   }
 
+  /**
+   * Add newcomers to the unassigned world pool (the countryside growing by itself).
+   * Returns how many were added.
+   */
+  growWorldPool(count: number, tick: number): number {
+    for (let i = 0; i < count; i++) {
+      const person = this.createPerson(null, randomAge(), tick);
+      this.persons.set(person.id, person);
+      this.unassigned.add(person.id);
+    }
+    return Math.max(0, count);
+  }
+
+  /**
+   * Move the unhappiest residents of a city back to the unassigned world pool.
+   * They start over with neutral needs. Returns how many left.
+   */
+  leaveCity(cityId: string, count: number): number {
+    const personIds = this.cityIndex.get(cityId);
+    if (!personIds || count <= 0) return 0;
+
+    const leavers = Array.from(personIds)
+      .map(id => this.persons.get(id)!)
+      .sort((a, b) => getPersonHappiness(a.maslow) - getPersonHappiness(b.maslow))
+      .slice(0, count);
+
+    for (const person of leavers) {
+      this.removeFromCityIndex(cityId, person.id);
+      person.cityId = null;
+      person.residenceZoneId = null;
+      person.maslow = createDefaultMaslow();
+      this.unassigned.add(person.id);
+    }
+    return leavers.length;
+  }
+
   /** Create a new person born in a city. */
   birth(cityId: string, tick: number): Person {
     const person = this.createPerson(cityId, 0, tick);

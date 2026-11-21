@@ -28,12 +28,30 @@ export const worldManager = new WorldManager(roomManager);
 let initPromise: Promise<void> | null = null;
 function ensureInitialized(): Promise<void> {
   if (!initPromise) {
-    initPromise = worldManager.init();
+    // Don't cache a failed start-up: a single dropped database connection would
+    // otherwise make every later request fail until the process is restarted.
+    initPromise = worldManager.init().catch((err) => {
+      initPromise = null;
+      throw err;
+    });
   }
   return initPromise;
 }
 
-app.use(async (_req, _res, next) => {
+// Start loading the world as soon as the process boots instead of on the first
+// request, so the first player doesn't pay for the whole start-up.
+ensureInitialized().catch((err) => {
+  console.error('World initialization failed (will retry on the next request):', err);
+});
+
+// These don't touch game state, so they can answer while the world is loading
+const NO_INIT_PATHS = new Set(['/api/health', '/api/config']);
+
+app.use(async (req, _res, next) => {
+  if (NO_INIT_PATHS.has(req.path)) {
+    next();
+    return;
+  }
   try {
     await ensureInitialized();
     next();

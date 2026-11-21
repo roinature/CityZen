@@ -47,6 +47,8 @@ export class GameClient {
   private cityChannel: RealtimeChannel | null = null;
   private currentCityId: string | null = null;
   private currentWorldId = 'default';
+  /** City whose state was just delivered from the join response; its echo broadcast is skipped. */
+  private skipCityStateEchoFor: string | null = null;
 
   static async create(serverUrl: string, callbacks: GameCallbacks): Promise<GameClient> {
     const client = new GameClient(serverUrl, callbacks);
@@ -113,6 +115,10 @@ export class GameClient {
       this.cityChannel!
         .on('broadcast', { event: S2C.CITY_STATE }, (msg) => {
           const payload = msg.payload as CityStatePayload;
+          if (this.skipCityStateEchoFor === payload.city.id) {
+            this.skipCityStateEchoFor = null;
+            return;
+          }
           this.callbacks.onCityState(payload.city, payload.players);
         })
         .on('broadcast', { event: S2C.BUILDING_PLACED }, (msg) => {
@@ -190,12 +196,24 @@ export class GameClient {
   }
 
   async joinCity(cityId: string, playerName: string, playerId?: string): Promise<void> {
-    // Subscribe to the city channel first so we receive the state broadcast
-    await this.subscribeToCityChannel(cityId);
-    const result = await this.post('/api/city/join', { cityId, playerName, playerId });
+    // Subscribe and join in parallel; the join response carries the city state,
+    // so entering takes one round-trip instead of subscribe + join + broadcast.
+    const [, result] = await Promise.all([
+      this.subscribeToCityChannel(cityId),
+      this.post('/api/city/join', { cityId, playerName, playerId }),
+    ]);
     if (!result.success) {
       this.unsubscribeFromCityChannel();
       this.callbacks.onError({ message: result.error || 'Failed to join city', code: result.code || 'JOIN_FAILED' });
+      return;
+    }
+    if (result.city) {
+      // The server also broadcasts this state; ignore that echo if it reaches us
+      this.skipCityStateEchoFor = cityId;
+      setTimeout(() => {
+        if (this.skipCityStateEchoFor === cityId) this.skipCityStateEchoFor = null;
+      }, 5000);
+      this.callbacks.onCityState(result.city, result.players ?? []);
     }
   }
 
@@ -226,6 +244,14 @@ export class GameClient {
 
   async setTaxRate(taxRate: number, playerId?: string): Promise<void> {
     await this.post('/api/city/tax-rate', { taxRate, playerId });
+  }
+
+  async takeLoan(amount: number, termDays: number, playerId?: string): Promise<{ success: boolean; error?: string }> {
+    return this.post('/api/city/loan/take', { amount, termDays, playerId });
+  }
+
+  async repayLoan(loanId: string, playerId?: string): Promise<{ success: boolean; error?: string }> {
+    return this.post('/api/city/loan/repay', { loanId, playerId });
   }
 
   async setUnlimitedMoney(enabled: boolean, playerId?: string): Promise<void> {

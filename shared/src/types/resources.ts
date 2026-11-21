@@ -23,6 +23,21 @@ export interface ZonePopulationEntry {
   capacity: number;
 }
 
+export interface Loan {
+  id: string;
+  /** Amount paid into the treasury when the loan was taken. */
+  principal: number;
+  /** Flat interest over the whole term (0.1 = 10%). */
+  interestRate: number;
+  termDays: number;
+  /** principal + interest. */
+  totalDue: number;
+  /** Still owed. Falls by paymentPerTick each tick the city can pay. */
+  remaining: number;
+  paymentPerTick: number;
+  takenAtTick: number;
+}
+
 export interface ResourceState {
   money: number;
   population: number;
@@ -31,4 +46,5 @@ export interface ResourceState {
   demand: DemandState;
   populationSummary?: PopulationSummary;
   zonePopulations?: ZonePopulationEntry[];
+  loans?: Loan[];
 }

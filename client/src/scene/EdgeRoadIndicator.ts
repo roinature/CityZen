@@ -7,6 +7,8 @@ import {
     calculateEdgeConnections,
     findAdjacentCity,
     getOppositeDirection,
+    getStarterEntranceX,
+    isStarterEntranceRoad,
     CELL_SIZE,
     DEFAULT_GRID_SIZE,
 } from '@cityzen/shared';
@@ -70,6 +72,8 @@ export class EdgeRoadIndicator {
         this.clearMeshes();
 
         const connections = calculateEdgeConnections(buildings);
+        const entranceX = getStarterEntranceX(DEFAULT_GRID_SIZE);
+        const hasEntrance = buildings.some(building => isStarterEntranceRoad(building, DEFAULT_GRID_SIZE));
 
         // Find current city in world state to determine world position
         const currentCity = worldState?.cities.find(c => c.cityId === cityId) ?? null;
@@ -86,6 +90,8 @@ export class EdgeRoadIndicator {
             const material = connected ? this.connectedMaterial : this.unconnectedMaterial;
 
             for (const pos of conn.positions) {
+                // The exterior road already marks this entrance in the scene.
+                if (hasEntrance && !connected && conn.direction === 'south' && pos === entranceX) continue;
                 this.addArrow(conn.direction, pos, material);
             }
         }

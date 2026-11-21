@@ -200,7 +200,7 @@ export function createGameRoutes(roomManager: RoomManager, worldManager: WorldMa
       room.addPlayer(playerId, payload.playerName);
 
       console.log(`${payload.playerName} joined city ${room.state.name}`);
-      res.json({ success: true, cityId: room.id });
+      res.json({ success: true, cityId: room.id, city: room.state, players: room.getPlayerList() });
     } catch (err) {
       res.json({ success: false, error: 'Failed to join city' });
     }
@@ -278,6 +278,28 @@ export function createGameRoutes(roomManager: RoomManager, worldManager: WorldMa
     res.json(result.success ? { success: true } : { success: false, error: result.error });
   });
 
+  // POST /api/city/loan/take
+  router.post('/city/loan/take', (req: Request, res: Response) => {
+    const { playerId, amount, termDays } = req.body as { playerId: string; amount: number; termDays: number };
+    const room = getPlayerRoom(playerId);
+    if (!room) {
+      res.json({ success: false, error: 'Not in a city' });
+      return;
+    }
+    res.json(room.takeLoan(Number(amount), Number(termDays)));
+  });
+
+  // POST /api/city/loan/repay
+  router.post('/city/loan/repay', (req: Request, res: Response) => {
+    const { playerId, loanId } = req.body as { playerId: string; loanId: string };
+    const room = getPlayerRoom(playerId);
+    if (!room) {
+      res.json({ success: false, error: 'Not in a city' });
+      return;
+    }
+    res.json(room.repayLoan(loanId));
+  });
+
   // POST /api/city/unlimited-money
   router.post('/city/unlimited-money', (req: Request, res: Response) => {
     const { playerId, enabled } = req.body as SetUnlimitedMoneyPayload & { playerId: string };
@@ -318,6 +340,7 @@ export function createGameRoutes(roomManager: RoomManager, worldManager: WorldMa
       return;
     }
     room.restart();
+    worldManager.updateCityEdgeConnections(room.id, calculateEdgeConnections(room.state.buildings));
     res.json({ success: true });
   });
 

@@ -2,6 +2,7 @@ import type { CityState } from '../types/city.js';
 import { calculateNetIncome, calculatePopulationGrowth, calculateHappiness, clamp } from './resources.js';
 import { calculateDemand, processZoneGrowth } from './demand.js';
 import { MAX_DEBT } from '../constants/economy.js';
+import { applyLoanPayments } from './loans.js';
 import { GAME_MS_PER_TICK, TICKS_PER_GAME_DAY, DAYS_PER_GAME_YEAR } from '../constants/simulation.js';
 
 export function advanceClock(state: CityState): CityState {
@@ -47,12 +48,21 @@ export function simulateCityTick(state: CityState): CityState {
   const popGrowth = calculatePopulationGrowth(working);
   const happiness = calculateHappiness(working);
 
+  // Loan instalments come out after the regular budget. They can't push the
+  // treasury past the debt floor; whatever can't be paid stays on the loan.
+  const moneyAfterBudget = working.resources.money + netIncome;
+  const { loans, paid: loanPayments } = applyLoanPayments(
+    working.resources.loans ?? [],
+    moneyAfterBudget + MAX_DEBT,
+  );
+
   return {
     ...working,
     resources: {
       ...working.resources,
       // Allow limited debt so a running deficit has consequences (see calculateBudgetPenalty)
-      money: Math.max(-MAX_DEBT, working.resources.money + netIncome),
+      money: Math.max(-MAX_DEBT, moneyAfterBudget - loanPayments),
+      loans,
       population: Math.max(0, working.resources.population + popGrowth),
       happiness: clamp(happiness, 0, 100),
     },

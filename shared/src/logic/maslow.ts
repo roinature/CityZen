@@ -3,6 +3,10 @@ import type { MaslowContribution } from '../types/building.js';
 import { MaslowNeed, MASLOW_NEEDS_ORDERED, LifeStage } from '../types/person.js';
 import { BUILDING_DEFS } from '../constants/buildings.js';
 import { isZone } from '../types/building.js';
+import {
+  SERVICE_BASE_SATISFACTION, SERVICE_QUALITY_FACTOR,
+  SMALL_TOWN_SATISFACTION, SMALL_TOWN_POPULATION, SMALL_TOWN_FADE_POPULATION,
+} from '../constants/simulation.js';
 
 // ── City Maslow Capacity ────────────────────────────────────
 
@@ -10,6 +14,8 @@ import { isZone } from '../types/building.js';
 export interface CityMaslowCapacity {
   totalValue: number;      // Sum of all building values for this need
   totalCapacity: number;   // Sum of all capacityServed for this need
+  /** Every building serving this need: how good it is and how many people it reaches. */
+  providers: Array<{ value: number; capacity: number }>;
 }
 
 export type CityMaslowProfile = Record<MaslowNeed, CityMaslowCapacity>;
@@ -18,7 +24,7 @@ export type CityMaslowProfile = Record<MaslowNeed, CityMaslowCapacity>;
 export function calculateCityMaslowCapacity(state: CityState): CityMaslowProfile {
   const profile = {} as CityMaslowProfile;
   for (const need of MASLOW_NEEDS_ORDERED) {
-    profile[need] = { totalValue: 0, totalCapacity: 0 };
+    profile[need] = { totalValue: 0, totalCapacity: 0, providers: [] };
   }
 
   for (const building of state.buildings) {
@@ -32,6 +38,7 @@ export function calculateCityMaslowCapacity(state: CityState): CityMaslowProfile
     for (const mc of contributions) {
       profile[mc.need].totalValue += mc.value;
       profile[mc.need].totalCapacity += mc.capacityServed;
+      profile[mc.need].providers.push({ value: mc.value, capacity: mc.capacityServed });
     }
   }
 
@@ -96,28 +103,52 @@ export const LIFE_STAGE_MASLOW_WEIGHTS: Record<LifeStage, Record<MaslowNeed, num
 
 // ── Target Satisfaction Calculation ─────────────────────────
 
+/** Satisfaction (0–100) of someone served by a building of the given quality. */
+export function getServiceSatisfaction(value: number): number {
+  return Math.min(100, SERVICE_BASE_SATISFACTION + SERVICE_QUALITY_FACTOR * value);
+}
+
+/** What every need sits at in a town too small to expect real services (fades with size). */
+export function getSmallTownSatisfaction(population: number): number {
+  const fade = (SMALL_TOWN_FADE_POPULATION - population) / (SMALL_TOWN_FADE_POPULATION - SMALL_TOWN_POPULATION);
+  return SMALL_TOWN_SATISFACTION * Math.max(0, Math.min(1, fade));
+}
+
 /**
  * Calculate the base target satisfaction (0–100) for each Maslow need,
  * given the city's infrastructure profile and population count.
  *
- * Formula per need:
- *   coverageRatio = min(totalCapacity / population, 1.0)
- *   targetSatisfaction = min(totalValue × coverageRatio, 100)
+ * Per need, residents are served by the best buildings first, each up to its
+ * capacity. Someone served gets that building's satisfaction (see
+ * getServiceSatisfaction); someone left without service gets 0. The target is
+ * the average across the population, so coverage and quality both matter and
+ * it no longer takes a dozen buildings to satisfy a village.
+ * Small towns never drop below getSmallTownSatisfaction.
  */
 export function calculateBaseMaslowTargets(
   profile: CityMaslowProfile,
   population: number,
 ): Record<MaslowNeed, number> {
   const targets = {} as Record<MaslowNeed, number>;
+  const floor = getSmallTownSatisfaction(population);
 
   for (const need of MASLOW_NEEDS_ORDERED) {
-    const { totalValue, totalCapacity } = profile[need];
-    if (population === 0 || totalCapacity === 0) {
-      targets[need] = 0;
+    if (population <= 0) {
+      targets[need] = floor;
       continue;
     }
-    const coverageRatio = Math.min(totalCapacity / population, 1.0);
-    targets[need] = Math.min(totalValue * coverageRatio, 100);
+
+    const providers = [...profile[need].providers].sort((a, b) => b.value - a.value);
+    let unserved = population;
+    let total = 0;
+    for (const provider of providers) {
+      if (unserved <= 0) break;
+      const served = Math.min(provider.capacity, unserved);
+      total += served * getServiceSatisfaction(provider.value);
+      unserved -= served;
+    }
+
+    targets[need] = Math.max(floor, total / population);
   }
 
   return targets;

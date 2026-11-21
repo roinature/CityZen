@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { CityState, PlacedBuilding, ZoneType } from '@cityzen/shared';
-import { isRoad, isZone, getZoneLevelDef, getEffectiveSize } from '@cityzen/shared';
+import { DEFAULT_GRID_SIZE, isRoad, isStarterEntranceRoad, isZone, getZoneLevelDef, getEffectiveSize } from '@cityzen/shared';
 import { calculateCityScore } from '@cityzen/shared';
 import { BuildingFactory, type RoadNeighbors } from './BuildingFactory.js';
 
@@ -16,13 +16,14 @@ function easeOutBack(t: number): number {
 export class CityRenderer {
   private scene: THREE.Scene;
   private factory: BuildingFactory;
+  private zonesHighlighted = false;
   private meshes: Map<string, THREE.Group> = new Map();
   private buildingLevels: Map<string, number> = new Map();
   private zonePopRatios: Map<string, number> = new Map();
   /** Buildings currently playing their "rise from the ground" animation (id → progress 0..1). */
   private growAnims: Map<string, number> = new Map();
 
-  constructor(scene: THREE.Scene) {
+  constructor(scene: THREE.Scene, private entranceRoad: THREE.Group) {
     this.scene = scene;
     this.factory = new BuildingFactory();
   }
@@ -47,12 +48,24 @@ export class CityRenderer {
     }
   }
 
+  highlightZones(highlight: boolean): void {
+    if (highlight === this.zonesHighlighted) return;
+    this.zonesHighlighted = highlight;
+    for (const id of this.buildingLevels.keys()) {
+      const mesh = this.meshes.get(id);
+      if (mesh) this.factory.setZoneHighlight(mesh, highlight);
+    }
+  }
+
   private startGrowAnim(id: string, mesh: THREE.Group): void {
     mesh.scale.y = 0.02;
     this.growAnims.set(id, 0);
   }
 
   syncState(state: CityState): void {
+    // Older unbuilt saves still see the approach road at the edge of their plot.
+    this.entranceRoad.visible = state.buildings.length === 0
+      || state.buildings.some(building => isStarterEntranceRoad(building, DEFAULT_GRID_SIZE));
     const currentIds = new Set(this.meshes.keys());
     // Loading a whole city at once should appear instantly, not as a wave of pop-ins
     const animate = currentIds.size > 0 || state.buildings.length <= 3;
@@ -133,6 +146,7 @@ export class CityRenderer {
         }
 
         if (isZone(building.type)) {
+          this.factory.setZoneHighlight(mesh, this.zonesHighlighted);
           this.buildingLevels.set(building.id, building.developmentLevel ?? 0);
         }
       }
@@ -162,6 +176,7 @@ export class CityRenderer {
           this.disposeMesh(existing);
           const ratio = newZonePopRatios.get(building.id);
           const mesh = this.factory.createBuilding(building, undefined, ratio);
+          this.factory.setZoneHighlight(mesh, this.zonesHighlighted);
           this.scene.add(mesh);
           this.meshes.set(building.id, mesh);
           this.buildingLevels.set(building.id, currLevel);
@@ -218,7 +233,8 @@ export class CityRenderer {
     }
 
     // Check along each edge of the building footprint
-    let hasNorth = false, hasSouth = false, hasEast = false, hasWest = false;
+    let hasNorth = false, hasEast = false, hasWest = false;
+    let hasSouth = isStarterEntranceRoad(building, DEFAULT_GRID_SIZE);
     for (let dx = 0; dx < w; dx++) {
       if (!ownCells.has(`${x + dx},${z - 1}`) && roadPositions.has(`${x + dx},${z - 1}`)) hasNorth = true;
       if (!ownCells.has(`${x + dx},${z + d}`) && roadPositions.has(`${x + dx},${z + d}`)) hasSouth = true;
@@ -238,6 +254,7 @@ export class CityRenderer {
   }
 
   clear(): void {
+    this.entranceRoad.visible = false;
     for (const [, mesh] of this.meshes) {
       this.scene.remove(mesh);
       this.disposeMesh(mesh);

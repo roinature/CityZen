@@ -19,10 +19,12 @@ import {
   DEFAULT_GAME_SPEED,
   BUILDING_DEFS,
   ZONE_DENSITY_COSTS,
-  createEmptyGrid,
+  createStarterLayout,
   canPlaceBuilding,
   getEffectiveSize,
   simulateCityTick,
+  validateLoanRequest,
+  createLoan,
 } from '@cityzen/shared';
 import { saveCityState } from '../persistence/jsonStore.js';
 import { broadcastToChannel } from '../realtime/supabaseBroadcast.js';
@@ -54,8 +56,7 @@ export class GameRoom {
       id,
       name,
       ownerId,
-      grid: createEmptyGrid(),
-      buildings: [],
+      ...createStarterLayout(id, ownerId),
       resources: { ...INITIAL_RESOURCES },
       clock: createInitialClock(),
       tick: 0,
@@ -290,6 +291,53 @@ export class GameRoom {
     return { success: true };
   }
 
+  /** Borrow money: the principal lands in the treasury now and is repaid every tick. */
+  takeLoan(amount: number, termDays: number): { success: boolean; error?: string } {
+    const check = validateLoanRequest(this.state, amount, termDays);
+    if (!check.valid) {
+      return { success: false, error: check.reason };
+    }
+
+    const loan = createLoan(uuid(), amount, termDays, this.state.tick);
+    this.state.resources.loans = [...(this.state.resources.loans ?? []), loan];
+    this.state.resources.money += amount;
+    this.state.updatedAt = Date.now();
+
+    this.broadcastResources();
+    this.saveAfterMutation();
+    return { success: true };
+  }
+
+  /** Pay off the whole remaining balance of one loan. */
+  repayLoan(loanId: string): { success: boolean; error?: string } {
+    const loans = this.state.resources.loans ?? [];
+    const loan = loans.find(l => l.id === loanId);
+    if (!loan) {
+      return { success: false, error: 'Loan not found' };
+    }
+    if (!this.unlimitedMoney && this.state.resources.money < loan.remaining) {
+      return { success: false, error: 'Not enough money to repay this loan' };
+    }
+
+    if (!this.unlimitedMoney) {
+      this.state.resources.money -= loan.remaining;
+    }
+    this.state.resources.loans = loans.filter(l => l.id !== loanId);
+    this.state.updatedAt = Date.now();
+
+    this.broadcastResources();
+    this.saveAfterMutation();
+    return { success: true };
+  }
+
+  private broadcastResources(): void {
+    this.broadcast(S2C.RESOURCES_UPDATE, {
+      resources: this.state.resources,
+      tick: this.state.tick,
+      clock: this.state.clock,
+    });
+  }
+
   setUnlimitedMoney(enabled: boolean): void {
     this.unlimitedMoney = enabled;
     this.broadcast(S2C.RESOURCES_UPDATE, {
@@ -302,8 +350,7 @@ export class GameRoom {
   restart(): void {
     this.state = {
       ...this.state,
-      grid: createEmptyGrid(),
-      buildings: [],
+      ...createStarterLayout(this.id, this.state.ownerId),
       resources: { ...INITIAL_RESOURCES },
       clock: createInitialClock(),
       tick: 0,

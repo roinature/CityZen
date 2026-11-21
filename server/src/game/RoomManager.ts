@@ -7,6 +7,8 @@ import { MessageManager } from '../services/MessageManager.js';
 
 export class RoomManager {
   private rooms: Map<string, GameRoom> = new Map();
+  /** In-flight loads, so two callers asking for the same city share one load. */
+  private loading: Map<string, Promise<GameRoom | null>> = new Map();
   private messageManager: MessageManager;
 
   constructor(prisma: any) {
@@ -30,6 +32,15 @@ export class RoomManager {
     const existing = this.rooms.get(cityId);
     if (existing) return existing;
 
+    const inFlight = this.loading.get(cityId);
+    if (inFlight) return inFlight;
+
+    const load = this.loadRoom(cityId).finally(() => this.loading.delete(cityId));
+    this.loading.set(cityId, load);
+    return load;
+  }
+
+  private async loadRoom(cityId: string): Promise<GameRoom | null> {
     const state = await loadCityState(cityId);
     if (!state) return null;
 
