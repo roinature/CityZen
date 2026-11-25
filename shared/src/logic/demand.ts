@@ -5,7 +5,7 @@ import { getZoneLevelDef, type ZoneLevelDef } from '../constants/buildings.js';
 import {
   DEMAND_GROWTH_RATE, MIN_DEMAND_TO_GROW, ZONE_GROWTH_CHANCE,
   ZONE_LEVEL_MIN_HAPPINESS, DEMAND_UNHAPPY_BELOW,
-  COMMERCIAL_JOBS_PER_RESIDENT, INDUSTRIAL_JOBS_PER_RESIDENT, MIN_JOBS_WANTED,
+  COMMERCIAL_JOBS_PER_WORKER, INDUSTRIAL_JOBS_PER_WORKER, MIN_JOBS_WANTED,
   HOUSING_BUFFER_RATIO, HOUSING_BUFFER_MIN,
 } from '../constants/simulation.js';
 import { clamp } from './resources.js';
@@ -17,10 +17,18 @@ import { calculateLaborStats } from './labor.js';
  * Residential: people want to move in while there is work for them and the
  * existing homes are mostly taken. An unhappy city puts newcomers off.
  * Commercial / industrial: businesses open while the city has fewer of those
- * jobs than its residents can fill. The two job targets add up to slightly more
- * than the workforce, so a city zoned in balance keeps growing instead of
- * settling into a standstill.
+ * jobs than its workers can fill. The targets follow the workforce rather than
+ * the head count, so a city of mostly working-age residents still gets enough
+ * jobs, and they leave a job for every worker even after the growth threshold,
+ * so housing and jobs keep pulling each other up instead of deadlocking.
  */
+function jobTargets(workers: number): { commercial: number; industrial: number } {
+  return {
+    commercial: Math.max(workers * COMMERCIAL_JOBS_PER_WORKER, MIN_JOBS_WANTED),
+    industrial: Math.max(workers * INDUSTRIAL_JOBS_PER_WORKER, MIN_JOBS_WANTED),
+  };
+}
+
 export function calculateDemandTargets(state: CityState): DemandState {
   const { commercialJobs, industrialJobs, jobs, workers, employmentRate, housingCapacity } =
     calculateLaborStats(state);
@@ -39,13 +47,12 @@ export function calculateDemandTargets(state: CityState): DemandState {
   // Mood: below DEMAND_UNHAPPY_BELOW the city's reputation drags demand down.
   const moodPenalty = Math.max(0, (DEMAND_UNHAPPY_BELOW - state.resources.happiness) / DEMAND_UNHAPPY_BELOW);
 
-  const commercialWanted = Math.max(pop * COMMERCIAL_JOBS_PER_RESIDENT, MIN_JOBS_WANTED);
-  const industrialWanted = Math.max(pop * INDUSTRIAL_JOBS_PER_RESIDENT, MIN_JOBS_WANTED);
+  const wanted = jobTargets(workers);
 
   return {
     residential: clamp(Math.min(jobPull, housingPull) - moodPenalty, -1, 1),
-    commercial: clamp(1 - commercialJobs / commercialWanted, -1, 1),
-    industrial: clamp(1 - industrialJobs / industrialWanted, -1, 1),
+    commercial: clamp(1 - commercialJobs / wanted.commercial, -1, 1),
+    industrial: clamp(1 - industrialJobs / wanted.industrial, -1, 1),
   };
 }
 
@@ -78,13 +85,14 @@ export interface ZoneGrowthResult {
  * nobody uses.
  */
 export function calculateGrowthBudget(state: CityState): DemandState {
-  const { commercialJobs, industrialJobs, housingCapacity } = calculateLaborStats(state);
+  const { commercialJobs, industrialJobs, workers, housingCapacity } = calculateLaborStats(state);
   const pop = state.resources.population;
+  const wanted = jobTargets(workers);
 
   return {
     residential: pop * HOUSING_BUFFER_RATIO + HOUSING_BUFFER_MIN - housingCapacity,
-    commercial: Math.max(pop * COMMERCIAL_JOBS_PER_RESIDENT, MIN_JOBS_WANTED) - commercialJobs,
-    industrial: Math.max(pop * INDUSTRIAL_JOBS_PER_RESIDENT, MIN_JOBS_WANTED) - industrialJobs,
+    commercial: wanted.commercial - commercialJobs,
+    industrial: wanted.industrial - industrialJobs,
   };
 }
 

@@ -25,9 +25,14 @@ export const MAX_GAME_SPEED = 3;
 export const DEMAND_GROWTH_RATE = 0.1;         // Per-tick lerp of each demand meter toward its target
 export const ZONE_GROWTH_CHANCE = 0.3;
 export const MIN_DEMAND_TO_GROW = 0.2;
-/** Businesses keep opening until the city has this many jobs of each kind per resident. */
-export const COMMERCIAL_JOBS_PER_RESIDENT = 0.3;
-export const INDUSTRIAL_JOBS_PER_RESIDENT = 0.4;
+/**
+ * Job targets per worker. Zones only develop while demand is at least
+ * MIN_DEMAND_TO_GROW, so businesses stop opening at (1 - MIN_DEMAND_TO_GROW) of
+ * these targets: 0.8 × 1.3 ≈ 1.04 jobs per worker. That keeps a job for
+ * everyone, so residential demand never stalls on unemployment.
+ */
+export const COMMERCIAL_JOBS_PER_WORKER = 0.55;
+export const INDUSTRIAL_JOBS_PER_WORKER = 0.75;
 /** Homes get built ahead of demand up to this multiple of the population, plus a few spare. */
 export const HOUSING_BUFFER_RATIO = 1.25;
 export const HOUSING_BUFFER_MIN = 20;
