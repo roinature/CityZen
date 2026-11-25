@@ -16,6 +16,7 @@ export enum BuildingType {
 
   // Standalone
   PARK = 'park',
+  PARKING = 'parking',
 
   // --- Infrastructure ---
   // Energy

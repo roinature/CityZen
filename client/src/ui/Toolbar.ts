@@ -8,7 +8,7 @@ import { DensityPicker } from './DensityPicker.js';
 const CATEGORIES: ReadonlyArray<{ label: string; types: readonly BuildingType[] }> = [
   { label: 'Roads', types: ROAD_TYPES },
   { label: 'Zones', types: ZONE_TYPES },
-  { label: 'Parks', types: [BuildingType.PARK] },
+  { label: 'Parks', types: [BuildingType.PARK, BuildingType.PARKING] },
   { label: 'Services', types: [] },
 ];
 

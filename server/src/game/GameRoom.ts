@@ -20,7 +20,11 @@ import {
   DEFAULT_GAME_SPEED,
   BUILDING_DEFS,
   ZONE_DENSITY_COSTS,
+  createEmptyGrid,
   createStarterLayout,
+  applySiteTerrain,
+  planTown,
+  type TownSettings,
   canPlaceBuilding,
   getEffectiveSize,
   getReplacedRoads,
@@ -41,6 +45,9 @@ function createInitialClock(): GameClock {
     gameYear: 1,
   };
 }
+
+/** A whole town has upkeep from the first tick, before anyone has moved in. */
+const PLANNED_TOWN_MONEY = 50_000;
 
 type CityBroadcast = (event: string, data: unknown) => void;
 
@@ -407,6 +414,27 @@ export class GameRoom {
     };
 
     // Broadcast fresh state to all players via channel
+    this.broadcast(S2C.CITY_STATE, {
+      city: this.state,
+      players: this.getPlayerList(),
+    });
+
+    this.saveAfterMutation();
+  }
+
+  /** Replace the city with a planned town. */
+  generateTown(settings: TownSettings): void {
+    const terrain = createEmptyGrid();
+    applySiteTerrain(terrain, this.state.siteId);
+    this.state = {
+      ...this.state,
+      ...planTown(terrain, settings, uuid(), this.state.ownerId),
+      resources: { ...INITIAL_RESOURCES, money: PLANNED_TOWN_MONEY },
+      clock: createInitialClock(),
+      tick: 0,
+      updatedAt: Date.now(),
+    };
+
     this.broadcast(S2C.CITY_STATE, {
       city: this.state,
       players: this.getPlayerList(),

@@ -2,6 +2,8 @@ import type { CameraController } from '../scene/CameraController.js';
 import type { BuildMode } from './BuildMode.js';
 
 const TAP_SLOP = 8;
+/** Radians turned by dragging the height of the map. */
+const ORBIT_SPEED = Math.PI * 1.2;
 
 export class MapInput {
   private pointers = new Map<number, PointerEvent>();
@@ -9,6 +11,7 @@ export class MapInput {
   private moved = false;
   private cameraOnly = false;
   private drawing = false;
+  private orbiting = false;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -43,6 +46,7 @@ export class MapInput {
 
   private reset(): void {
     this.start = null;
+    this.orbiting = false;
     this.drawing = false;
     this.canvas.classList.remove('panning');
     this.build.cancelInteraction();
@@ -72,7 +76,10 @@ export class MapInput {
       this.cameraOnly = true;
       return;
     }
-    this.drawing = event.button === 0 && this.build.canDraw();
+    // Right or middle drag orbits; so does a left drag with a modifier, for trackpads.
+    this.orbiting = event.pointerType !== 'touch'
+      && (event.button !== 0 || event.shiftKey || event.altKey || event.ctrlKey);
+    this.drawing = !this.orbiting && event.button === 0 && this.build.canDraw();
     if (this.drawing) this.build.startDraw(event.clientX, event.clientY);
     else if (event.button === 0) this.build.hover(event.clientX, event.clientY);
   };
@@ -91,6 +98,11 @@ export class MapInput {
       const nextFirst = first.pointerId === event.pointerId ? event : first;
       const nextSecond = second.pointerId === event.pointerId ? event : second;
       const distance = Math.hypot(first.clientX - second.clientX, first.clientY - second.clientY);
+      const angle = Math.atan2(second.clientY - first.clientY, second.clientX - first.clientX);
+      const nextAngle = Math.atan2(nextSecond.clientY - nextFirst.clientY, nextSecond.clientX - nextFirst.clientX);
+      // Twisting two fingers turns the map with them.
+      const twist = Math.atan2(Math.sin(nextAngle - angle), Math.cos(nextAngle - angle));
+      if (distance > 30) this.camera.orbit(twist, 0);
       const nextDistance = Math.hypot(nextFirst.clientX - nextSecond.clientX, nextFirst.clientY - nextSecond.clientY);
       this.moveCamera(
         (first.clientX + second.clientX) / 2, (first.clientY + second.clientY) / 2,
@@ -108,8 +120,15 @@ export class MapInput {
 
     const wasMoving = this.moved || this.cameraOnly;
     this.moved ||= this.exceedsTapSlop(event);
-    if (this.cameraOnly || (this.moved && (
-      event.pointerType === 'touch' || this.start.button !== 0 || this.build.getToolMode() === 'pointer'
+    if (this.orbiting) {
+      if (!this.moved) return;
+      const from = wasMoving ? previous : this.start;
+      const scale = ORBIT_SPEED / this.canvas.clientHeight;
+      this.canvas.classList.add('panning');
+      this.build.clearHover();
+      this.camera.orbit((from.clientX - event.clientX) * scale, (event.clientY - from.clientY) * scale * 0.6);
+    } else if (this.cameraOnly || (this.moved && (
+      event.pointerType === 'touch' || this.build.getToolMode() === 'pointer'
     ))) {
       const from = wasMoving ? previous : this.start;
       this.moveCamera(from.clientX, from.clientY, event.clientX, event.clientY);

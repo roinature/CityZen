@@ -1,9 +1,18 @@
+import { CAMERA_VIEWS, type CameraView } from '../scene/CameraController.js';
+import { CITY_STYLES, type CityStyleId } from '../world/CityStyle.js';
+
 export interface GameOptions {
   showGrid: boolean;
   showCars: boolean;
   maxCars: number;
   cameraSpeed: number;
   shadowsEnabled: boolean;
+  cityStyle: CityStyleId;
+  cameraView: CameraView;
+  /** Building heights, percent. */
+  skyline: number;
+  crossings: boolean;
+  trees: boolean;
   unlimitedMoney: boolean;
   soundEnabled: boolean;
   masterVolume: number;
@@ -19,12 +28,21 @@ const DEFAULT_OPTIONS: GameOptions = {
   maxCars: 20,
   cameraSpeed: 30,
   shadowsEnabled: true,
+  cityStyle: 'classic',
+  cameraView: 'hero',
+  skyline: 100,
+  crossings: true,
+  trees: true,
   unlimitedMoney: false,
   soundEnabled: true,
   masterVolume: 50,
   musicVolume: 70,
   sfxVolume: 80,
 };
+
+function selectOptions(items: Record<string, { label: string }>): string {
+  return Object.entries(items).map(([id, { label }]) => `<option value="${id}">${label}</option>`).join('');
+}
 
 export type OptionsChangeCallback = (options: GameOptions) => void;
 
@@ -44,6 +62,27 @@ export class OptionsPanel {
       <div class="options-panel">
         <h2>Options</h2>
         <div class="options-list">
+          <div class="option-row">
+            <label for="opt-style">City Style</label>
+            <select id="opt-style">${selectOptions(CITY_STYLES)}</select>
+          </div>
+          <div class="option-row">
+            <label for="opt-view">Camera (V)</label>
+            <select id="opt-view">${selectOptions(CAMERA_VIEWS)}</select>
+          </div>
+          <div class="option-row">
+            <label for="opt-skyline">Skyline Height</label>
+            <input type="range" id="opt-skyline" min="50" max="180" step="10" />
+            <span class="option-value" id="opt-skyline-val"></span>
+          </div>
+          <div class="option-row">
+            <label for="opt-crossings">Crosswalks</label>
+            <input type="checkbox" id="opt-crossings" />
+          </div>
+          <div class="option-row">
+            <label for="opt-trees">Trees</label>
+            <input type="checkbox" id="opt-trees" />
+          </div>
           <div class="option-row">
             <label for="opt-grid">Show Grid</label>
             <input type="checkbox" id="opt-grid" />
@@ -114,6 +153,11 @@ export class OptionsPanel {
     // Bind change handlers
     this.bindCheckbox('opt-grid', 'showGrid');
     this.bindCheckbox('opt-cars', 'showCars');
+    this.bindCheckbox('opt-crossings', 'crossings');
+    this.bindCheckbox('opt-trees', 'trees');
+    this.bindSelect('opt-style', 'cityStyle');
+    this.bindSelect('opt-view', 'cameraView');
+    this.bindRange('opt-skyline', 'skyline', 'opt-skyline-val');
     this.bindCheckbox('opt-shadows', 'shadowsEnabled');
     this.bindCheckbox('opt-unlimited', 'unlimitedMoney');
     this.bindCheckbox('opt-sound', 'soundEnabled');
@@ -152,6 +196,13 @@ export class OptionsPanel {
     (this.overlay.querySelector('#opt-unlimited') as HTMLInputElement).checked = this.options.unlimitedMoney;
     (this.overlay.querySelector('#opt-sound') as HTMLInputElement).checked = this.options.soundEnabled;
 
+    (this.overlay.querySelector('#opt-crossings') as HTMLInputElement).checked = this.options.crossings;
+    (this.overlay.querySelector('#opt-trees') as HTMLInputElement).checked = this.options.trees;
+    (this.overlay.querySelector('#opt-style') as HTMLSelectElement).value = this.options.cityStyle;
+    (this.overlay.querySelector('#opt-view') as HTMLSelectElement).value = this.options.cameraView;
+    (this.overlay.querySelector('#opt-skyline') as HTMLInputElement).value = String(this.options.skyline);
+    this.overlay.querySelector('#opt-skyline-val')!.textContent = String(this.options.skyline);
+
     const maxCarsEl = this.overlay.querySelector('#opt-max-cars') as HTMLInputElement;
     maxCarsEl.value = String(this.options.maxCars);
     this.overlay.querySelector('#opt-max-cars-val')!.textContent = String(this.options.maxCars);
@@ -182,6 +233,22 @@ export class OptionsPanel {
     });
   }
 
+  private bindSelect(id: string, key: 'cityStyle' | 'cameraView'): void {
+    const el = this.overlay.querySelector(`#${id}`) as HTMLSelectElement;
+    el.addEventListener('change', () => {
+      Object.assign(this.options, { [key]: el.value });
+      this.saveAndNotify();
+    });
+  }
+
+  nextCameraView(): CameraView {
+    const views = Object.keys(CAMERA_VIEWS) as CameraView[];
+    this.options.cameraView = views[(views.indexOf(this.options.cameraView) + 1) % views.length];
+    this.syncUI();
+    this.saveAndNotify();
+    return this.options.cameraView;
+  }
+
   private bindRange(id: string, key: keyof GameOptions, valueId: string): void {
     const el = this.overlay.querySelector(`#${id}`) as HTMLInputElement;
     el.addEventListener('input', () => {
@@ -201,7 +268,10 @@ export class OptionsPanel {
     try {
       const raw = localStorage.getItem(OPTIONS_KEY);
       if (!raw) return { ...DEFAULT_OPTIONS };
-      return { ...DEFAULT_OPTIONS, ...JSON.parse(raw) };
+      const options = { ...DEFAULT_OPTIONS, ...JSON.parse(raw) } as GameOptions;
+      if (!(options.cityStyle in CITY_STYLES)) options.cityStyle = DEFAULT_OPTIONS.cityStyle;
+      if (!(options.cameraView in CAMERA_VIEWS)) options.cameraView = DEFAULT_OPTIONS.cameraView;
+      return options;
     } catch {
       return { ...DEFAULT_OPTIONS };
     }

@@ -20,27 +20,27 @@ interface LightPreset {
 }
 
 const DAY: LightPreset = {
-  sunIntensity: 1.3,
-  sunColor: new THREE.Color(0xffffff),
-  sunHeight: 50,
-  ambientIntensity: 0.68,
-  ambientColor: new THREE.Color(0x404060),
-  hemiIntensity: 0.3,
-  hemiSky: new THREE.Color(0x87ceeb),
-  hemiGround: new THREE.Color(0x7ec850),
-  background: new THREE.Color(0x87ceeb),
+  sunIntensity: 2.35,
+  sunColor: new THREE.Color(0xfff1dc),
+  sunHeight: 62,
+  ambientIntensity: 0.12,
+  ambientColor: new THREE.Color(0xffffff),
+  hemiIntensity: 1.45,
+  hemiSky: new THREE.Color(0xe8f0ff),
+  hemiGround: new THREE.Color(0x6b7a55),
+  background: new THREE.Color(0xcfdbe6),
 };
 
 const NIGHT: LightPreset = {
-  sunIntensity: 0.15,
-  sunColor: new THREE.Color(0x8888cc),
-  sunHeight: 20,
-  ambientIntensity: 0.3,
-  ambientColor: new THREE.Color(0x101030),
-  hemiIntensity: 0.1,
-  hemiSky: new THREE.Color(0x1a1a3e),
-  hemiGround: new THREE.Color(0x0a0a1a),
-  background: new THREE.Color(0x0a0a1e),
+  sunIntensity: 0.9,
+  sunColor: new THREE.Color(0x9db0e6),
+  sunHeight: 62,
+  ambientIntensity: 0.1,
+  ambientColor: new THREE.Color(0x404a80),
+  hemiIntensity: 0.9,
+  hemiSky: new THREE.Color(0x5a6aa8),
+  hemiGround: new THREE.Color(0x1c2438),
+  background: new THREE.Color(0x131b33),
 };
 
 const TRANSITION_SECONDS = 1.2;
@@ -48,8 +48,8 @@ const TRANSITION_SECONDS = 1.2;
 // The camera looks along the grid diagonals (and rotates in 90° steps). A sun on
 // the same diagonal hides every shadow behind its building and lights both
 // visible walls identically, so keep it well off-diagonal.
-const SUN_OFFSET_X = 42;
-const SUN_OFFSET_Z = 12;
+const SUN_OFFSET_X = -44;
+const SUN_OFFSET_Z = 18;
 
 export function setupLighting(scene: THREE.Scene): LightingControls {
   const center = (DEFAULT_GRID_SIZE * CELL_SIZE) / 2;
@@ -60,7 +60,10 @@ export function setupLighting(scene: THREE.Scene): LightingControls {
   sun.target.position.set(center, 0, center);
   scene.add(sun.target);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
+  const shadowSize = matchMedia('(pointer: coarse)').matches ? 2048 : 4096;
+  sun.shadow.mapSize.set(shadowSize, shadowSize);
+  sun.shadow.bias = -0.0004;
+  sun.shadow.normalBias = 0.03;
   sun.shadow.camera.left = -50;
   sun.shadow.camera.right = 50;
   sun.shadow.camera.top = 50;

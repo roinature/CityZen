@@ -103,6 +103,10 @@ export type { ZoneLevelDef } from './constants/buildings.js';
 // Logic
 export { canPlaceBuilding, createEmptyGrid, getEffectiveSize, getReplacedRoads, replacesRoads } from './logic/placement.js';
 export { createStarterLayout, getStarterEntranceX, isStarterEntranceRoad } from './logic/starterLayout.js';
+export {
+  planTown, normalizeTownSettings, TOWN_CHARACTERS, TOWN_CHARACTER_KNOBS, DEFAULT_TOWN,
+} from './logic/townPlan.js';
+export type { TownSettings, TownCharacter, TownPlan } from './logic/townPlan.js';
 export type { TaxBreakdown } from './logic/resources.js';
 export { calculateTaxBreakdown, calculateTaxRevenue, calculateMaintenance, calculateNetIncome, calculatePopulationGrowth, calculateHappiness, calculateHousingCapacity, calculateBudgetPenalty, calculateTaxPenalty, clamp, calculateCityScore } from './logic/resources.js';
 export { simulateTick, simulateCityTick, advanceClock } from './logic/simulation.js';

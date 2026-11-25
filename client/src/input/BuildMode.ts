@@ -74,7 +74,7 @@ function computeStraightLine(start: Position, end: Position, stepW: number, step
 
 export class BuildMode {
   private scene: THREE.Scene;
-  private camera: THREE.Camera;
+  private getCamera: () => THREE.Camera;
   private raycaster: GridRaycaster;
   private factory: BuildingFactory;
 
@@ -112,9 +112,9 @@ export class BuildMode {
   /** Reports the cost of what is about to be placed (null = nothing), and whether the city can afford it. */
   onDragCostUpdate: ((cost: number | null, affordable?: boolean) => void) | null = null;
 
-  constructor(scene: THREE.Scene, camera: THREE.Camera, canvas: HTMLCanvasElement) {
+  constructor(scene: THREE.Scene, getCamera: () => THREE.Camera, canvas: HTMLCanvasElement) {
     this.scene = scene;
-    this.camera = camera;
+    this.getCamera = getCamera;
     this.raycaster = new GridRaycaster(canvas);
     this.factory = new BuildingFactory();
   }
@@ -308,7 +308,7 @@ export class BuildMode {
   }
 
   hover(x: number, y: number): void {
-    this.currentHoverPos = this.raycaster.getGridPosition(x, y, this.camera, this.isDragging);
+    this.currentHoverPos = this.raycaster.getGridPosition(x, y, this.getCamera(), this.isDragging);
   }
 
   clearHover(): void {
@@ -358,7 +358,7 @@ export class BuildMode {
   }
 
   tap(x: number, y: number): void {
-    const pos = this.raycaster.getGridPosition(x, y, this.camera);
+    const pos = this.raycaster.getGridPosition(x, y, this.getCamera());
     if (!pos) return;
     if (this.toolMode === 'bulldoze') {
       this.demolishArea(pos);
@@ -380,7 +380,7 @@ export class BuildMode {
   }
 
   demolishAt(x: number, y: number): void {
-    const pos = this.raycaster.getGridPosition(x, y, this.camera);
+    const pos = this.raycaster.getGridPosition(x, y, this.getCamera());
     if (pos) this.onDemolish?.(pos);
   }
 

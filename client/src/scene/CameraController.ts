@@ -3,6 +3,22 @@ import { CELL_SIZE, DEFAULT_GRID_SIZE, clamp, getEffectiveSize, getStarterEntran
 import type { SceneManager } from './SceneManager.js';
 
 const START_ANGLE = Math.PI / 4;
+const MIN_PITCH = THREE.MathUtils.degToRad(7);
+const MAX_PITCH = THREE.MathUtils.degToRad(88);
+/** An orthographic view tilted lower than this would reach under the ground. */
+const MIN_ORTHOGRAPHIC_PITCH = THREE.MathUtils.degToRad(29);
+/** Radians per second while a rotation key is held. */
+const KEY_ORBIT_SPEED = 1.6;
+
+export type CameraView = 'hero' | 'isometric' | 'top' | 'street';
+
+/** Elevation above the horizon, in degrees, and projection of each view. */
+export const CAMERA_VIEWS: Record<CameraView, { label: string; pitch: number; perspective: boolean; maxZoom?: number }> = {
+  hero: { label: 'Skyline', pitch: 27, perspective: true },
+  isometric: { label: 'Isometric', pitch: 35.26, perspective: false },
+  top: { label: 'Top down', pitch: 84, perspective: true },
+  street: { label: 'Street', pitch: 14, perspective: true, maxZoom: 12 },
+};
 
 export class CameraController {
   private sceneManager: SceneManager;
@@ -23,9 +39,11 @@ export class CameraController {
   // Rotation around Y axis (radians). PI/4 = initial isometric view
   private rotationAngle = START_ANGLE;
   private targetRotation = START_ANGLE;
-  private readonly rotationAnimSpeed = 5;
-  private readonly orbitRadius = 50 * Math.SQRT2; // ~70.71, same XZ distance as original (50,50)
-  private readonly orbitHeight = 50;
+  private readonly rotationAnimSpeed = 11;
+  private view: CameraView = 'hero';
+  private pitch = THREE.MathUtils.degToRad(CAMERA_VIEWS.hero.pitch);
+  private targetPitch = this.pitch;
+  private zoomBeforeStreet = 0;
 
   constructor(sceneManager: SceneManager) {
     this.sceneManager = sceneManager;
@@ -33,11 +51,8 @@ export class CameraController {
 
     window.addEventListener('keydown', (e) => {
       if (e.target instanceof Element && e.target.closest('input, select, textarea, [contenteditable="true"]')) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
       this.keys.add(e.code);
-      if (!e.repeat) {
-        if (e.code === 'KeyQ') this.rotate(-1);
-        if (e.code === 'KeyE') this.rotate(1);
-      }
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     window.addEventListener('blur', () => this.keys.clear());
@@ -69,10 +84,12 @@ export class CameraController {
     }
 
     const aspect = window.innerWidth / window.innerHeight;
-    const groundTilt = this.orbitHeight / Math.hypot(this.orbitRadius, this.orbitHeight);
+    const groundTilt = Math.sin(this.pitch);
     // Reserve room for the status bar, dock, and the tops of buildings.
-    this.openingZoom = Math.max(30, span * groundTilt + 16, (span + 10) / aspect);
-    this.targetZoom = this.openingZoom;
+    this.openingZoom = Math.max(30, span * groundTilt * 0.85 + 6, (span + 4) / aspect);
+    const { maxZoom } = CAMERA_VIEWS[this.view];
+    this.zoomBeforeStreet = this.openingZoom;
+    this.targetZoom = maxZoom ? Math.min(maxZoom, this.openingZoom) : this.openingZoom;
     this.sceneManager.setFrustumSize(this.targetZoom);
     this.update(0);
   }
@@ -88,25 +105,25 @@ export class CameraController {
       this.sceneManager.setFrustumSize(this.targetZoom);
     }
 
-    // Smooth rotation animation
-    const rotDiff = this.targetRotation - this.rotationAngle;
-    if (Math.abs(rotDiff) > 0.001) {
-      const step = this.rotationAnimSpeed * deltaTime;
-      if (Math.abs(rotDiff) < step) {
-        this.rotationAngle = this.targetRotation;
-      } else {
-        this.rotationAngle += Math.sign(rotDiff) * step;
-      }
-    }
+    const held = (plus: string, minus: string) => Number(this.keys.has(plus)) - Number(this.keys.has(minus));
+    const turn = held('KeyE', 'KeyQ');
+    const tilt = held('KeyR', 'KeyF');
+    if (turn || tilt) this.orbit(turn * KEY_ORBIT_SPEED * deltaTime, tilt * KEY_ORBIT_SPEED * 0.5 * deltaTime);
 
-    // Compute offset from rotation angle
-    this.offset.set(
-      this.orbitRadius * Math.sin(this.rotationAngle),
-      this.orbitHeight,
-      this.orbitRadius * Math.cos(this.rotationAngle),
-    );
-    // Keep the orthographic camera above the ground across the whole viewport at wide zooms.
-    this.offset.multiplyScalar(Math.max(1, this.sceneManager.getFrustumSize() / 90));
+    // Ease towards the target angles, so a drag glides to a stop
+    const ease = 1 - Math.exp(-this.rotationAnimSpeed * deltaTime);
+    this.rotationAngle += (this.targetRotation - this.rotationAngle) * ease;
+    this.pitch += (this.targetPitch - this.pitch) * ease;
+    if (Math.abs(this.targetRotation - this.rotationAngle) < 1e-4) this.rotationAngle = this.targetRotation;
+    if (Math.abs(this.targetPitch - this.pitch) < 1e-4) this.pitch = this.targetPitch;
+
+    // The orthographic camera only has to stay above the ground across the
+    // whole viewport; the perspective one frames the city by standing back.
+    const distance = this.sceneManager.isPerspective()
+      ? this.sceneManager.getViewDistance()
+      : 87 * Math.max(1, this.sceneManager.getFrustumSize() / 90);
+    const flat = distance * Math.cos(this.pitch);
+    this.offset.set(flat * Math.sin(this.rotationAngle), distance * Math.sin(this.pitch), flat * Math.cos(this.rotationAngle));
 
     // Pan directions relative to current camera rotation
     const forward = new THREE.Vector3(
@@ -116,7 +133,8 @@ export class CameraController {
       Math.cos(this.rotationAngle), 0, -Math.sin(this.rotationAngle),
     );
 
-    const speed = this.panSpeed * deltaTime;
+    // Slow down close to the ground.
+    const speed = this.panSpeed * deltaTime * Math.min(1, this.sceneManager.getFrustumSize() / 30);
     if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) {
       this.target.addScaledVector(forward, speed);
     }
@@ -145,8 +163,26 @@ export class CameraController {
     this.panSpeed = speed;
   }
 
+  setView(view: CameraView): void {
+    if (view === this.view) return;
+    const { pitch, perspective, maxZoom } = CAMERA_VIEWS[view];
+    if (maxZoom) this.zoomBeforeStreet = this.targetZoom;
+    else if (CAMERA_VIEWS[this.view].maxZoom) this.targetZoom = this.zoomBeforeStreet;
+    if (maxZoom) this.targetZoom = Math.min(this.targetZoom, maxZoom);
+    this.view = view;
+    this.targetPitch = THREE.MathUtils.degToRad(pitch);
+    this.sceneManager.setPerspective(perspective);
+  }
+
   getRotationAngle(): number {
     return this.rotationAngle;
+  }
+
+  /** Turn around the point in view and tilt towards (+) or away from the top-down view, in radians. */
+  orbit(turn: number, tilt: number): void {
+    this.targetRotation += turn;
+    const lowest = this.sceneManager.isPerspective() ? MIN_PITCH : MIN_ORTHOGRAPHIC_PITCH;
+    this.targetPitch = clamp(this.targetPitch + tilt, lowest, MAX_PITCH);
   }
 
   rotate(direction: -1 | 1): void {
@@ -180,7 +216,8 @@ export class CameraController {
   ): void {
     const zoom = this.sceneManager.getFrustumSize();
     const nextZoom = zoomFactor === 1 ? zoom : clamp(zoom * zoomFactor, this.minZoom, this.getZoomOutLimit());
-    const groundTilt = this.orbitHeight / Math.hypot(this.orbitRadius, this.orbitHeight);
+    // Near the horizon a small drag would otherwise cross the whole map.
+    const groundTilt = Math.max(0.25, Math.sin(this.pitch));
     const right = (fromX * zoom - toX * nextZoom) / viewportHeight;
     const forward = (toY * nextZoom - fromY * zoom) / (viewportHeight * groundTilt);
     const sin = Math.sin(this.rotationAngle);

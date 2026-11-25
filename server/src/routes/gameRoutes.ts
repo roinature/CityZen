@@ -7,6 +7,7 @@ import {
   isRoad,
   isZone,
   calculateEdgeConnections,
+  normalizeTownSettings,
   type ClaimPlotPayload,
   type JoinCityPayload,
   type PlaceBuildingPayload,
@@ -18,6 +19,7 @@ import {
   type SetGameSpeedPayload,
   type PlacedBuilding,
   type CityState,
+  type Player,
 } from '@cityzen/shared';
 import { IS_SERVERLESS } from '../config.js';
 import { GameRoom } from '../game/GameRoom.js';
@@ -34,6 +36,8 @@ interface CityActionResult {
   code?: string;
   roadsChanged?: boolean;
   placement?: BuildingsPlacedPayload;
+  city?: CityState;
+  players?: Player[];
 }
 
 export function createGameRoutes(roomManager: RoomManager, worldManager: WorldManager): Router {
@@ -326,6 +330,14 @@ export function createGameRoutes(roomManager: RoomManager, worldManager: WorldMa
   router.post('/city/restart', cityAction((room) => {
     room.restart();
     return { success: true, roadsChanged: true };
+  }));
+
+  // Replaces the whole city, like restart. The settings are planned again here:
+  // the client's preview is only a picture. The response carries the city since
+  // a full town can be too large for a realtime message.
+  router.post('/city/generate', cityAction((room, body: { settings?: unknown }) => {
+    room.generateTown(normalizeTownSettings(body.settings));
+    return { success: true, roadsChanged: true, city: room.state, players: room.getPlayerList() };
   }));
 
   // POST /api/city/leave

@@ -88,7 +88,8 @@ CityZen/
 - **Right click**: Demolish building under cursor
 - **WASD / Arrow keys**: Pan camera
 - **Scroll wheel**: Zoom in/out
-- **Q / E**: Rotate camera
+- **Right-drag / middle-drag** (or **Shift + left-drag**): Orbit: sideways to rotate, up and down to tilt
+- **Q / E**: Rotate camera · **R / F**: Tilt
 - **Space**: Pause / resume · **1-3**: Game speed
 - **B**: Toggle bulldozer
 - **ESC**: Open/close game menu (or deselect building)
@@ -97,7 +98,15 @@ On a touchscreen:
 
 - **Tap** a plot with a tool selected to build or bulldoze.
 - **Drag** to move the map. With a road or zone selected, a one-finger drag draws a road or fills a rectangle.
-- **Use two fingers** to move or pinch-zoom the map with any tool selected. The camera buttons also zoom and rotate.
+- **Use two fingers** to move or pinch-zoom the map, and twist to rotate it, with any tool selected. The camera buttons also zoom and rotate.
+
+### Town Planner
+
+Menu → **Town Planner** replaces the city with a planned town, with a live preview. Pick a character (city, crossroads, hill, river or village) and a seed, then adjust blocks, curves, cul-de-sacs, downtown, parks, parking and roads out. The same settings on the same site always give the same town.
+
+### Looks
+
+**V** or the **View** button switches between skyline, isometric, top-down and street cameras. Options has city styles, skyline height, crosswalks and trees. Building shading and the planner's vocabulary are adapted from [citygen](https://github.com/hxtnv/citygen); see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ### Resources
 

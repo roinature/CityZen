@@ -2285,3 +2285,134 @@ body:not(.in-city) .density-picker {
 .earth-legacy { display: grid; gap: 4px; }
 .earth-panel small { display: block; margin-top: 14px; color: #bdc8c3; }
 .earth-panel a { color: inherit; }
+
+/* Town planner */
+.option-row select,
+.option-row input[type="number"] {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  background: #26263f;
+  color: white;
+  font: inherit;
+}
+
+.town-planner {
+  display: grid;
+  grid-template: "preview settings" minmax(0, 1fr) "preview buttons" auto / 340px 380px;
+  gap: 16px 28px;
+  max-width: 100%;
+  max-height: 100%;
+  padding: 24px 28px;
+  border-radius: 12px;
+  background: #1a1a2e;
+  color: white;
+}
+
+.town-planner h2 {
+  margin-bottom: 14px;
+  font-size: 22px;
+}
+
+.town-planner-preview { grid-area: preview; }
+
+.town-planner canvas {
+  display: block;
+  width: 100%;
+  border-radius: 8px;
+}
+
+.town-planner-stats {
+  margin: 10px 0;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
+.town-planner-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: 12px;
+}
+
+.town-planner-legend span::before {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  border-radius: 2px;
+  background: var(--swatch);
+}
+
+.town-planner-settings {
+  grid-area: settings;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  max-height: 68vh;
+  padding-right: 8px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.town-planner .options-buttons { grid-area: buttons; }
+
+.town-planner .option-row > label:first-child { width: 110px; }
+
+.town-planner .option-value { min-width: 38px; }
+
+.town-planner-characters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 6px;
+}
+
+.town-planner .menu-btn { padding: 8px 10px; }
+
+.town-planner-characters [aria-pressed="true"] {
+  background: #4caf50;
+}
+
+.town-planner .town-planner-exits {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.town-planner .town-planner-exits label {
+  width: auto;
+  font-size: 13px;
+}
+
+@media (max-width: 820px) {
+  .town-planner {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    padding: 16px;
+    overflow: auto;
+  }
+
+  .town-planner canvas {
+    width: min(100%, 260px);
+    margin: 0 auto;
+  }
+
+  .town-planner-preview,
+  .town-planner-settings {
+    flex: none;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .town-planner .options-buttons {
+    position: sticky;
+    bottom: -16px;
+    padding: 12px 0;
+    background: #1a1a2e;
+  }
+}

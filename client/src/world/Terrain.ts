@@ -38,15 +38,15 @@ function addTreeGroves(scene: THREE.Scene, size: number, entranceX: number): voi
   };
 
   for (const grove of TREE_GROVES) {
-    for (let i = 0; i < grove.count; i++) {
+    for (let i = 0; i < grove.count * 4; i++) {
       const angle = random() * Math.PI * 2;
       const radius = Math.sqrt(random()) * CELL_SIZE;
       const x = grove.x * size + Math.cos(angle) * radius * 6;
       const z = grove.z * size + Math.sin(angle) * radius * 5;
       // Keep trunks and overhanging crowns clear of the grid and the road.
-      if (x > -2 && x < size + 2 && z > -2 && z < size + 2) continue;
+      if (x > -1 && x < size + 1 && z > -1 && z < size + 1) continue;
       if (z >= size && Math.abs(x - entranceX) < 2.4) continue;
-      if (trees.some(tree => Math.hypot(tree.x - x, tree.z - z) < 1.25)) continue;
+      if (trees.some(tree => Math.hypot(tree.x - x, tree.z - z) < 0.6)) continue;
       const pine = random() < 0.37;
       const palette = pine ? PINE_COLORS : LEAF_COLORS;
       trees.push({
@@ -54,7 +54,7 @@ function addTreeGroves(scene: THREE.Scene, size: number, entranceX: number): voi
         z,
         pine,
         angle,
-        scale: (0.75 + random() * 0.65) * CELL_SIZE,
+        scale: (0.34 + random() * 0.3) * CELL_SIZE,
         color: palette[Math.floor(random() * palette.length)],
       });
     }
@@ -121,7 +121,7 @@ function createEntranceRoad(entranceX: number, startZ: number, endZ: number): TH
   const shoulder = new THREE.PlaneGeometry(CELL_SIZE * 1.44, length);
   shoulder.rotateX(-Math.PI / 2);
   const verge = new THREE.Mesh(shoulder, new THREE.MeshLambertMaterial({ color: 0x82765d }));
-  verge.position.set(entranceX, -0.018, startZ + length / 2);
+  verge.position.set(entranceX, -0.03, startZ + length / 2);
   verge.receiveShadow = true;
   exterior.add(verge);
 
@@ -185,7 +185,7 @@ export function createTerrain(scene: THREE.Scene) {
   const size = DEFAULT_GRID_SIZE * CELL_SIZE;
 
   // Playable plot
-  const grass = createGrassTexture('#8cac6d', ['#7f9e60', '#98b77a', '#85a467', '#a0bc82']);
+  const grass = createGrassTexture('#93a873', ['#8ca26b', '#9aae7a', '#8fa46e', '#9db180']);
   grass.repeat.set(size / 8, size / 8);
   const geometry = new THREE.PlaneGeometry(size, size);
   geometry.rotateX(-Math.PI / 2);
@@ -196,13 +196,13 @@ export function createTerrain(scene: THREE.Scene) {
   scene.add(mesh);
 
   // Surrounding countryside, so the city doesn't float in an empty void
-  const outerSize = size * 7;
-  const outerGrass = createGrassTexture('#78965d', ['#6d8a53', '#829f66', '#748f58']);
+  const outerSize = size * 40;
+  const outerGrass = createGrassTexture('#8fa46f', ['#889d68', '#96aa76', '#8c9f6b']);
   outerGrass.repeat.set(outerSize / 8, outerSize / 8);
   const outerGeometry = new THREE.PlaneGeometry(outerSize, outerSize);
   outerGeometry.rotateX(-Math.PI / 2);
   const outer = new THREE.Mesh(outerGeometry, new THREE.MeshLambertMaterial({ map: outerGrass }));
-  outer.position.set(size / 2, -0.03, size / 2);
+  outer.position.set(size / 2, -0.06, size / 2);
   outer.receiveShadow = true;
   outer.name = 'terrain-outskirts';
   scene.add(outer);
@@ -222,7 +222,7 @@ export function createTerrain(scene: THREE.Scene) {
 
   const entranceX = (getStarterEntranceX(DEFAULT_GRID_SIZE) + 0.5) * CELL_SIZE;
   addTreeGroves(scene, size, entranceX);
-  const entranceRoad = createEntranceRoad(entranceX, size, (size + outerSize) / 2);
+  const entranceRoad = createEntranceRoad(entranceX, size, size * 4);
   scene.add(entranceRoad);
 
   let activeSite: string | undefined;
@@ -234,7 +234,6 @@ export function createTerrain(scene: THREE.Scene) {
     const site = getSite(siteId);
     siteTexture = site ? new THREE.CanvasTexture(drawSiteMap(site.id).canvas) : undefined;
     if (siteTexture) {
-      siteTexture.magFilter = THREE.NearestFilter;
       siteTexture.colorSpace = THREE.SRGBColorSpace;
     }
     mesh.material.map = siteTexture ?? grass;

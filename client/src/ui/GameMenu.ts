@@ -6,6 +6,7 @@ export interface GameMenuCallbacks {
   onRestart: () => void;
   onEndGame: () => void;
   onOptions: () => void;
+  onPlanTown: () => void;
   onResume: () => void;
   fetchCities: () => Promise<CityListItem[]>;
 }
@@ -31,6 +32,7 @@ export class GameMenu {
           <button class="menu-btn" data-action="resume">Resume Game</button>
           <button class="menu-btn" data-action="save">Save Game</button>
           <button class="menu-btn" data-action="load">Load Game</button>
+          <button class="menu-btn" data-action="plan">Town Planner</button>
           <button class="menu-btn" data-action="options">Options</button>
           <button class="menu-btn" data-action="connect-x" style="background-color: #000; color: #fff;">Connect X</button>
           <button class="menu-btn" data-action="restart">Restart City</button>
@@ -72,6 +74,7 @@ export class GameMenu {
           case 'resume': this.hide(); this.callbacks.onResume(); break;
           case 'save': this.callbacks.onSave(); break;
           case 'load': this.showLoadPanel(); break;
+          case 'plan': this.hide(); this.callbacks.onPlanTown(); break;
           case 'options': this.hide(); this.callbacks.onOptions(); break;
           case 'connect-x': window.location.href = '/api/auth/twitter'; break;
           case 'restart': this.handleRestart(); break;

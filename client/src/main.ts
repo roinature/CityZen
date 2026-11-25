@@ -20,7 +20,7 @@ import {
   DisplayType,
 } from '@cityzen/shared';
 import { SceneManager } from './scene/SceneManager.js';
-import { CameraController } from './scene/CameraController.js';
+import { CAMERA_VIEWS, CameraController } from './scene/CameraController.js';
 import { setupLighting } from './scene/LightingSetup.js';
 import { createGridOverlay, setGridEditing } from './scene/GridOverlay.js';
 import { EdgeRoadIndicator } from './scene/EdgeRoadIndicator.js';
@@ -46,6 +46,7 @@ import { ZoomControl } from './ui/ZoomControl.js';
 import { MessageManager } from './ui/MessageManager.js';
 import { GameClient } from './network/GameClient.js';
 import { SoundManager } from './audio/SoundManager.js';
+import { TownPlannerPanel } from './ui/TownPlannerPanel.js';
 import { CityLoading } from './ui/CityLoading.js';
 
 const SERVER_URL = window.location.origin;
@@ -102,10 +103,9 @@ const { entranceRoad, setSite } = createTerrain(sceneManager.scene);
 const gridHelper = createGridOverlay(sceneManager.scene);
 const edgeRoadIndicator = new EdgeRoadIndicator(sceneManager.scene);
 
-const touchDisplay = matchMedia('(pointer: coarse)').matches;
-const cityRenderer = new CityRenderer(sceneManager.scene, entranceRoad, touchDisplay ? 180 : 280);
+const cityRenderer = new CityRenderer(sceneManager.scene, entranceRoad);
 const carManager = new CarManager(sceneManager.scene);
-const buildMode = new BuildMode(sceneManager.scene, sceneManager.camera, canvas);
+const buildMode = new BuildMode(sceneManager.scene, () => sceneManager.camera, canvas);
 const soundManager = new SoundManager();
 
 // --- HUD visibility ---
@@ -282,6 +282,9 @@ function addHudAction(label: string, onClick: () => void, compactLabel?: string)
   return button;
 }
 
+addHudAction('View', () => {
+  footerIndicator.toast(`${CAMERA_VIEWS[optionsPanel.nextCameraView()].label} view`);
+});
 addHudAction('Finance', () => {
   if (!cityState) return;
   toolbar.close();
@@ -652,6 +655,9 @@ const gameMenu = new GameMenu(uiRoot, {
   onOptions: () => {
     optionsPanel.show();
   },
+  onPlanTown: () => {
+    if (cityState) townPlanner.show(cityState);
+  },
   onResume: () => {
     // Menu closes itself
   },
@@ -665,6 +671,15 @@ function applyOptions(options: GameOptions): void {
   // Cars
   carManager.setEnabled(options.showCars);
   carManager.setMaxCars(options.maxCars);
+
+  // Looks
+  cityRenderer.setLook({
+    style: options.cityStyle,
+    skyline: options.skyline / 100,
+    crossings: options.crossings,
+    trees: options.trees,
+  });
+  cameraController.setView(options.cameraView);
 
   // Camera speed
   cameraController.setPanSpeed(options.cameraSpeed);
@@ -684,6 +699,12 @@ function applyOptions(options: GameOptions): void {
   soundManager.setSfxVolume(options.sfxVolume / 100);
 }
 
+const townPlanner = new TownPlannerPanel(uiRoot, async (settings) => {
+  const built = await gameClient.generateTown(settings, playerId);
+  if (built && cityState) cameraController.frameCity(cityState);
+  return built;
+});
+
 const optionsPanel = new OptionsPanel(uiRoot, applyOptions);
 
 addHudAction('Menu', () => {
@@ -700,6 +721,8 @@ window.addEventListener('keydown', (e) => {
     maslowPanel.hide();
   } else if (financePanel.isVisible()) {
     financePanel.hide();
+  } else if (townPlanner.isVisible()) {
+    townPlanner.hide();
   } else if (optionsPanel.isVisible()) {
     optionsPanel.hide();
     gameMenu.show();
@@ -720,7 +743,7 @@ window.addEventListener('keydown', (e) => {
   if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
   const el = e.target as HTMLElement | null;
   if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
-  if (!cityState || !gameClient || cityAdvisor.isOpen() || gameMenu.isVisible() || optionsPanel.isVisible()) return;
+  if (!cityState || !gameClient || cityAdvisor.isOpen() || gameMenu.isVisible() || optionsPanel.isVisible() || townPlanner.isVisible()) return;
 
   if (e.code === 'Space' && !el?.closest('button, select')) {
     e.preventDefault();
@@ -733,6 +756,8 @@ window.addEventListener('keydown', (e) => {
     }
   } else if (e.code === 'Digit1' || e.code === 'Digit2' || e.code === 'Digit3') {
     gameClient.setGameSpeed(Number(e.code.slice(-1)), playerId);
+  } else if (e.code === 'KeyV') {
+    footerIndicator.toast(`${CAMERA_VIEWS[optionsPanel.nextCameraView()].label} view`);
   } else if (e.code === 'KeyB') {
     setToolMode(buildMode.getToolMode() === 'bulldoze' ? 'pointer' : 'bulldoze');
   }
@@ -764,7 +789,7 @@ function gameLoop(): void {
 
   cameraController.update(deltaTime);
   lighting.update(deltaTime);
-  cityRenderer.update(deltaTime, sceneManager.camera, isNight);
+  cityRenderer.update(deltaTime, isNight);
   // Paused (speed 0) freezes all simulated movement; camera/UI stay live
   const paused = cityState?.clock?.speed === 0;
   if (!paused) carManager.update(deltaTime, cityState);

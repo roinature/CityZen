@@ -22,6 +22,7 @@ import {
   type Player,
   type WorldState,
   type PopulationSummary,
+  type TownSettings,
 } from '@cityzen/shared';
 
 export interface GameCallbacks {
@@ -246,6 +247,23 @@ export class GameClient {
 
   async restart(playerId?: string): Promise<void> {
     await this.post('/api/city/restart', { playerId });
+  }
+
+  async generateTown(settings: TownSettings, playerId: string): Promise<boolean> {
+    const channel = this.joinedCityChannel;
+    if (!channel) return false;
+    try {
+      const result = await this.post('/api/city/generate', { settings, playerId });
+      if (this.joinedCityChannel !== channel) return false;
+      if (result.success) {
+        this.callbacks.onCityState(result.city, result.players ?? []);
+        return true;
+      }
+      this.callbacks.onError({ message: result.error || 'Could not plan the town', code: 'GENERATE_FAILED' });
+    } catch {
+      this.callbacks.onError({ message: 'Could not reach the server', code: 'GENERATE_FAILED' });
+    }
+    return false;
   }
 
   async setTaxRate(taxRate: number, playerId?: string): Promise<void> {

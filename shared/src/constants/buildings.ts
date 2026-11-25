@@ -100,6 +100,16 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     height: 0.2,
   },
 
+  [BuildingType.PARKING]: {
+    type: BuildingType.PARKING,
+    label: 'Parking Lot',
+    cost: 40,
+    size: { w: 1, d: 1 },
+    effects: { happiness: 1, maintenance: 0.5 },
+    color: '#55585e',
+    height: 0.1,
+  },
+
   // === ENERGY → Maslow: PHYSIOLOGICAL ===
   [BuildingType.ENERGY_WIND_TURBINE]: {
     type: BuildingType.ENERGY_WIND_TURBINE,

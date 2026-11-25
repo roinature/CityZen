@@ -1,0 +1,192 @@
+import * as THREE from 'three';
+import { BUILDING_DEFS, BuildingType, CELL_SIZE, getEffectiveSize, type PlacedBuilding } from '@cityzen/shared';
+import type { CityStyle } from './CityStyle.js';
+
+type Build = (kit: Kit, w: number, d: number) => void;
+
+/** Small helper for putting together a model out of plain shapes. */
+class Kit {
+  readonly group = new THREE.Group();
+
+  constructor(readonly style: CityStyle, readonly accent: number) {}
+
+  add(geometry: THREE.BufferGeometry, color: number, x: number, y: number, z: number): THREE.Mesh {
+    const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color, roughness: 0.85, flatShading: true }));
+    mesh.position.set(x, y, z);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    this.group.add(mesh);
+    return mesh;
+  }
+
+  box(w: number, h: number, d: number, color: number, x = 0, y = 0, z = 0): THREE.Mesh {
+    return this.add(new THREE.BoxGeometry(w, h, d), color, x, y + h / 2, z);
+  }
+
+  cylinder(top: number, bottom: number, h: number, color: number, x = 0, y = 0, z = 0): THREE.Mesh {
+    return this.add(new THREE.CylinderGeometry(top, bottom, h, 20), color, x, y + h / 2, z);
+  }
+
+  tree(x: number, z: number, scale = 1): void {
+    this.cylinder(0.025, 0.035, 0.2 * scale, 0x6b4f35, x, 0.03, z);
+    this.add(new THREE.IcosahedronGeometry(0.2 * scale, 1), this.style.leaves[0], x, 0.36 * scale, z);
+  }
+}
+
+const WHITE = 0xe9eaea;
+const METAL = 0x8d949b;
+
+const plant: Build = (kit, w, d) => {
+  kit.box(w * 0.5, 0.75, d * 0.42, kit.style.industry[0], -w * 0.18, 0.04, d * 0.2);
+  kit.box(w * 0.52, 0.06, d * 0.44, kit.style.flatRoof, -w * 0.18, 0.79, d * 0.2);
+  for (const x of [-0.28, -0.1, 0.08]) {
+    kit.cylinder(0.11, 0.15, 2.4, 0xc7bdb2, x * w, 0.04, -d * 0.2);
+    kit.cylinder(0.12, 0.12, 0.2, 0xb0483c, x * w, 2.1, -d * 0.2);
+  }
+  kit.cylinder(0.3, 0.3, 0.5, METAL, w * 0.3, 0.04, d * 0.22);
+  kit.box(w * 0.2, 0.3, d * 0.2, 0x2c2c2e, w * 0.3, 0.04, -d * 0.2);
+};
+
+const basins: Build = (kit, w, d) => {
+  const r = Math.min(w, d) * 0.19;
+  for (const x of [-0.24, 0.24]) {
+    for (const z of [-0.24, 0.24]) {
+      if (x > 0 && z > 0) continue;
+      kit.cylinder(r, r, 0.16, kit.style.concrete, x * w, 0.03, z * d);
+      kit.cylinder(r * 0.86, r * 0.86, 0.02, 0x4f8fa8, x * w, 0.18, z * d);
+      kit.box(r * 1.7, 0.03, 0.05, METAL, x * w, 0.2, z * d);
+    }
+  }
+  kit.box(w * 0.34, 0.5, d * 0.34, kit.style.apartments[0], w * 0.24, 0.03, d * 0.24);
+  kit.box(w * 0.36, 0.06, d * 0.36, kit.accent, w * 0.24, 0.53, d * 0.24);
+};
+
+const gardens: Build = (kit, w, d) => {
+  kit.box(w * 0.86, 0.02, d * 0.1, kit.style.walk, 0, 0.04, 0);
+  kit.box(w * 0.1, 0.02, d * 0.86, kit.style.walk, 0, 0.04, 0);
+  for (const x of [-0.36, 0.36]) for (const z of [-0.36, 0.36]) kit.tree(x * w, z * d);
+};
+
+/** Services with a shape of their own. The rest are ordinary buildings with a coloured roof. */
+const MODELS: Partial<Record<BuildingType, Build>> = {
+  [BuildingType.ENERGY_WIND_TURBINE]: (kit) => {
+    kit.cylinder(0.2, 0.24, 0.05, kit.style.concrete, 0, 0.02);
+    kit.cylinder(0.025, 0.06, 2.6, WHITE, 0, 0.04);
+    kit.box(0.1, 0.1, 0.26, WHITE, 0, 2.6, 0.04);
+    const rotor = new THREE.Group();
+    rotor.name = 'rotor';
+    rotor.position.set(0, 2.65, 0.2);
+    for (let i = 0; i < 3; i++) {
+      const blade = new THREE.Mesh(
+        new THREE.BoxGeometry(0.05, 1.15, 0.018).translate(0, 0.575, 0),
+        new THREE.MeshStandardMaterial({ color: WHITE, roughness: 0.7 }),
+      );
+      blade.castShadow = true;
+      blade.rotation.z = (i * Math.PI * 2) / 3;
+      rotor.add(blade);
+    }
+    kit.group.add(rotor);
+  },
+  [BuildingType.ENERGY_SOLAR_FARM]: (kit, w, d) => {
+    for (let row = 0; row < 4; row++) {
+      for (let i = 0; i < 4; i++) {
+        const panel = kit.add(new THREE.BoxGeometry(w * 0.2, 0.02, d * 0.17), 0x22426e, (i - 1.5) * w * 0.22, 0.14, (row - 1.5) * d * 0.23);
+        panel.rotation.x = 0.5;
+        kit.box(0.03, 0.12, 0.03, METAL, (i - 1.5) * w * 0.22, 0.02, (row - 1.5) * d * 0.23);
+      }
+    }
+  },
+  [BuildingType.ENERGY_COAL_PLANT]: plant,
+  [BuildingType.ENERGY_NUCLEAR_PLANT]: (kit, w, d) => {
+    const profile = [[0.62, 0], [0.5, 0.6], [0.42, 1.2], [0.43, 1.6], [0.48, 1.9]].map(([r, y]) => new THREE.Vector2(r, y));
+    for (const x of [-0.24, 0.24]) {
+      kit.add(new THREE.LatheGeometry(profile, 28), 0xd3d2cc, x * w, 0.04, -d * 0.22).material = new THREE.MeshStandardMaterial({
+        color: 0xd3d2cc, roughness: 0.9, side: THREE.DoubleSide,
+      });
+    }
+    kit.box(w * 0.5, 0.7, d * 0.24, kit.style.industry[0], -w * 0.1, 0.04, d * 0.24);
+    kit.cylinder(0.4, 0.4, 0.6, WHITE, w * 0.3, 0.04, d * 0.24);
+    kit.add(new THREE.SphereGeometry(0.4, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), WHITE, w * 0.3, 0.64, d * 0.24);
+  },
+  [BuildingType.WATER_TOWER]: (kit) => {
+    for (const x of [-0.17, 0.17]) for (const z of [-0.17, 0.17]) kit.cylinder(0.02, 0.025, 1.1, METAL, x, 0.02, z);
+    kit.cylinder(0.035, 0.035, 1.1, METAL, 0, 0.02);
+    kit.cylinder(0.3, 0.24, 0.42, 0xdfe6ea, 0, 1.08);
+    kit.cylinder(0.302, 0.302, 0.07, 0x5f9ec4, 0, 1.36);
+    kit.add(new THREE.ConeGeometry(0.33, 0.18, 20), 0x9fb4c0, 0, 1.6, 0);
+  },
+  [BuildingType.WATER_TREATMENT]: basins,
+  [BuildingType.WATER_SEWAGE_PLANT]: basins,
+  [BuildingType.TOUR_STADIUM]: (kit, w, d) => {
+    const rx = w * 0.46, rz = d * 0.46;
+    const ring = kit.add(new THREE.CylinderGeometry(1, 0.9, 0.8, 40, 1, true), 0xd9dcde, 0, 0.44, 0);
+    ring.scale.set(rx, 1, rz);
+    const bowl = kit.add(new THREE.CylinderGeometry(1, 0.62, 0.74, 40, 1, true), kit.accent, 0, 0.43, 0);
+    bowl.scale.set(rx * 0.97, 1, rz * 0.97);
+    for (const mesh of [ring, bowl]) (mesh.material as THREE.MeshStandardMaterial).side = THREE.DoubleSide;
+    kit.box(w * 0.5, 0.02, d * 0.42, 0x6fa653, 0, 0.06, 0);
+    for (const x of [-1, 1]) for (const z of [-1, 1]) kit.cylinder(0.025, 0.035, 1.3, METAL, x * rx * 0.72, 0.04, z * rz * 0.72);
+  },
+  [BuildingType.TOUR_AMUSEMENT]: (kit, w, d) => {
+    gardens(kit, w, d);
+    const wheel = kit.add(new THREE.TorusGeometry(Math.min(w, d) * 0.3, 0.03, 6, 32), kit.accent, 0, Math.min(w, d) * 0.36, 0);
+    for (let i = 0; i < 4; i++) {
+      const spoke = kit.add(new THREE.BoxGeometry(Math.min(w, d) * 0.6, 0.015, 0.015), WHITE, 0, wheel.position.y, 0);
+      spoke.rotation.z = (i * Math.PI) / 4;
+    }
+    for (const x of [-0.14, 0.14]) kit.box(0.04, wheel.position.y, 0.04, METAL, x * w, 0.02, 0.06);
+    kit.add(new THREE.ConeGeometry(0.4, 0.5, 8), 0xd9534f, -w * 0.28, 0.55, d * 0.26);
+    kit.cylinder(0.32, 0.32, 0.3, 0xf2e3c6, -w * 0.28, 0.03, d * 0.26);
+  },
+  [BuildingType.GOV_MONUMENT]: (kit, w, d) => {
+    gardens(kit, w, d);
+    kit.box(0.5, 0.14, 0.5, kit.style.concrete, 0, 0.04);
+    kit.add(new THREE.CylinderGeometry(0.06, 0.13, 1.7, 4), 0xe6e0d2, 0, 1.02, 0);
+    kit.add(new THREE.ConeGeometry(0.09, 0.16, 4), 0xd8b45a, 0, 1.95, 0);
+  },
+  [BuildingType.HEALTH_CEMETERY]: (kit, w, d) => {
+    gardens(kit, w, d);
+    for (let i = 0; i < 24; i++) {
+      const x = ((i % 6) - 2.5) * w * 0.14, z = (Math.floor(i / 6) - 1.5) * d * 0.2;
+      if (Math.abs(x) > w * 0.06 && Math.abs(z) > d * 0.06) kit.box(0.06, 0.1, 0.025, 0xb9bab6, x, 0.03, z);
+    }
+  },
+  [BuildingType.ART_SCULPTURE_PARK]: (kit, w, d) => {
+    gardens(kit, w, d);
+    kit.add(new THREE.TorusKnotGeometry(0.18, 0.05, 40, 6), kit.accent, 0, 0.42, 0);
+    kit.box(0.14, 0.3, 0.14, 0xd9a43a, -w * 0.2, 0.04, d * 0.2).rotation.y = 0.6;
+    kit.add(new THREE.SphereGeometry(0.12, 12, 8), 0xc6cdd2, w * 0.2, 0.16, d * 0.2);
+  },
+  [BuildingType.TRANS_AIRPORT]: (kit, w, d) => {
+    kit.box(w * 0.92, 0.02, d * 0.2, kit.style.asphalt, 0, 0.04, -d * 0.28);
+    for (let i = 0; i < 9; i++) kit.box(w * 0.05, 0.005, 0.03, WHITE, (i - 4) * w * 0.1, 0.06, -d * 0.28);
+    kit.box(w * 0.6, 0.42, d * 0.18, 0xc9d6dd, -w * 0.08, 0.04, d * 0.24);
+    kit.box(w * 0.62, 0.05, d * 0.2, kit.accent, -w * 0.08, 0.46, d * 0.24);
+    kit.cylinder(0.09, 0.12, 1.1, 0xdcdcd8, w * 0.34, 0.04, d * 0.24);
+    kit.cylinder(0.24, 0.17, 0.2, 0x39566b, w * 0.34, 1.12, d * 0.24);
+    for (const x of [-0.24, 0.06]) {
+      kit.add(new THREE.CapsuleGeometry(0.07, 0.5, 4, 8).rotateX(Math.PI / 2), WHITE, x * w, 0.15, -d * 0.02);
+      kit.box(0.6, 0.02, 0.14, WHITE, x * w, 0.13, -d * 0.02);
+      kit.box(0.02, 0.16, 0.1, kit.accent, x * w, 0.18, -d * 0.02 + 0.26);
+    }
+  },
+};
+
+export function hasServiceModel(type: BuildingType): boolean {
+  return type in MODELS;
+}
+
+const GREEN = new Set<BuildingType>([
+  BuildingType.GOV_MONUMENT, BuildingType.HEALTH_CEMETERY, BuildingType.ART_SCULPTURE_PARK,
+  BuildingType.TOUR_AMUSEMENT, BuildingType.ENERGY_SOLAR_FARM, BuildingType.ENERGY_WIND_TURBINE, BuildingType.TRANS_AIRPORT,
+]);
+
+export function createServiceModel(building: PlacedBuilding, style: CityStyle): THREE.Group {
+  const { w, d } = getEffectiveSize(building.type, building.orientation);
+  const kit = new Kit(style, new THREE.Color(BUILDING_DEFS[building.type].color).getHex());
+  kit.box(w, 0.03, d, GREEN.has(building.type) ? style.lawn : style.concrete);
+  MODELS[building.type]?.(kit, w, d);
+  kit.group.scale.setScalar(CELL_SIZE);
+  kit.group.position.set((building.position.x + w / 2) * CELL_SIZE, 0, (building.position.z + d / 2) * CELL_SIZE);
+  return kit.group;
+}
