@@ -2416,3 +2416,151 @@ body:not(.in-city) .density-picker {
     background: #1a1a2e;
   }
 }
+
+/* Drive mode */
+body.driving .build-dock,
+body.driving .zoom-control {
+  display: none;
+}
+
+#ui-root > .drive-hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 20;
+}
+
+.drive-hud[hidden] {
+  display: none;
+}
+
+.drive-gauge {
+  position: absolute;
+  right: 24px;
+  bottom: 24px;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 10px 16px;
+  border: 1px solid var(--hud-edge);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--hud-surface) 88%, transparent);
+  color: var(--hud-text);
+}
+
+.drive-speed {
+  min-width: 2.2ch;
+  font-size: 34px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.drive-unit {
+  color: var(--hud-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.drive-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  max-width: calc(100% - 320px);
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--hud-surface) 80%, transparent);
+  color: var(--hud-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.drive-exit {
+  position: absolute;
+  right: 24px;
+  bottom: 96px;
+  pointer-events: auto;
+  border-color: var(--hud-edge);
+  background: var(--hud-surface);
+}
+
+.drive-touch {
+  display: none;
+}
+
+@media (pointer: coarse) {
+  .drive-hint {
+    display: none;
+  }
+
+  .drive-gauge {
+    right: 50%;
+    transform: translateX(50%);
+    bottom: max(16px, env(safe-area-inset-bottom));
+  }
+
+  .drive-exit {
+    top: max(80px, calc(env(safe-area-inset-top) + 72px));
+    bottom: auto;
+    right: 16px;
+  }
+
+  .drive-touch {
+    display: block;
+  }
+
+  .drive-touch-button {
+    position: absolute;
+    bottom: max(20px, env(safe-area-inset-bottom));
+    width: 68px;
+    height: 68px;
+    border: 1px solid var(--hud-edge);
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--hud-surface) 75%, transparent);
+    color: var(--hud-text);
+    font-size: 22px;
+    pointer-events: auto;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  .drive-touch-button:active {
+    background: #314c3b;
+  }
+
+  .drive-touch-left { left: 16px; }
+  .drive-touch-right { left: 96px; }
+  .drive-touch-down { right: 96px; }
+  .drive-touch-up { right: 16px; }
+}
+
+#game-canvas.drive-picking {
+  cursor: crosshair;
+}
+
+body.driving .compass-indicator {
+  display: none;
+}
+
+.drive-minimap {
+  position: absolute;
+  left: 20px;
+  bottom: 20px;
+  width: 168px;
+  height: 168px;
+  border: 2px solid var(--hud-edge);
+  border-radius: 50%;
+  box-shadow: 0 4px 16px #0006;
+}
+
+@media (pointer: coarse) {
+  .drive-minimap {
+    top: max(80px, calc(env(safe-area-inset-top) + 72px));
+    bottom: auto;
+    left: 16px;
+    width: 112px;
+    height: 112px;
+  }
+}

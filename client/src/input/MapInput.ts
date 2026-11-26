@@ -12,6 +12,8 @@ export class MapInput {
   private cameraOnly = false;
   private drawing = false;
   private orbiting = false;
+  /** When set, a left-click tap on the map goes here instead of the build tools. */
+  onTap: ((clientX: number, clientY: number) => void) | null = null;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -145,7 +147,8 @@ export class MapInput {
     if (onMap && this.drawing) {
       this.build.finishDraw(event.clientX, event.clientY);
     } else if (onMap && !this.cameraOnly && !this.moved && !this.exceedsTapSlop(event)) {
-      if (event.button === 0) this.build.tap(event.clientX, event.clientY);
+      if (event.button === 0 && this.onTap) this.onTap(event.clientX, event.clientY);
+      else if (event.button === 0) this.build.tap(event.clientX, event.clientY);
       if (event.button === 2) this.build.demolishAt(event.clientX, event.clientY);
     }
     this.reset();

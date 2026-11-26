@@ -61,6 +61,13 @@ function easeOutBack(t: number): number {
  * Walls with rows of windows sized in world units, whatever the box's scale,
  * after citygen's facade shader (MIT, see THIRD_PARTY_NOTICES.md). Shops get a
  * glazed ground floor, works get strip windows, and windows light up at night.
+ *
+ * Glass is smooth and mirrors a made-up surrounding: sky, a ragged skyline of
+ * neighbouring buildings (their windows lit at night) and the street. No two
+ * panes sit quite in one plane, so each mirrors a slightly different piece of
+ * it. The reflection goes in as three's environment light, so fresnel and the
+ * sun's (shadowed) glint come out of the standard lighting. After
+ * manhattan-free-roam (MIT, see THIRD_PARTY_NOTICES.md).
  */
 function createFacadeMaterial(night: { value: number }): THREE.MeshStandardMaterial {
   const material = new THREE.MeshStandardMaterial({ roughness: 0.82, metalness: 0.02 });
@@ -81,9 +88,43 @@ function createFacadeMaterial(night: { value: number }): THREE.MeshStandardMater
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `${varyings}
         uniform float uNight;
-        float facadeLit;`)
+        float facadeLit;
+        float facadeGlass;
+        vec2 facadePane;
+        float facadeHash(vec2 p) {
+          p = fract(p * vec2(123.34, 456.21));
+          p += dot(p, p + 45.32);
+          return fract(p.x * p.y);
+        }
+        // What glass mirrors in world direction r (linear colour). seed: the building's own number.
+        vec3 facadeReflection(vec3 r, float seed) {
+          float level = max(length(r.xz), 1e-3);
+          float elev = r.y / level;
+          vec3 horizon = mix(vec3(0.62, 0.70, 0.78), vec3(0.012, 0.016, 0.04), uNight);
+          vec3 zenith = mix(vec3(0.16, 0.34, 0.70), vec3(0.002, 0.004, 0.014), uNight);
+          vec3 c = mix(horizon, zenith, smoothstep(0.0, 1.2, elev));
+          // the buildings across the street: a ragged skyline, filling everything below it
+          float az = atan(r.z, r.x) * 6.0 + seed * 40.0;
+          float block = floor(az);
+          float tall = 0.04 + 0.5 * pow(facadeHash(vec2(block, floor(seed * 9.0))), 2.0);
+          float there = (1.0 - smoothstep(tall - 0.015, tall + 0.015, elev)) * step(0.08, fract(az));
+          float shade = facadeHash(vec2(block, 11.0));
+          vec3 wall = mix(vec3(0.16, 0.16, 0.17), vec3(0.40, 0.36, 0.31), shade) * mix(1.0, 0.06, uNight);
+          vec2 g = vec2(az * 8.0, elev * 40.0);
+          // their windows, faded out once smaller than a pixel so the far city does not shimmer
+          float fine = 1.0 - smoothstep(0.25, 0.5, max(fwidth(g.x), fwidth(g.y)));
+          float pane = step(0.35, fract(g.x)) * step(0.4, fract(g.y)) * fine;
+          wall *= 1.0 - 0.3 * pane * (1.0 - uNight);
+          wall += vec3(1.0, 0.62, 0.3) * pane * step(0.7, facadeHash(floor(g) + block)) * uNight * 0.7;
+          c = mix(c, wall, there);
+          // and, looking steeply down, the street
+          vec3 street = mix(vec3(0.10, 0.10, 0.095), vec3(0.008, 0.008, 0.012), uNight);
+          return mix(c, street, smoothstep(-0.5, -1.4, elev));
+        }`)
       .replace('#include <color_fragment>', `#include <color_fragment>
         facadeLit = 0.0;
+        facadeGlass = 0.0;
+        facadePane = vec2(0.0);
         if (abs(vFacadeNormal.y) < 0.5) {
           bool side = abs(vFacadeNormal.x) > 0.5;
           float span = side ? vFacadeSize.z : vFacadeSize.x;
@@ -103,9 +144,12 @@ function createFacadeMaterial(night: { value: number }): THREE.MeshStandardMater
           if (kind > 2.5) glass = fv > 0.5 && fv < 0.74 && fu > 0.06 && fu < 0.94;
           if (kind > 0.5 && kind < 2.5 && ground) glass = fu > 0.08 && fu < 0.92 && fv > 0.08 && fv < 0.68;
           // Glass towers, for some of the tall ones.
-          if (kind > 1.5 && kind < 2.5 && vFacadeInfo.y > 0.62 && !ground) glass = fu > 0.08 && fu < 0.92 && fv > 0.16;
+          bool curtain = kind > 1.5 && kind < 2.5 && vFacadeInfo.y > 0.62 && !ground;
+          if (curtain) glass = fu > 0.08 && fu < 0.92 && fv > 0.16;
           vec3 wall = diffuseColor.rgb;
           if (glass) {
+            facadeGlass = curtain ? 1.0 : 0.7;
+            facadePane = vec2(floor(u), floor(v)) + (side ? vec2(0.5, 0.0) : vec2(0.0));
             vec3 pane = mix(vec3(0.10, 0.14, 0.19), vec3(0.22, 0.30, 0.37), fract(v * 0.37 + u * 0.23 + vFacadeInfo.y));
             diffuseColor.rgb = mix(wall, pane, 0.86);
             float roll = fract(sin(dot(vec2(floor(u), floor(v)) + vFacadeInfo.y * 71.0 + (side ? 13.0 : 0.0), vec2(12.9898, 78.233))) * 43758.5453);
@@ -120,7 +164,26 @@ function createFacadeMaterial(night: { value: number }): THREE.MeshStandardMater
           diffuseColor.rgb *= mix(0.72, 1.0, smoothstep(0.0, 0.22, vFacade.y));
         }`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
-        totalEmissiveRadiance += facadeLit * uNight * mix(vec3(1.0, 0.62, 0.26), vec3(0.62, 0.8, 1.0), step(0.88, vFacadeInfo.y)) * 0.75;`);
+        totalEmissiveRadiance += facadeLit * uNight * mix(vec3(1.0, 0.62, 0.26), vec3(0.62, 0.8, 1.0), step(0.88, vFacadeInfo.y)) * 0.75;`)
+      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+        if (facadeGlass > 0.0) roughnessFactor = 0.06;`)
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+        if (facadeGlass > 0.0) {
+          // each pane tilted a hair, sideways and up or down
+          vec3 worldNormal = inverseTransformDirection(normal, viewMatrix);
+          vec3 along = normalize(cross(vec3(0.0, 1.0, 0.0), worldNormal));
+          float a = facadeHash(facadePane + vFacadeInfo.y * 31.0) - 0.5;
+          float b = facadeHash(facadePane.yx + vFacadeInfo.y * 17.0 + 5.0) - 0.5;
+          vec3 tilted = normalize(worldNormal + along * a * 0.08 + vec3(0.0, b * 0.06, 0.0));
+          normal = normalize((viewMatrix * vec4(tilted, 0.0)).xyz);
+        }`)
+      .replace('#include <lights_physical_fragment>', `#include <lights_physical_fragment>
+        if (facadeGlass > 0.0) material.specularColor = mix(material.specularColor, vec3(0.07, 0.08, 0.09), facadeGlass);`)
+      .replace('#include <lights_fragment_maps>', `#include <lights_fragment_maps>
+        if (facadeGlass > 0.0) {
+          vec3 mirrored = inverseTransformDirection(reflect(-geometryViewDir, geometryNormal), viewMatrix);
+          radiance += facadeReflection(mirrored, vFacadeInfo.y) * facadeGlass * 2.0;
+        }`);
   };
   return material;
 }

@@ -7,6 +7,8 @@ export interface GameOptions {
   maxCars: number;
   cameraSpeed: number;
   shadowsEnabled: boolean;
+  /** Glow round lights, colour grading and lens falloff. */
+  postEffects: boolean;
   cityStyle: CityStyleId;
   cameraView: CameraView;
   /** Building heights, percent. */
@@ -28,6 +30,7 @@ const DEFAULT_OPTIONS: GameOptions = {
   maxCars: 20,
   cameraSpeed: 30,
   shadowsEnabled: true,
+  postEffects: true,
   cityStyle: 'classic',
   cameraView: 'hero',
   skyline: 100,
@@ -106,6 +109,10 @@ export class OptionsPanel {
             <input type="checkbox" id="opt-shadows" />
           </div>
           <div class="option-row">
+            <label for="opt-post">Glow &amp; Color Grading</label>
+            <input type="checkbox" id="opt-post" />
+          </div>
+          <div class="option-row">
             <label for="opt-unlimited">Unlimited Money</label>
             <input type="checkbox" id="opt-unlimited" />
           </div>
@@ -159,6 +166,7 @@ export class OptionsPanel {
     this.bindSelect('opt-view', 'cameraView');
     this.bindRange('opt-skyline', 'skyline', 'opt-skyline-val');
     this.bindCheckbox('opt-shadows', 'shadowsEnabled');
+    this.bindCheckbox('opt-post', 'postEffects');
     this.bindCheckbox('opt-unlimited', 'unlimitedMoney');
     this.bindCheckbox('opt-sound', 'soundEnabled');
     this.bindRange('opt-max-cars', 'maxCars', 'opt-max-cars-val');
@@ -193,6 +201,7 @@ export class OptionsPanel {
     (this.overlay.querySelector('#opt-grid') as HTMLInputElement).checked = this.options.showGrid;
     (this.overlay.querySelector('#opt-cars') as HTMLInputElement).checked = this.options.showCars;
     (this.overlay.querySelector('#opt-shadows') as HTMLInputElement).checked = this.options.shadowsEnabled;
+    (this.overlay.querySelector('#opt-post') as HTMLInputElement).checked = this.options.postEffects;
     (this.overlay.querySelector('#opt-unlimited') as HTMLInputElement).checked = this.options.unlimitedMoney;
     (this.overlay.querySelector('#opt-sound') as HTMLInputElement).checked = this.options.soundEnabled;
 

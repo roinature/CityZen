@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { PostProcessing } from './PostProcessing.js';
 
 /** Vertical field of view of the perspective camera. */
 const FOV = 40;
@@ -10,8 +11,13 @@ export class SceneManager {
   private perspective = true;
   private fog = new THREE.Fog(0xcfdbe6, 100, 400);
   renderer: THREE.WebGLRenderer;
+  /** Glow, grading and antialiasing between the scene and the screen. */
+  readonly post: PostProcessing;
+  private drawingSize = new THREE.Vector2();
 
   private frustumSize = 50;
+  /** Close-up mode for a camera riding along at street level. */
+  private closeUp = false;
 
   constructor(private canvas: HTMLCanvasElement) {
     this.scene = new THREE.Scene();
@@ -25,9 +31,11 @@ export class SceneManager {
       0.1,
       1000,
     );
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-    const maxPixelRatio = matchMedia('(pointer: coarse)').matches ? 1.5 : 2;
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxPixelRatio));
+    // Edges are smoothed in the post-processing buffer, not the canvas.
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
+    const coarse = matchMedia('(pointer: coarse)').matches;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, coarse ? 1.5 : 2));
+    this.post = new PostProcessing(this.renderer, coarse ? 2 : 4);
     this.onResize();
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -43,6 +51,8 @@ export class SceneManager {
   private onResize(): void {
     this.updateProjection();
     this.renderer.setSize(this.canvas.clientWidth, this.canvas.clientHeight, false);
+    this.renderer.getDrawingBufferSize(this.drawingSize);
+    this.post?.setSize(this.drawingSize.x, this.drawingSize.y);
   }
 
   get camera(): THREE.OrthographicCamera | THREE.PerspectiveCamera {
@@ -74,7 +84,7 @@ export class SceneManager {
 
     const distance = this.getViewDistance();
     perspectiveCamera.aspect = aspect;
-    perspectiveCamera.near = Math.max(0.2, distance * 0.04);
+    perspectiveCamera.near = this.closeUp ? 0.03 : Math.max(0.2, distance * 0.04);
     perspectiveCamera.updateProjectionMatrix();
     // Haze starts beyond the city whatever the zoom. Depth means nothing to an
     // orthographic view, so it goes without.
@@ -82,6 +92,13 @@ export class SceneManager {
     this.fog.far = distance * 2 + 420;
     if (this.scene.background instanceof THREE.Color) this.fog.color = this.scene.background;
     this.scene.fog = this.perspective ? this.fog : null;
+  }
+
+  /** A perspective view from just behind a car, with a near plane to match. */
+  setCloseUp(closeUp: boolean): void {
+    this.closeUp = closeUp;
+    if (closeUp) this.perspective = true;
+    this.updateProjection();
   }
 
   getFrustumSize(): number {
@@ -103,6 +120,6 @@ export class SceneManager {
   }
 
   render(): void {
-    this.renderer.render(this.scene, this.camera);
+    this.post.render(this.scene, this.camera);
   }
 }

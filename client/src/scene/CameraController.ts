@@ -174,6 +174,20 @@ export class CameraController {
     this.sceneManager.setPerspective(perspective);
   }
 
+  /** Centre the view on a ground point, keeping the angle and zoom. */
+  lookAt(x: number, z: number): void {
+    this.target.set(x, 0, z);
+    this.update(0);
+  }
+
+  getTarget(): THREE.Vector3 {
+    return this.target;
+  }
+
+  isPerspectiveView(): boolean {
+    return CAMERA_VIEWS[this.view].perspective;
+  }
+
   getRotationAngle(): number {
     return this.rotationAngle;
   }

@@ -5,6 +5,8 @@ export interface LightingControls {
   setNight(isNight: boolean): void;
   /** Advance the day/night fade. Call once per frame. */
   update(deltaTime: number): void;
+  /** Where the fade is: 0 day .. 1 night, eased. */
+  getNight(): number;
 }
 
 interface LightPreset {
@@ -85,6 +87,7 @@ export function setupLighting(scene: THREE.Scene): LightingControls {
 
   let blend = 0;  // 0 = day, 1 = night
   let target = 0;
+  let eased = 0;
 
   const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
@@ -130,7 +133,12 @@ export function setupLighting(scene: THREE.Scene): LightingControls {
       const step = deltaTime / TRANSITION_SECONDS;
       blend = target > blend ? Math.min(target, blend + step) : Math.max(target, blend - step);
       // Smoothstep so the fade eases in and out
-      apply(blend * blend * (3 - 2 * blend));
+      eased = blend * blend * (3 - 2 * blend);
+      apply(eased);
+    },
+
+    getNight(): number {
+      return eased;
     },
   };
 }

@@ -9,6 +9,7 @@ import {
   findAdjacentCity,
   getOppositeDirection,
   isZone,
+  isRoad,
   calculateNetIncome,
   calculateLaborStats,
   calculateDemandTargets,
@@ -37,6 +38,8 @@ import { WorldMap } from './ui/WorldMap.js';
 import { GameMenu } from './ui/GameMenu.js';
 import { OptionsPanel, type GameOptions } from './ui/OptionsPanel.js';
 import { CarManager } from './world/CarManager.js';
+import { DriveMode } from './world/DriveMode.js';
+import { GridRaycaster } from './input/Raycaster.js';
 import { BuildTools, type ToolMode } from './ui/BuildTools.js';
 import { FinancePanel } from './ui/FinancePanel.js';
 import { MaslowPanel } from './ui/MaslowPanel.js';
@@ -105,6 +108,7 @@ const edgeRoadIndicator = new EdgeRoadIndicator(sceneManager.scene);
 
 const cityRenderer = new CityRenderer(sceneManager.scene, entranceRoad);
 const carManager = new CarManager(sceneManager.scene);
+const driveMode = new DriveMode(sceneManager.scene, sceneManager, cameraController, carManager, uiRoot);
 const buildMode = new BuildMode(sceneManager.scene, () => sceneManager.camera, canvas);
 const soundManager = new SoundManager();
 
@@ -121,6 +125,8 @@ function setInCity(inCity: boolean): void {
 const cityLoading = new CityLoading(uiRoot);
 
 function beginCityLoad(label: string): void {
+  setDrivePicking(false);
+  driveMode.stop();
   lobby.hide();
   worldMap.hide();
   cityState = null;
@@ -195,6 +201,7 @@ const buildTools = new BuildTools(toolbar.controls, setToolMode, (size) => build
 const mapInput = new MapInput(canvas, cameraController, buildMode, () => toolbar.dismissPicker());
 
 function setToolMode(mode: ToolMode): void {
+  if (mode !== 'pointer') setDrivePicking(false);
   mapInput.cancel();
   buildMode.setToolMode(mode);
   buildTools.setActiveMode(mode);
@@ -297,6 +304,53 @@ addHudAction('City Needs', () => {
   if (cityState.resources.populationSummary) maslowPanel.update(cityState.resources.populationSummary);
   maslowPanel.toggle();
 }, 'Needs');
+// --- Drive mode: take a car through the city ---
+// Drive → click a spot on the map → the car starts on the nearest road there.
+const driveRaycaster = new GridRaycaster(canvas);
+let drivePicking = false;
+
+function setDrivePicking(picking: boolean): void {
+  drivePicking = picking;
+  mapInput.onTap = picking ? pickDriveStart : null;
+  canvas.classList.toggle('drive-picking', picking);
+  driveButton?.setAttribute('aria-pressed', String(picking || driveMode.isActive()));
+}
+
+function pickDriveStart(clientX: number, clientY: number): void {
+  if (!cityState) return setDrivePicking(false);
+  const cell = driveRaycaster.getGridPosition(clientX, clientY, sceneManager.camera);
+  if (!cell) return;
+  if (!driveMode.start(cityState, { x: cell.x + 0.5, z: cell.z + 0.5 })) {
+    footerIndicator.toast('No road there. Click closer to a road');
+    return;
+  }
+  setDrivePicking(false);
+  footerIndicator.toast('Driving · Esc to get out');
+}
+
+function toggleDriving(): void {
+  if (driveMode.isActive()) {
+    driveMode.stop();
+    return;
+  }
+  if (drivePicking) {
+    setDrivePicking(false);
+    return;
+  }
+  if (!cityState) return;
+  if (!cityState.buildings.some(b => isRoad(b.type))) {
+    footerIndicator.toast('Build a road first, then take it for a drive');
+    return;
+  }
+  toolbar.close();
+  setToolMode('pointer');
+  setDrivePicking(true);
+  footerIndicator.toast('Click a road on the map to start driving', 4000);
+}
+const driveButton = addHudAction('Drive', toggleDriving);
+driveButton.setAttribute('aria-pressed', 'false');
+driveMode.onExit = () => driveButton.setAttribute('aria-pressed', 'false');
+
 const nightButton = addHudAction('Night View', () => {
   isNight = !isNight;
   lighting.setNight(isNight);
@@ -324,6 +378,7 @@ GameClient.create(SERVER_URL, {
 
   onCityState: (city, players) => {
     if (cityState?.id !== city.id || (city.tick === 0 && cityState.tick > 0)) {
+      driveMode.stop();
       cameraController.frameCity(city);
     }
     setSite(city.siteId);
@@ -637,6 +692,7 @@ const gameMenu = new GameMenu(uiRoot, {
     return res.json();
   },
   onRestart: () => {
+    driveMode.stop();
     cityRenderer.clear();
     edgeRoadIndicator.clear();
     carManager.clear();
@@ -691,6 +747,7 @@ function applyOptions(options: GameOptions): void {
 
   // Shadows
   sceneManager.renderer.shadowMap.enabled = options.shadowsEnabled;
+  sceneManager.post.enabled = options.postEffects;
 
   // Sound
   soundManager.setEnabled(options.soundEnabled);
@@ -728,6 +785,8 @@ window.addEventListener('keydown', (e) => {
     gameMenu.show();
   } else if (gameMenu.isVisible()) {
     gameMenu.hide();
+  } else if (driveMode.isActive() || drivePicking) {
+    toggleDriving();
   } else if (cityState) {
     if (buildMode.getSelectedType() || buildMode.getToolMode() === 'bulldoze') {
       setToolMode('pointer');
@@ -744,6 +803,13 @@ window.addEventListener('keydown', (e) => {
   const el = e.target as HTMLElement | null;
   if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
   if (!cityState || !gameClient || cityAdvisor.isOpen() || gameMenu.isVisible() || optionsPanel.isVisible() || townPlanner.isVisible()) return;
+
+  if (e.code === 'KeyC') {
+    toggleDriving();
+    return;
+  }
+  // Drive mode owns the driving keys (Space brakes, V switches camera).
+  if (driveMode.isActive() && e.code !== 'Digit1' && e.code !== 'Digit2' && e.code !== 'Digit3') return;
 
   if (e.code === 'Space' && !el?.closest('button, select')) {
     e.preventDefault();
@@ -765,6 +831,8 @@ window.addEventListener('keydown', (e) => {
 
 // --- Show world map helper ---
 function showWorldMap(): void {
+  setDrivePicking(false);
+  driveMode.stop();
   cityAdvisor.hide();
   unhappyCityId = null;
   // No city on screen any more: drop the active tool and hide the HUD
@@ -787,8 +855,10 @@ function gameLoop(): void {
   const deltaTime = Math.min((now - lastTime) / 1000, 0.1);
   lastTime = now;
 
-  cameraController.update(deltaTime);
+  if (driveMode.isActive()) driveMode.update(deltaTime, cityState);
+  else cameraController.update(deltaTime);
   lighting.update(deltaTime);
+  sceneManager.post.setNight(lighting.getNight());
   cityRenderer.update(deltaTime, isNight);
   // Paused (speed 0) freezes all simulated movement; camera/UI stay live
   const paused = cityState?.clock?.speed === 0;

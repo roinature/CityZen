@@ -69,6 +69,14 @@ interface Car {
   leaving: number;
 }
 
+/** The car the player drives, as other traffic sees it. */
+export interface PlayerCar {
+  x: number;
+  z: number;
+  yaw: number;
+  v: number;
+}
+
 const pick = <T>(items: readonly T[]): T => items[Math.floor(Math.random() * items.length)];
 
 function angleDelta(a: number, b: number): number {
@@ -108,6 +116,8 @@ export class CarManager {
   private spawnCooldown = 0;
   private hash = new Map<number, Car[]>();
   private nearby: Car[] = [];
+  /** Stand-in for the player's car: an obstacle that is always "waiting legitimately". */
+  private player: Car | null = null;
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -117,6 +127,26 @@ export class CarManager {
   setEnabled(enabled: boolean): void {
     this.enabled = enabled;
     if (!enabled) this.clear();
+  }
+
+  /** Make traffic queue behind (and not spawn on top of) the player's car. Null removes it. */
+  setPlayer(p: PlayerCar | null): void {
+    if (!p) {
+      this.player = null;
+      return;
+    }
+    this.player ??= { id: -1, leader: null, waitMemo: 1 } as Car;
+    this.player.x = p.x;
+    this.player.z = p.z;
+    this.player.yaw = p.yaw;
+    this.player.v = p.v;
+    // Shared with waitingLegitimately(), which caches per frame on real cars only.
+    this.player.waitMemo = 1;
+  }
+
+  /** Positions of the traffic cars, in cells. */
+  getCars(): readonly { x: number; z: number; yaw: number; v: number; leaving: number }[] {
+    return this.cars;
   }
 
   setMaxCars(max: number): void {
@@ -306,7 +336,7 @@ export class CarManager {
       if (path.xs.length < 2) continue;
       if (this.isOccupied(path.xs[0], path.zs[0], SPAWN_CLEARANCE)) return null;
 
-      const mesh = this.createCarMesh();
+      const mesh = createCarMesh(pick(CAR_COLORS));
       this.scene.add(mesh);
       const car: Car = {
         id: this.nextId++,
@@ -344,6 +374,8 @@ export class CarManager {
   }
 
   private isOccupied(x: number, z: number, radius: number): boolean {
+    const p = this.player;
+    if (p && (p.x - x) ** 2 + (p.z - z) ** 2 < radius * radius) return true;
     for (const car of this.cars) {
       if ((car.x - x) ** 2 + (car.z - z) ** 2 < radius * radius) return true;
     }
@@ -388,7 +420,10 @@ export class CarManager {
   private findOnPath(car: Car, sFrom: number, sTo: number, slowOnly: boolean): { other: Car; gap: number } | null {
     const { xs, zs, ss } = car.path;
     const [mx, mz] = positionAt(car.path, (sFrom + sTo) / 2, car.seg);
-    const candidates = this.query(mx, mz, (sTo - sFrom) / 2 + 0.8);
+    const reach = (sTo - sFrom) / 2 + 0.8;
+    const candidates = this.query(mx, mz, reach);
+    const p = this.player;
+    if (p && Math.abs(p.x - mx) <= reach + 1 && Math.abs(p.z - mz) <= reach + 1) candidates.push(p);
     let best: { other: Car; gap: number } | null = null;
     let k0 = car.seg;
     while (k0 > 0 && ss[k0] > sFrom) k0--;
@@ -625,209 +660,213 @@ export class CarManager {
     e?.junction?.waiting.delete(car);
   }
 
-  // ── Car model ─────────────────────────────────────────────
-
-  private createCarMesh(): THREE.Group {
-    const group = new THREE.Group();
-    const color = CAR_COLORS[Math.floor(Math.random() * CAR_COLORS.length)];
-
-    // Materials
-    const bodyMaterial = new THREE.MeshStandardMaterial({
-      color,
-      metalness: 0.6,
-      roughness: 0.4
-    });
-    const glassMaterial = new THREE.MeshStandardMaterial({
-      color: 0x88ccff,
-      metalness: 0.9,
-      roughness: 0.1,
-      transparent: true,
-      opacity: 0.7
-    });
-    const wheelMaterial = new THREE.MeshStandardMaterial({
-      color: 0x1a1a1a,
-      metalness: 0.3,
-      roughness: 0.8
-    });
-    const hubcapMaterial = new THREE.MeshStandardMaterial({
-      color: 0xcccccc,
-      metalness: 0.8,
-      roughness: 0.2
-    });
-    const headlightMaterial = new THREE.MeshStandardMaterial({
-      color: 0xffffee,
-      emissive: 0xffffaa,
-      emissiveIntensity: 0.3
-    });
-    const taillightMaterial = new THREE.MeshStandardMaterial({
-      color: 0xff2222,
-      emissive: 0xff0000,
-      emissiveIntensity: 0.4
-    });
-    const grilleMaterial = new THREE.MeshStandardMaterial({
-      color: 0x222222,
-      metalness: 0.5,
-      roughness: 0.5
-    });
-
-    // Main car body - lower section (longer, sleeker)
-    const bodyLower = new THREE.Mesh(
-      new THREE.BoxGeometry(0.55, 0.12, 0.26),
-      bodyMaterial,
-    );
-    bodyLower.position.y = 0.08;
-    bodyLower.castShadow = true;
-    bodyLower.receiveShadow = true;
-    group.add(bodyLower);
-
-    // Hood (front sloped section)
-    const hood = new THREE.Mesh(
-      new THREE.BoxGeometry(0.18, 0.04, 0.24),
-      bodyMaterial,
-    );
-    hood.position.set(0.16, 0.14, 0);
-    hood.rotation.z = -0.15;
-    hood.castShadow = true;
-    group.add(hood);
-
-    // Trunk (rear section)
-    const trunk = new THREE.Mesh(
-      new THREE.BoxGeometry(0.12, 0.04, 0.24),
-      bodyMaterial,
-    );
-    trunk.position.set(-0.20, 0.14, 0);
-    trunk.rotation.z = 0.1;
-    trunk.castShadow = true;
-    group.add(trunk);
-
-    // Cabin (passenger compartment)
-    const cabin = new THREE.Mesh(
-      new THREE.BoxGeometry(0.22, 0.11, 0.22),
-      bodyMaterial,
-    );
-    cabin.position.set(-0.02, 0.19, 0);
-    cabin.castShadow = true;
-    group.add(cabin);
-
-    // Front windshield (angled)
-    const frontWindshield = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.20, 0.10),
-      glassMaterial,
-    );
-    frontWindshield.position.set(0.08, 0.20, 0);
-    frontWindshield.rotation.y = Math.PI / 2;
-    frontWindshield.rotation.x = 0;
-    frontWindshield.rotation.z = -0.4;
-    group.add(frontWindshield);
-
-    // Rear windshield (angled)
-    const rearWindshield = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.18, 0.09),
-      glassMaterial,
-    );
-    rearWindshield.position.set(-0.12, 0.20, 0);
-    rearWindshield.rotation.y = Math.PI / 2;
-    rearWindshield.rotation.z = 0.35;
-    group.add(rearWindshield);
-
-    // Side windows
-    const sideWindowGeom = new THREE.PlaneGeometry(0.18, 0.08);
-    const leftWindow = new THREE.Mesh(sideWindowGeom, glassMaterial);
-    leftWindow.position.set(-0.02, 0.21, 0.112);
-    leftWindow.rotation.y = 0;
-    group.add(leftWindow);
-
-    const rightWindow = new THREE.Mesh(sideWindowGeom, glassMaterial);
-    rightWindow.position.set(-0.02, 0.21, -0.112);
-    rightWindow.rotation.y = Math.PI;
-    group.add(rightWindow);
-
-    // Wheels (4 cylinders with hubcaps)
-    const wheelGeom = new THREE.CylinderGeometry(0.05, 0.05, 0.04, 12);
-    const hubcapGeom = new THREE.CylinderGeometry(0.03, 0.03, 0.01, 8);
-    const wheelPositions = [
-      { x: 0.16, z: 0.13 },   // front-left
-      { x: 0.16, z: -0.13 },  // front-right
-      { x: -0.16, z: 0.13 },  // rear-left
-      { x: -0.16, z: -0.13 }, // rear-right
-    ];
-
-    for (const pos of wheelPositions) {
-      const wheel = new THREE.Mesh(wheelGeom, wheelMaterial);
-      wheel.position.set(pos.x, 0.05, pos.z);
-      wheel.rotation.x = Math.PI / 2;
-      wheel.castShadow = true;
-      group.add(wheel);
-
-      // Hubcap
-      const hubcap = new THREE.Mesh(hubcapGeom, hubcapMaterial);
-      hubcap.position.set(pos.x, 0.05, pos.z > 0 ? pos.z + 0.02 : pos.z - 0.02);
-      hubcap.rotation.x = Math.PI / 2;
-      group.add(hubcap);
-    }
-
-    // Headlights (front)
-    const headlightGeom = new THREE.BoxGeometry(0.02, 0.03, 0.06);
-    const leftHeadlight = new THREE.Mesh(headlightGeom, headlightMaterial);
-    leftHeadlight.position.set(0.27, 0.10, 0.08);
-    group.add(leftHeadlight);
-
-    const rightHeadlight = new THREE.Mesh(headlightGeom, headlightMaterial);
-    rightHeadlight.position.set(0.27, 0.10, -0.08);
-    group.add(rightHeadlight);
-
-    // Taillights (rear)
-    const taillightGeom = new THREE.BoxGeometry(0.02, 0.03, 0.05);
-    const leftTaillight = new THREE.Mesh(taillightGeom, taillightMaterial);
-    leftTaillight.position.set(-0.27, 0.10, 0.09);
-    group.add(leftTaillight);
-
-    const rightTaillight = new THREE.Mesh(taillightGeom, taillightMaterial);
-    rightTaillight.position.set(-0.27, 0.10, -0.09);
-    group.add(rightTaillight);
-
-    // Front grille
-    const grille = new THREE.Mesh(
-      new THREE.BoxGeometry(0.01, 0.05, 0.14),
-      grilleMaterial,
-    );
-    grille.position.set(0.275, 0.09, 0);
-    group.add(grille);
-
-    // Bumpers
-    const bumperMaterial = new THREE.MeshStandardMaterial({
-      color: 0x333333,
-      metalness: 0.4,
-      roughness: 0.6
-    });
-    const frontBumper = new THREE.Mesh(
-      new THREE.BoxGeometry(0.03, 0.04, 0.26),
-      bumperMaterial,
-    );
-    frontBumper.position.set(0.28, 0.04, 0);
-    group.add(frontBumper);
-
-    const rearBumper = new THREE.Mesh(
-      new THREE.BoxGeometry(0.03, 0.04, 0.26),
-      bumperMaterial,
-    );
-    rearBumper.position.set(-0.28, 0.04, 0);
-    group.add(rearBumper);
-
-    // Scale the whole car slightly for better visibility
-    group.scale.set(0.9, 0.9, 0.9);
-
-    return group;
-  }
-
   private disposeMesh(group: THREE.Group): void {
-    group.traverse((child) => {
-      if (child instanceof THREE.Mesh) {
-        child.geometry.dispose();
-        if (child.material instanceof THREE.Material) {
-          child.material.dispose();
-        }
-      }
-    });
+    disposeCarMesh(group);
   }
+}
+
+// ── Car model ─────────────────────────────────────────────
+
+/** A small car, nose along +x, about half a cell long. */
+export function createCarMesh(color: number): THREE.Group {
+  const group = new THREE.Group();
+
+  // Materials
+  const bodyMaterial = new THREE.MeshStandardMaterial({
+    color,
+    metalness: 0.6,
+    roughness: 0.4
+  });
+  const glassMaterial = new THREE.MeshStandardMaterial({
+    color: 0x88ccff,
+    metalness: 0.9,
+    roughness: 0.1,
+    transparent: true,
+    opacity: 0.7
+  });
+  const wheelMaterial = new THREE.MeshStandardMaterial({
+    color: 0x1a1a1a,
+    metalness: 0.3,
+    roughness: 0.8
+  });
+  const hubcapMaterial = new THREE.MeshStandardMaterial({
+    color: 0xcccccc,
+    metalness: 0.8,
+    roughness: 0.2
+  });
+  const headlightMaterial = new THREE.MeshStandardMaterial({
+    color: 0xffffee,
+    emissive: 0xffffaa,
+    emissiveIntensity: 0.3
+  });
+  const taillightMaterial = new THREE.MeshStandardMaterial({
+    color: 0xff2222,
+    emissive: 0xff0000,
+    emissiveIntensity: 0.4
+  });
+  const grilleMaterial = new THREE.MeshStandardMaterial({
+    color: 0x222222,
+    metalness: 0.5,
+    roughness: 0.5
+  });
+
+  // Main car body - lower section (longer, sleeker)
+  const bodyLower = new THREE.Mesh(
+    new THREE.BoxGeometry(0.55, 0.12, 0.26),
+    bodyMaterial,
+  );
+  bodyLower.position.y = 0.08;
+  bodyLower.castShadow = true;
+  bodyLower.receiveShadow = true;
+  group.add(bodyLower);
+
+  // Hood (front sloped section)
+  const hood = new THREE.Mesh(
+    new THREE.BoxGeometry(0.18, 0.04, 0.24),
+    bodyMaterial,
+  );
+  hood.position.set(0.16, 0.14, 0);
+  hood.rotation.z = -0.15;
+  hood.castShadow = true;
+  group.add(hood);
+
+  // Trunk (rear section)
+  const trunk = new THREE.Mesh(
+    new THREE.BoxGeometry(0.12, 0.04, 0.24),
+    bodyMaterial,
+  );
+  trunk.position.set(-0.20, 0.14, 0);
+  trunk.rotation.z = 0.1;
+  trunk.castShadow = true;
+  group.add(trunk);
+
+  // Cabin (passenger compartment)
+  const cabin = new THREE.Mesh(
+    new THREE.BoxGeometry(0.22, 0.11, 0.22),
+    bodyMaterial,
+  );
+  cabin.position.set(-0.02, 0.19, 0);
+  cabin.castShadow = true;
+  group.add(cabin);
+
+  // Front windshield (angled)
+  const frontWindshield = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.20, 0.10),
+    glassMaterial,
+  );
+  frontWindshield.position.set(0.08, 0.20, 0);
+  frontWindshield.rotation.y = Math.PI / 2;
+  frontWindshield.rotation.x = 0;
+  frontWindshield.rotation.z = -0.4;
+  group.add(frontWindshield);
+
+  // Rear windshield (angled)
+  const rearWindshield = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.18, 0.09),
+    glassMaterial,
+  );
+  rearWindshield.position.set(-0.12, 0.20, 0);
+  rearWindshield.rotation.y = Math.PI / 2;
+  rearWindshield.rotation.z = 0.35;
+  group.add(rearWindshield);
+
+  // Side windows
+  const sideWindowGeom = new THREE.PlaneGeometry(0.18, 0.08);
+  const leftWindow = new THREE.Mesh(sideWindowGeom, glassMaterial);
+  leftWindow.position.set(-0.02, 0.21, 0.112);
+  leftWindow.rotation.y = 0;
+  group.add(leftWindow);
+
+  const rightWindow = new THREE.Mesh(sideWindowGeom, glassMaterial);
+  rightWindow.position.set(-0.02, 0.21, -0.112);
+  rightWindow.rotation.y = Math.PI;
+  group.add(rightWindow);
+
+  // Wheels (4 cylinders with hubcaps)
+  const wheelGeom = new THREE.CylinderGeometry(0.05, 0.05, 0.04, 12);
+  const hubcapGeom = new THREE.CylinderGeometry(0.03, 0.03, 0.01, 8);
+  const wheelPositions = [
+    { x: 0.16, z: 0.13 },   // front-left
+    { x: 0.16, z: -0.13 },  // front-right
+    { x: -0.16, z: 0.13 },  // rear-left
+    { x: -0.16, z: -0.13 }, // rear-right
+  ];
+
+  for (const pos of wheelPositions) {
+    const wheel = new THREE.Mesh(wheelGeom, wheelMaterial);
+    wheel.position.set(pos.x, 0.05, pos.z);
+    wheel.rotation.x = Math.PI / 2;
+    wheel.castShadow = true;
+    group.add(wheel);
+
+    // Hubcap
+    const hubcap = new THREE.Mesh(hubcapGeom, hubcapMaterial);
+    hubcap.position.set(pos.x, 0.05, pos.z > 0 ? pos.z + 0.02 : pos.z - 0.02);
+    hubcap.rotation.x = Math.PI / 2;
+    group.add(hubcap);
+  }
+
+  // Headlights (front)
+  const headlightGeom = new THREE.BoxGeometry(0.02, 0.03, 0.06);
+  const leftHeadlight = new THREE.Mesh(headlightGeom, headlightMaterial);
+  leftHeadlight.position.set(0.27, 0.10, 0.08);
+  group.add(leftHeadlight);
+
+  const rightHeadlight = new THREE.Mesh(headlightGeom, headlightMaterial);
+  rightHeadlight.position.set(0.27, 0.10, -0.08);
+  group.add(rightHeadlight);
+
+  // Taillights (rear)
+  const taillightGeom = new THREE.BoxGeometry(0.02, 0.03, 0.05);
+  const leftTaillight = new THREE.Mesh(taillightGeom, taillightMaterial);
+  leftTaillight.position.set(-0.27, 0.10, 0.09);
+  group.add(leftTaillight);
+
+  const rightTaillight = new THREE.Mesh(taillightGeom, taillightMaterial);
+  rightTaillight.position.set(-0.27, 0.10, -0.09);
+  group.add(rightTaillight);
+
+  // Front grille
+  const grille = new THREE.Mesh(
+    new THREE.BoxGeometry(0.01, 0.05, 0.14),
+    grilleMaterial,
+  );
+  grille.position.set(0.275, 0.09, 0);
+  group.add(grille);
+
+  // Bumpers
+  const bumperMaterial = new THREE.MeshStandardMaterial({
+    color: 0x333333,
+    metalness: 0.4,
+    roughness: 0.6
+  });
+  const frontBumper = new THREE.Mesh(
+    new THREE.BoxGeometry(0.03, 0.04, 0.26),
+    bumperMaterial,
+  );
+  frontBumper.position.set(0.28, 0.04, 0);
+  group.add(frontBumper);
+
+  const rearBumper = new THREE.Mesh(
+    new THREE.BoxGeometry(0.03, 0.04, 0.26),
+    bumperMaterial,
+  );
+  rearBumper.position.set(-0.28, 0.04, 0);
+  group.add(rearBumper);
+
+  // Scale the whole car slightly for better visibility
+  group.scale.set(0.9, 0.9, 0.9);
+
+  return group;
+}
+
+export function disposeCarMesh(group: THREE.Group): void {
+  group.traverse((child) => {
+    if (child instanceof THREE.Mesh) {
+      child.geometry.dispose();
+      if (child.material instanceof THREE.Material) {
+        child.material.dispose();
+      }
+    }
+  });
 }
