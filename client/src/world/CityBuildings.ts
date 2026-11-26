@@ -37,6 +37,16 @@ interface Part {
   d: number;
 }
 
+type RoofDraft = Omit<Part, 'mesh' | 'index'> & { color: number };
+interface RoofLists {
+  part: (list: RoofDraft[], y: number, w: number, h: number, d: number, color: number, x?: number, z?: number) => void;
+  slabs: RoofDraft[];
+  stacks: RoofDraft[];
+  kit: RoofDraft[];
+  drums: RoofDraft[];
+  caps: RoofDraft[];
+}
+
 export interface CityBuildingsOptions {
   style: CityStyle;
   /** Multiplier on building heights. */
@@ -365,6 +375,10 @@ export class CityBuildings {
     const slabs: Draft[] = [];
     const hips: Draft[] = [];
     const stacks: Draft[] = [];
+    /** Rooftop plant: boxes, then round things (fans, tanks, vents), then the caps on water towers. */
+    const kit: Draft[] = [];
+    const drums: Draft[] = [];
+    const caps: Draft[] = [];
     const foot = 0.03;
 
     for (const u of units) {
@@ -404,6 +418,7 @@ export class CityBuildings {
         part(slabs, top, w * 0.3, 0.1 + u.seed * 0.08, d * 0.28, style.kerb, u.x + (u.seed - 0.5) * w * 0.4, u.z + (0.5 - u.seed) * d * 0.4);
         if (u.kind === TOWER && u.h > 5 && u.seed > 0.4) part(stacks, top, 0.035, 0.7, 0.035, 0xd8dadc);
       }
+      this.roofPlant(u, top, w, d, { part, slabs, stacks, kit, drums, caps });
     }
 
     const box = () => new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
@@ -444,6 +459,9 @@ export class CityBuildings {
     add('roofs', box(), plain(), slabs);
     add('house-roofs', hip, plain(), hips);
     add('chimneys', box(), plain(), stacks);
+    add('roof-kit', box(), plain(), kit);
+    add('roof-drums', new THREE.CylinderGeometry(0.5, 0.5, 1, 12).translate(0, 0.5, 0), plain(), drums);
+    add('roof-caps', new THREE.ConeGeometry(0.5, 1, 12).translate(0, 0.5, 0), plain(), caps);
 
     for (const [unit, parts] of byUnit) {
       this.placeParts(parts, 1);
@@ -451,6 +469,92 @@ export class CityBuildings {
     }
     for (const child of this.group.children) if (child instanceof THREE.InstancedMesh) child.computeBoundingSphere();
     for (const { parts } of this.growing) this.placeParts(parts, 0.02);
+  }
+
+  /**
+   * Clutter on a flat roof whose top tier is w × d and stands at height top:
+   * air-conditioning units, water towers on mid-rise blocks, cooling plant on
+   * the tallest towers and extractor vents on works. Laid out from the
+   * building's seed, so a roof looks the same every time, and nothing overlaps
+   * the plant room or each other.
+   */
+  private roofPlant(u: Unit, top: number, w: number, d: number, lists: RoofLists): void {
+    const { part, kit, drums, caps, stacks } = lists;
+    const margin = 0.05, spacing = 0.025;
+    const taken: Array<[number, number, number, number]> = [];
+    let draws = 0;
+    const rand = () => hash(Math.floor(u.seed * 1e6), draws++, 21);
+    const free = (x: number, z: number, hw: number, hd: number) =>
+      Math.abs(x - u.x) + hw <= w / 2 - margin && Math.abs(z - u.z) + hd <= d / 2 - margin
+      && taken.every(([x0, z0, x1, z1]) =>
+        x + hw + spacing <= x0 || x - hw - spacing >= x1 || z + hd + spacing <= z0 || z - hd - spacing >= z1);
+    const claim = (x: number, z: number, hw: number, hd: number) => taken.push([x - hw, z - hd, x + hw, z + hd]);
+    /** A free spot for something hw × hd (half sizes), or null when the roof is full. */
+    const spot = (hw: number, hd: number): [number, number] | null => {
+      for (let i = 0; i < 14; i++) {
+        const x = u.x + (rand() - 0.5) * Math.max(0, w - 2 * hw - 2 * margin);
+        const z = u.z + (rand() - 0.5) * Math.max(0, d - 2 * hd - 2 * margin);
+        if (free(x, z, hw, hd)) {
+          claim(x, z, hw, hd);
+          return [x, z];
+        }
+      }
+      return null;
+    };
+    const metal = [0xc9ccce, 0xb3b8bc, 0xdedfdb, 0x9ea4a9];
+    const fan = 0x2c3034;
+
+    if (u.kind === WORKS) {
+      const vents = 2 + Math.floor(rand() * 3);
+      for (let i = 0; i < vents; i++) {
+        const at = spot(0.035, 0.035);
+        if (!at) break;
+        part(drums, top, 0.06, 0.12 + rand() * 0.06, 0.06, pick(metal, rand()), at[0], at[1]);
+        part(drums, top + 0.12, 0.075, 0.02, 0.075, 0x6d7276, at[0], at[1]);
+      }
+      return;
+    }
+
+    // The plant room laid down in addUnits.
+    claim(u.x + (u.seed - 0.5) * w * 0.4, u.z + (0.5 - u.seed) * d * 0.4, w * 0.15, d * 0.14);
+
+    if (u.kind === TOWER && u.h > 3.2) {
+      // Cooling plant: big louvred boxes with fans on top.
+      const units = 1 + Math.floor(rand() * 2);
+      for (let i = 0; i < units; i++) {
+        const along = rand() < 0.5;
+        const hw = along ? 0.13 : 0.07, hd = along ? 0.07 : 0.13;
+        const at = spot(hw, hd);
+        if (!at) break;
+        part(kit, top, hw * 2, 0.11, hd * 2, pick(metal, rand()), at[0], at[1]);
+        for (const side of [-1, 1]) {
+          part(drums, top + 0.11, 0.08, 0.012, 0.08, fan, at[0] + (along ? side * hw * 0.5 : 0), at[1] + (along ? 0 : side * hd * 0.5));
+        }
+      }
+    } else if ((u.kind === TOWER || u.kind === SHOP) && !u.accent && Math.min(w, d) > 0.45 && rand() < 0.45) {
+      // A timber water tower on legs.
+      const at = spot(0.1, 0.1);
+      if (at) {
+        const legs = 0.09, tank = 0.15;
+        for (const [lx, lz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+          part(stacks, top, 0.014, legs, 0.014, 0x4a4643, at[0] + lx * 0.055, at[1] + lz * 0.055);
+        }
+        part(drums, top + legs, 0.16, tank, 0.16, rand() < 0.5 ? 0x8b6a4e : 0x9a7a5a, at[0], at[1]);
+        part(caps, top + legs + tank, 0.18, 0.07, 0.18, 0x5a4a3e, at[0], at[1]);
+      }
+    }
+
+    // Air-conditioning units, more on bigger roofs.
+    const units = 1 + Math.floor(rand() * Math.min(6, w * d * 5));
+    for (let i = 0; i < units; i++) {
+      const along = rand() < 0.5;
+      const hw = along ? 0.045 : 0.035, hd = along ? 0.035 : 0.045;
+      const at = spot(hw, hd);
+      if (!at) break;
+      const height = 0.05 + rand() * 0.02;
+      part(kit, top, hw * 2, height, hd * 2, pick(metal, rand()), at[0], at[1]);
+      part(drums, top + height, 0.05, 0.008, 0.05, fan, at[0], at[1]);
+    }
   }
 
   private placeParts(parts: Part[], scale: number): void {

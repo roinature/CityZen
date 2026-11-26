@@ -667,9 +667,41 @@ export class CarManager {
 
 // ── Car model ─────────────────────────────────────────────
 
+let contactShadowTexture: THREE.Texture | null = null;
+
+/** A soft dark oval under the car, shared texture, own geometry and material (cars dispose theirs). */
+function createContactShadow(): THREE.Mesh {
+  if (!contactShadowTexture) {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 64;
+    const context = canvas.getContext('2d')!;
+    const gradient = context.createRadialGradient(32, 32, 4, 32, 32, 32);
+    gradient.addColorStop(0, 'rgba(0,0,0,1)');
+    gradient.addColorStop(0.55, 'rgba(0,0,0,0.75)');
+    gradient.addColorStop(1, 'rgba(0,0,0,0)');
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, 64, 64);
+    contactShadowTexture = new THREE.CanvasTexture(canvas);
+  }
+  const shadow = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.72, 0.4).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({
+      map: contactShadowTexture, color: 0x000000, transparent: true, opacity: 0.42,
+      depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+    }),
+  );
+  shadow.name = 'contact-shadow';
+  shadow.position.y = 0.006;
+  shadow.renderOrder = -1;
+  return shadow;
+}
+
 /** A small car, nose along +x, about half a cell long. */
 export function createCarMesh(color: number): THREE.Group {
   const group = new THREE.Group();
+  // Cars move all the time, so they don't cast into the sun's shadow map (it
+  // would have to be redrawn every frame); a soft contact shadow sits under them.
+  group.add(createContactShadow());
 
   // Materials
   const bodyMaterial = new THREE.MeshStandardMaterial({
@@ -716,7 +748,6 @@ export function createCarMesh(color: number): THREE.Group {
     bodyMaterial,
   );
   bodyLower.position.y = 0.08;
-  bodyLower.castShadow = true;
   bodyLower.receiveShadow = true;
   group.add(bodyLower);
 
@@ -727,7 +758,6 @@ export function createCarMesh(color: number): THREE.Group {
   );
   hood.position.set(0.16, 0.14, 0);
   hood.rotation.z = -0.15;
-  hood.castShadow = true;
   group.add(hood);
 
   // Trunk (rear section)
@@ -737,7 +767,6 @@ export function createCarMesh(color: number): THREE.Group {
   );
   trunk.position.set(-0.20, 0.14, 0);
   trunk.rotation.z = 0.1;
-  trunk.castShadow = true;
   group.add(trunk);
 
   // Cabin (passenger compartment)
@@ -746,7 +775,6 @@ export function createCarMesh(color: number): THREE.Group {
     bodyMaterial,
   );
   cabin.position.set(-0.02, 0.19, 0);
-  cabin.castShadow = true;
   group.add(cabin);
 
   // Front windshield (angled)
@@ -796,7 +824,6 @@ export function createCarMesh(color: number): THREE.Group {
     const wheel = new THREE.Mesh(wheelGeom, wheelMaterial);
     wheel.position.set(pos.x, 0.05, pos.z);
     wheel.rotation.x = Math.PI / 2;
-    wheel.castShadow = true;
     group.add(wheel);
 
     // Hubcap

@@ -81,7 +81,7 @@ const MODELS: Partial<Record<BuildingType, Build>> = {
         new THREE.BoxGeometry(0.05, 1.15, 0.018).translate(0, 0.575, 0),
         new THREE.MeshStandardMaterial({ color: WHITE, roughness: 0.7 }),
       );
-      blade.castShadow = true;
+      // No shadow: a spinning caster would force the shadow map to redraw every frame.
       blade.rotation.z = (i * Math.PI * 2) / 3;
       rotor.add(blade);
     }

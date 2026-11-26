@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { PostProcessing } from './PostProcessing.js';
+import { ShadowCache } from './ShadowCache.js';
 
 /** Vertical field of view of the perspective camera. */
 const FOV = 40;
@@ -39,6 +40,10 @@ export class SceneManager {
     this.onResize();
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // Shadow maps are redrawn only when a caster changes. This runs after
+    // three has updated every matrix and before it draws the shadow maps.
+    const shadows = new ShadowCache(this.renderer, this.scene);
+    this.scene.onBeforeRender = (_renderer, _scene, camera) => shadows.update(camera);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
 
