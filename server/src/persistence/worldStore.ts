@@ -8,28 +8,32 @@ export async function saveWorldState(
   populationData?: unknown[],
   preserveCities = false,
 ): Promise<void> {
-  await prisma.$transaction(async tx => {
-    await tx.world.update({
-      where: { id: state.id },
-      data: {
-        totalPopulation: state.totalPopulation,
-        clock: state.clock as unknown as Prisma.InputJsonValue,
-        // Omitted while the people are still loading, so the stored ones are kept
-        ...(populationData && { populationData: populationData as unknown as Prisma.InputJsonValue }),
-      },
-    });
-    // Keep sites claimed by another request while this snapshot was in flight.
-    if (!preserveCities) {
-      await tx.$executeRaw`
-        UPDATE "World" SET cities = COALESCE((
-          SELECT jsonb_agg(COALESCE(snapshot.entry, live.entry) ORDER BY live.ord)
-          FROM jsonb_array_elements(cities) WITH ORDINALITY AS live(entry, ord)
-          LEFT JOIN jsonb_array_elements(${JSON.stringify(state.cities)}::jsonb) AS snapshot(entry)
-            ON snapshot.entry->>'cityId' = live.entry->>'cityId'
-        ), '[]'::jsonb) WHERE id = ${state.id}
-      `;
-    }
+  // A batch (not interactive) transaction: populationData is a large JSON
+  // value that can take minutes to upload over a slow link, which blew past
+  // the 5s interactive-transaction timeout and rolled the whole save back.
+  const update = prisma.world.update({
+    where: { id: state.id },
+    data: {
+      totalPopulation: state.totalPopulation,
+      clock: state.clock as unknown as Prisma.InputJsonValue,
+      // Omitted while the people are still loading, so the stored ones are kept
+      ...(populationData && { populationData: populationData as unknown as Prisma.InputJsonValue }),
+    },
   });
+  if (preserveCities) {
+    await update;
+    return;
+  }
+  // Keep sites claimed by another request while this snapshot was in flight.
+  const mergeCities = prisma.$executeRaw`
+    UPDATE "World" SET cities = COALESCE((
+      SELECT jsonb_agg(COALESCE(snapshot.entry, live.entry) ORDER BY live.ord)
+      FROM jsonb_array_elements(cities) WITH ORDINALITY AS live(entry, ord)
+      LEFT JOIN jsonb_array_elements(${JSON.stringify(state.cities)}::jsonb) AS snapshot(entry)
+        ON snapshot.entry->>'cityId' = live.entry->>'cityId'
+    ), '[]'::jsonb) WHERE id = ${state.id}
+  `;
+  await prisma.$transaction([update, mergeCities]);
 }
 
 export async function writeWorldCityEdges(

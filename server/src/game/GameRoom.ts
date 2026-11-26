@@ -254,7 +254,7 @@ export class GameRoom {
       return { success: false, error: result.reason };
     }
 
-    // A roundabout dropped on a crossing replaces the roads under it.
+    // A roundabout replaces the roads under it; a road replaces zoned tiles.
     for (const road of getReplacedRoads(this.state.grid, position, type, this.state.buildings, orientation)) {
       this.demolishBuilding(road.position);
     }

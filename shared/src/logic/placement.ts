@@ -22,9 +22,16 @@ export function replacesRoads(type: BuildingType): boolean {
 }
 
 /**
- * Road buildings a placement would replace. Only meaningful for types where
- * `replacesRoads` is true; returns an empty list otherwise.
+ * Whether placing `type` may clear an existing `occupant` out of the way:
+ * a roundabout replaces plain roads, and any road may be laid over zoned
+ * tiles (the zone, and whatever grew on it, is removed).
  */
+function canReplace(type: BuildingType, occupant: BuildingType): boolean {
+  if (replacesRoads(type)) return isRoad(occupant) && !replacesRoads(occupant);
+  return isRoad(type) && isZone(occupant);
+}
+
+/** Existing buildings (roads under a roundabout, zones under a road) a placement would replace. */
 export function getReplacedRoads(
   grid: Grid,
   pos: Position,
@@ -32,7 +39,7 @@ export function getReplacedRoads(
   buildings: PlacedBuilding[],
   orientation?: RoadOrientation,
 ): PlacedBuilding[] {
-  if (!replacesRoads(type)) return [];
+  if (!isRoad(type)) return [];
   const { w, d } = getEffectiveSize(type, orientation);
   const ids = new Set<string>();
   for (let dx = 0; dx < w; dx++) {
@@ -41,7 +48,7 @@ export function getReplacedRoads(
       if (id) ids.add(id);
     }
   }
-  return buildings.filter(b => ids.has(b.id) && isRoad(b.type) && !replacesRoads(b.type));
+  return buildings.filter(b => ids.has(b.id) && canReplace(type, b.type));
 }
 
 export interface PlacementResult {
@@ -67,8 +74,8 @@ export function canPlaceBuilding(
   }
 
   const { w, d } = getEffectiveSize(type, orientation);
-  const replaceable = replacesRoads(type) && buildings
-    ? new Set(buildings.filter(b => isRoad(b.type) && !replacesRoads(b.type)).map(b => b.id))
+  const replaceable = isRoad(type) && buildings
+    ? new Set(buildings.filter(b => canReplace(type, b.type)).map(b => b.id))
     : null;
   for (let dx = 0; dx < w; dx++) {
     for (let dz = 0; dz < d; dz++) {
