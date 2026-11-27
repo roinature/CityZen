@@ -38,6 +38,7 @@ jobs:
           VITE_TURN_USERNAME: ${{ secrets.VITE_TURN_USERNAME }}
           VITE_TURN_CREDENTIAL: ${{ secrets.VITE_TURN_CREDENTIAL }}
         run: |
+          npm run clean
           npm run build -w shared
           npm run build -w client
 
