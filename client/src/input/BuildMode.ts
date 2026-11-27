@@ -10,6 +10,7 @@ import {
   type UtilityLayer,
   type ZoneDensity,
   findGridBuildingToDemolish,
+  isGeneratorBuilding,
   isPowerConductorBuilding,
   isRoad,
   isSewageFacilityBuilding,
@@ -21,7 +22,13 @@ import {
   ZONE_DENSITY_COSTS,
   CELL_SIZE,
   DEFAULT_GRID_SIZE,
+  POWER_GENERATOR_RADIUS,
+  POWER_LINE_RADIUS,
+  POWER_MAX_SPAN,
+  POWER_PYLON_STEP,
+  POWER_SUBSTATION_RADIUS,
   canPlaceBuilding,
+  computePowerCableSpans,
   getEffectiveSize,
   getPlacementCost,
   getWaterfrontFacing,
@@ -99,6 +106,218 @@ function computeStraightLine(start: Position, end: Position, stepW: number, step
   }
 
   return positions;
+}
+
+function getPowerRangeForType(type: BuildingType): number {
+  if (type === BuildingType.ENERGY_SUBSTATION) return POWER_SUBSTATION_RADIUS;
+  if (isGeneratorBuilding(type)) return POWER_GENERATOR_RADIUS;
+  if (type === BuildingType.UTILITY_POWER_LINE) return POWER_LINE_RADIUS;
+  return 0;
+}
+
+function hasConductorOnCell(state: CityState, x: number, z: number): boolean {
+  const cell = state.grid[x]?.[z];
+  if (!cell) return false;
+  if (cell.powerLineId) return true;
+  if (cell.buildingId) {
+    const b = state.buildings.find(item => item.id === cell.buildingId);
+    return Boolean(b && isPowerConductorBuilding(b.type));
+  }
+  return false;
+}
+
+/**
+ * Computes spaced pylon positions along a free-angle line from `start` to `end`
+ * (every `POWER_PYLON_STEP = 5` tiles, stretching overhead cables across the gap).
+ * If `start` already holds a power plant/substation/pylon and the drag extends away,
+ * skips placing a duplicate pylon at `start` so cables stretch cleanly from the existing anchor.
+ */
+function computeSpacedPowerLinePositions(
+  state: CityState | null,
+  start: Position,
+  end: Position,
+): Position[] {
+  const maxCoord = DEFAULT_GRID_SIZE - 1;
+  const s: Position = {
+    x: Math.max(0, Math.min(maxCoord, start.x)),
+    z: Math.max(0, Math.min(maxCoord, start.z)),
+  };
+  const e: Position = {
+    x: Math.max(0, Math.min(maxCoord, end.x)),
+    z: Math.max(0, Math.min(maxCoord, end.z)),
+  };
+
+  const dx = e.x - s.x;
+  const dz = e.z - s.z;
+  const dist = Math.hypot(dx, dz);
+  if (dist < 0.5) return [s];
+
+  const segments = Math.max(1, Math.ceil(dist / POWER_PYLON_STEP));
+  const startAnchored = Boolean(state && hasConductorOnCell(state, s.x, s.z));
+  const endAnchored = Boolean(state && hasConductorOnCell(state, e.x, e.z));
+  const out: Position[] = [];
+  let prevAnchor: Position = s;
+
+  for (let i = 0; i <= segments; i++) {
+    if (i === 0 && startAnchored && segments >= 1) continue;
+    if (i === segments && endAnchored && out.length > 0) continue;
+
+    const t = i / segments;
+    let px = Math.round(s.x + dx * t);
+    let pz = Math.round(s.z + dz * t);
+
+    // If an intermediate tower lands on water or an unplaceable cell, nudge <= 1 tile onto dry ground
+    if (state && i > 0 && i < segments) {
+      const ok = canPlaceBuilding(
+        state.grid, { x: px, z: pz }, BuildingType.UTILITY_POWER_LINE, state.resources, true, state.buildings,
+      ).valid;
+      if (!ok) {
+        const nextX = s.x + dx * ((i + 1) / segments);
+        const nextZ = s.z + dz * ((i + 1) / segments);
+        for (const [ox, oz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) {
+          const nx = px + ox;
+          const nz = pz + oz;
+          if (nx < 0 || nz < 0 || nx > maxCoord || nz > maxCoord) continue;
+          if (Math.hypot(nx - prevAnchor.x, nz - prevAnchor.z) > POWER_MAX_SPAN) continue;
+          if (Math.hypot(nextX - nx, nextZ - nz) > POWER_MAX_SPAN) continue;
+          if (canPlaceBuilding(
+            state.grid, { x: nx, z: nz }, BuildingType.UTILITY_POWER_LINE, state.resources, true, state.buildings,
+          ).valid) {
+            px = nx;
+            pz = nz;
+            break;
+          }
+        }
+      }
+    }
+
+    if (out.length === 0 || out[out.length - 1].x !== px || out[out.length - 1].z !== pz) {
+      out.push({ x: px, z: pz });
+      prevAnchor = { x: px, z: pz };
+    }
+  }
+
+  return out.length > 0 ? out : [e];
+}
+
+/**
+ * Builds golden circular range rings and stretched catenary preview cables
+ * for hovered or dragged power infrastructure.
+ */
+function buildPowerPreviewOverlay(
+  state: CityState,
+  ghostBuildings: PlacedBuilding[],
+  radiusTiles: number,
+  showCables: boolean,
+): THREE.Group {
+  const group = new THREE.Group();
+  const rWorld = (radiusTiles + 0.35) * CELL_SIZE;
+
+  if (radiusTiles > 0 && ghostBuildings.length > 0) {
+    const discGeo = new THREE.CircleGeometry(rWorld, 36).rotateX(-Math.PI / 2);
+    const discMat = new THREE.MeshBasicMaterial({
+      color: 0xffd54f,
+      transparent: true,
+      opacity: 0.08,
+      depthWrite: false,
+    });
+    const ringGeo = new THREE.RingGeometry(rWorld - 0.07 * CELL_SIZE, rWorld, 44).rotateX(-Math.PI / 2);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: 0xffeb3b,
+      transparent: true,
+      opacity: 0.5,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+
+    const discs = new THREE.InstancedMesh(discGeo, discMat, ghostBuildings.length);
+    const rings = new THREE.InstancedMesh(ringGeo, ringMat, ghostBuildings.length);
+    discs.renderOrder = 4;
+    rings.renderOrder = 5;
+    const mat = new THREE.Matrix4();
+
+    ghostBuildings.forEach((gb, idx) => {
+      const { w, d } = getEffectiveSize(gb.type, gb.orientation);
+      const cx = (gb.position.x + w * 0.5) * CELL_SIZE;
+      const cz = (gb.position.z + d * 0.5) * CELL_SIZE;
+      mat.makeTranslation(cx, 0.032, cz);
+      discs.setMatrixAt(idx, mat);
+      mat.makeTranslation(cx, 0.036, cz);
+      rings.setMatrixAt(idx, mat);
+    });
+    discs.computeBoundingSphere();
+    rings.computeBoundingSphere();
+    group.add(discs, rings);
+  }
+
+  if (showCables && ghostBuildings.length > 0) {
+    const ghostIds = new Set(ghostBuildings.map(g => g.id));
+    const existingConductors = state.buildings.filter(b => isPowerConductorBuilding(b.type));
+    const activeGhosts = ghostBuildings.filter(
+      g => !hasConductorOnCell(state, g.position.x, g.position.z),
+    );
+    if (activeGhosts.length > 0) {
+      const spans = computePowerCableSpans([...existingConductors, ...activeGhosts], POWER_MAX_SPAN)
+        .filter(sp => ghostIds.has(sp.fromId) || ghostIds.has(sp.toId));
+
+      if (spans.length > 0) {
+        const SEGS = 6;
+        const wireY = 1.02 * CELL_SIZE;
+        const chordGeo = new THREE.CylinderGeometry(0.022 * CELL_SIZE, 0.022 * CELL_SIZE, 1, 6);
+        const chordMat = new THREE.MeshBasicMaterial({
+          color: 0xffeb3b,
+          transparent: true,
+          opacity: 0.9,
+        });
+        const wires = new THREE.InstancedMesh(chordGeo, chordMat, spans.length * 2 * SEGS);
+        const upAxis = new THREE.Vector3(0, 1, 0);
+        const p0 = new THREE.Vector3();
+        const p1 = new THREE.Vector3();
+        const delta = new THREE.Vector3();
+        const mid = new THREE.Vector3();
+        const quat = new THREE.Quaternion();
+        const scaleVec = new THREE.Vector3();
+        const mat = new THREE.Matrix4();
+
+        let wi = 0;
+        for (const sp of spans) {
+          const ax = sp.ax * CELL_SIZE;
+          const az = sp.az * CELL_SIZE;
+          const bx = sp.bx * CELL_SIZE;
+          const bz = sp.bz * CELL_SIZE;
+          const dx = bx - ax;
+          const dz = bz - az;
+          const len = Math.hypot(dx, dz) || 0.001;
+          const perpX = (-dz / len) * 0.18 * CELL_SIZE;
+          const perpZ = (dx / len) * 0.18 * CELL_SIZE;
+          const sagMax = Math.min(0.32, 0.042 * Math.max(1, sp.distance)) * CELL_SIZE;
+
+          for (const side of [-1, 1]) {
+            const ox = side * perpX;
+            const oz = side * perpZ;
+            for (let s = 0; s < SEGS; s++) {
+              const t0 = s / SEGS;
+              const t1 = (s + 1) / SEGS;
+              p0.set(ax + dx * t0 + ox, wireY - 4 * sagMax * t0 * (1 - t0), az + dz * t0 + oz);
+              p1.set(ax + dx * t1 + ox, wireY - 4 * sagMax * t1 * (1 - t1), az + dz * t1 + oz);
+              delta.subVectors(p1, p0);
+              const segLen = delta.length();
+              mid.addVectors(p0, p1).multiplyScalar(0.5);
+              quat.setFromUnitVectors(upAxis, delta.normalize());
+              scaleVec.set(1, segLen * 1.02, 1);
+              mat.compose(mid, quat, scaleVec);
+              wires.setMatrixAt(wi++, mat);
+            }
+          }
+        }
+        wires.count = wi;
+        wires.computeBoundingSphere();
+        group.add(wires);
+      }
+    }
+  }
+
+  return group;
 }
 
 export class BuildMode {
@@ -483,6 +702,27 @@ export class BuildMode {
       this.currentHoverPos.z * CELL_SIZE + d / 2,
     );
 
+    // Show circular power range & live stretched snap cables when hovering power infrastructure
+    const powerRange = getPowerRangeForType(this.selectedType);
+    if (powerRange > 0) {
+      this.clearLineDragPreview();
+      const ghostEntry: PlacedBuilding = {
+        id: '__hover_power__',
+        type: this.selectedType,
+        position: this.currentHoverPos,
+        placedBy: '',
+        placedAt: 0,
+        orientation,
+      };
+      this.lineDragPreviewGroup = buildPowerPreviewOverlay(
+        state,
+        [ghostEntry],
+        powerRange,
+        this.selectedType === BuildingType.UTILITY_POWER_LINE && result.valid,
+      );
+      this.scene.add(this.lineDragPreviewGroup);
+    }
+
     if (result.valid && !isZone(this.selectedType) && !isUtilityConduit(this.selectedType)) {
       this.onPreviewClearance?.({
         x: this.currentHoverPos.x,
@@ -620,7 +860,9 @@ export class BuildMode {
       if (this.lineDragStart && isLineDragType(type)) {
         const orientation = this.computeActiveLineDragOrientation(this.currentCityState);
         const { w, d } = getEffectiveSize(type, orientation);
-        const positions = computeStraightLine(this.lineDragStart, this.currentHoverPos, w, d);
+        const positions = type === BuildingType.UTILITY_POWER_LINE
+          ? computeSpacedPowerLinePositions(this.currentCityState, this.lineDragStart, this.currentHoverPos)
+          : computeStraightLine(this.lineDragStart, this.currentHoverPos, w, d);
         this.onPaint?.({ positions, type, orientation });
       } else if (this.rectDragStart && isRectDragType(type)) {
         const positions = this.getRectanglePositions(this.rectDragStart, this.currentHoverPos);
@@ -719,10 +961,13 @@ export class BuildMode {
     if (!this.lineDragStart || !this.currentHoverPos || !this.selectedType) return;
 
     const type = this.selectedType;
+    const isPowerLine = type === BuildingType.UTILITY_POWER_LINE;
     const orientation = this.computeActiveLineDragOrientation(state);
     const flowDir = this.computeActiveDragFlowDir();
     const { w: effW, d: effD } = getEffectiveSize(type, orientation);
-    const positions = computeStraightLine(this.lineDragStart, this.currentHoverPos, effW, effD);
+    const positions = isPowerLine
+      ? computeSpacedPowerLinePositions(state, this.lineDragStart, this.currentHoverPos)
+      : computeStraightLine(this.lineDragStart, this.currentHoverPos, effW, effD);
     const strokeCells = new Set(positions.map(p => `${p.x},${p.z}`));
     const conduit = isUtilityConduit(type);
 
@@ -730,6 +975,7 @@ export class BuildMode {
     const w = effW * CELL_SIZE;
     const d = effD * CELL_SIZE;
     const leveled = new Set<string>();
+    const validPowerGhosts: PlacedBuilding[] = [];
     let totalCost = 0;
     let gradingCost = 0;
 
@@ -750,8 +996,19 @@ export class BuildMode {
         }
       }
 
+      if (isPowerLine) {
+        validPowerGhosts.push({
+          id: `__drag_power_${idx}__`,
+          type,
+          position: pos,
+          placedBy: '',
+          placedAt: 0,
+          orientation,
+        });
+      }
+
       let conduitConnections: ConduitConnections | undefined;
-      if (conduit) {
+      if (conduit && !isPowerLine) {
         if (positions.length === 1) {
           conduitConnections = {
             ...this.computeHoverConduitConnections(state, pos, type, orientation),
@@ -775,12 +1032,29 @@ export class BuildMode {
       const ghost = this.factory.createGhostPreview(
         type, orientation, CITY_STYLES[this.styleId], segValid, conduitConnections,
       );
+      // Orient power pylon crossarm perpendicular to the free-angle drag vector
+      if (isPowerLine && this.lineDragStart) {
+        const sdx = this.currentHoverPos.x - this.lineDragStart.x;
+        const sdz = this.currentHoverPos.z - this.lineDragStart.z;
+        if (Math.hypot(sdx, sdz) >= 0.5) {
+          ghost.rotation.y = Math.atan2(-sdz, sdx);
+          if (orientation === 'NS') {
+            ghost.rotation.y -= Math.PI / 2;
+          }
+        }
+      }
       ghost.position.set(
         pos.x * CELL_SIZE + w / 2,
         0,
         pos.z * CELL_SIZE + d / 2,
       );
       this.lineDragPreviewGroup.add(ghost);
+    }
+
+    if (isPowerLine && validPowerGhosts.length > 0) {
+      this.lineDragPreviewGroup.add(
+        buildPowerPreviewOverlay(state, validPowerGhosts, POWER_LINE_RADIUS, true),
+      );
     }
 
     this.scene.add(this.lineDragPreviewGroup);

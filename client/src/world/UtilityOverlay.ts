@@ -6,8 +6,11 @@ import {
   CELL_FLAG_WATER,
   CELL_FLAG_WATER_SOURCE,
   CELL_SIZE,
+  POWER_MAX_SPAN,
+  computePowerCableSpans,
   evaluateCityUtilities,
   getEffectiveSize,
+  isGeneratorBuilding,
   isPowerConductorBuilding,
   isSewageFacilityBuilding,
   isWaterFacilityBuilding,
@@ -90,129 +93,186 @@ export class UtilityOverlay {
     disposeGroup(this.layerGroup);
   }
 
-  // ── Overhead Power Lines (Always Visible) ──────────────────
+  // ── Overhead Power Lines & Stretched Catenary Spans (Always Visible) ──
 
   private rebuildOverheadPowerLines(state: CityState, report: UtilityGridReport): void {
     disposeGroup(this.powerLinesGroup);
-    const size = report.gridSize;
-    const lines = state.buildings.filter(b => b.type === BuildingType.UTILITY_POWER_LINE);
-    if (!lines.length) return;
+    const conductors = state.buildings.filter(b => isPowerConductorBuilding(b.type));
+    if (!conductors.length) return;
+
+    const lines = conductors.filter(b => b.type === BuildingType.UTILITY_POWER_LINE);
+    const spans = computePowerCableSpans(conductors, POWER_MAX_SPAN);
+    if (!lines.length && !spans.length) return;
 
     const powerHighlight = this.activeLayer === 'power';
-    const hasConductorAt = new Uint8Array(size * size);
-    const lineStateAt = new Map<number, 'energized' | 'overloaded' | 'unenergized'>();
+    const byId = new Map(conductors.map(b => [b.id, b]));
 
-    for (const b of state.buildings) {
-      if (!isPowerConductorBuilding(b.type)) continue;
-      const { w, d } = getEffectiveSize(b.type, b.orientation);
-      for (let dx = 0; dx < w; dx++) {
-        for (let dz = 0; dz < d; dz++) {
-          const cx = b.position.x + dx, cz = b.position.z + dz;
-          if (cx >= 0 && cx < size && cz >= 0 && cz < size) {
-            hasConductorAt[cx * size + cz] = 1;
-          }
+    const conductorState = (id: string): 'energized' | 'overloaded' | 'unenergized' =>
+      report.powerLineState.get(id) ?? (byId.has(id) && isGeneratorBuilding(byId.get(id)!.type) ? 'energized' : 'unenergized');
+
+    // Compute average span tangent per pylon so crossarms rotate perpendicular to cable runs
+    const tangentX = new Map<string, number>();
+    const tangentZ = new Map<string, number>();
+    for (const sp of spans) {
+      const dx = sp.bx - sp.ax;
+      const dz = sp.bz - sp.az;
+      const len = Math.hypot(dx, dz) || 1;
+      const ux = dx / len;
+      const uz = dz / len;
+      for (const id of [sp.fromId, sp.toId]) {
+        const px = tangentX.get(id);
+        const pz = tangentZ.get(id);
+        if (px === undefined || pz === undefined) {
+          tangentX.set(id, ux);
+          tangentZ.set(id, uz);
+        } else {
+          // Align vector sign before summing so opposing outgoing cables reinforce the line axis
+          const sign = px * ux + pz * uz < 0 ? -1 : 1;
+          tangentX.set(id, px + sign * ux);
+          tangentZ.set(id, pz + sign * uz);
         }
-      }
-      if (b.type === BuildingType.UTILITY_POWER_LINE) {
-        const st = report.powerLineState.get(b.id) ?? 'unenergized';
-        lineStateAt.set(b.position.x * size + b.position.z, st);
       }
     }
 
-    const pylonHeight = 1.05 * CELL_SIZE;
-    const wireY = 0.98 * CELL_SIZE;
+    const pylonHeight = 1.12 * CELL_SIZE;
+    const wireY = 1.02 * CELL_SIZE;
     const transform = new THREE.Matrix4();
+    const rotMat = new THREE.Matrix4();
     const color = new THREE.Color();
 
-    // 1. Steel Pylons + Crossarms
-    const poleGeo = new THREE.CylinderGeometry(0.022 * CELL_SIZE, 0.038 * CELL_SIZE, pylonHeight, 7);
-    const poleMat = new THREE.MeshStandardMaterial({
-      color: powerHighlight ? 0xdbe4ea : 0x7e8a92,
-      roughness: 0.6,
-      metalness: 0.35,
-    });
-    const poles = new THREE.InstancedMesh(poleGeo, poleMat, lines.length);
+    // 1. Steel Pylons + Oriented Crossarms + Twin Insulator Bells
+    if (lines.length > 0) {
+      const poleGeo = new THREE.CylinderGeometry(0.022 * CELL_SIZE, 0.042 * CELL_SIZE, pylonHeight, 8);
+      const poleMat = new THREE.MeshStandardMaterial({
+        color: powerHighlight ? 0xe2e8f0 : 0x7e8a92,
+        roughness: 0.55,
+        metalness: 0.38,
+      });
+      const poles = new THREE.InstancedMesh(poleGeo, poleMat, lines.length);
 
-    const armGeo = new THREE.BoxGeometry(0.38 * CELL_SIZE, 0.03 * CELL_SIZE, 0.38 * CELL_SIZE);
-    const armMat = new THREE.MeshStandardMaterial({ roughness: 0.5 });
-    const arms = new THREE.InstancedMesh(armGeo, armMat, lines.length);
+      const armGeo = new THREE.BoxGeometry(0.055 * CELL_SIZE, 0.036 * CELL_SIZE, 0.54 * CELL_SIZE);
+      const armMat = new THREE.MeshStandardMaterial({ roughness: 0.45, metalness: 0.3 });
+      const arms = new THREE.InstancedMesh(armGeo, armMat, lines.length);
 
-    lines.forEach((line, i) => {
-      const wx = (line.position.x + 0.5) * CELL_SIZE;
-      const wz = (line.position.z + 0.5) * CELL_SIZE;
-      transform.makeTranslation(wx, pylonHeight * 0.5, wz);
-      poles.setMatrixAt(i, transform);
+      const insGeo = new THREE.CylinderGeometry(0.022 * CELL_SIZE, 0.028 * CELL_SIZE, 0.075 * CELL_SIZE, 8);
+      const insMat = new THREE.MeshStandardMaterial({ roughness: 0.3, metalness: 0.1 });
+      const insulators = new THREE.InstancedMesh(insGeo, insMat, lines.length * 2);
 
-      transform.makeTranslation(wx, wireY + 0.02 * CELL_SIZE, wz);
-      arms.setMatrixAt(i, transform);
-      const st = report.powerLineState.get(line.id) ?? 'unenergized';
-      const armHex = st === 'energized'
-        ? (powerHighlight ? 0xffd54f : 0xcfd8dc)
-        : st === 'overloaded'
-          ? 0xff9800
-          : 0x607d8b;
-      arms.setColorAt(i, color.setHex(armHex));
-    });
-    poles.computeBoundingSphere();
-    arms.computeBoundingSphere();
-    this.powerLinesGroup.add(poles, arms);
+      lines.forEach((line, i) => {
+        const wx = (line.position.x + 0.5) * CELL_SIZE;
+        const wz = (line.position.z + 0.5) * CELL_SIZE;
+        transform.makeTranslation(wx, pylonHeight * 0.5, wz);
+        poles.setMatrixAt(i, transform);
 
-    // 2. Wire Spans connecting orthogonally adjacent conductor cells
-    const spans: Array<{ mx: number; mz: number; ew: boolean; state: 'energized' | 'overloaded' | 'unenergized' }> = [];
-    for (const line of lines) {
-      const { x, z } = line.position;
-      const st = lineStateAt.get(x * size + z) ?? 'unenergized';
-      // East neighbor
-      if (x + 1 < size && hasConductorAt[(x + 1) * size + z]) {
-        if (!lineStateAt.has((x + 1) * size + z) || x < x + 1) {
-          spans.push({ mx: (x + 1) * CELL_SIZE, mz: (z + 0.5) * CELL_SIZE, ew: true, state: st });
+        const tx = tangentX.get(line.id) ?? (line.orientation === 'NS' ? 0 : 1);
+        const tz = tangentZ.get(line.id) ?? (line.orientation === 'NS' ? 1 : 0);
+        // Box local Z is the wide crossarm axis; rotate around Y so local X aligns with cable tangent (tx, tz)
+        const yaw = Math.atan2(-tz, tx);
+        rotMat.makeRotationY(yaw);
+        transform.makeTranslation(wx, wireY + 0.045 * CELL_SIZE, wz).multiply(rotMat);
+        arms.setMatrixAt(i, transform);
+
+        const st = report.powerLineState.get(line.id) ?? 'unenergized';
+        const armHex = st === 'energized'
+          ? (powerHighlight ? 0xffd54f : 0xcfd8dc)
+          : st === 'overloaded'
+            ? 0xff9800
+            : 0x607d8b;
+        arms.setColorAt(i, color.setHex(armHex));
+
+        // Perpendicular unit vector in XZ for the twin insulator bells
+        const tLen = Math.hypot(tx, tz) || 1;
+        const perpX = (-tz / tLen) * 0.18 * CELL_SIZE;
+        const perpZ = (tx / tLen) * 0.18 * CELL_SIZE;
+        const insHex = st === 'energized' ? 0xffe082 : st === 'overloaded' ? 0xffab40 : 0x90a4ae;
+        color.setHex(insHex);
+        for (let side = 0; side < 2; side++) {
+          const s = side === 0 ? -1 : 1;
+          transform.makeTranslation(wx + s * perpX, wireY + 0.01 * CELL_SIZE, wz + s * perpZ);
+          insulators.setMatrixAt(i * 2 + side, transform);
+          insulators.setColorAt(i * 2 + side, color);
         }
-      }
-      // South neighbor
-      if (z + 1 < size && hasConductorAt[x * size + (z + 1)]) {
-        if (!lineStateAt.has(x * size + (z + 1)) || z < z + 1) {
-          spans.push({ mx: (x + 0.5) * CELL_SIZE, mz: (z + 1) * CELL_SIZE, ew: false, state: st });
-        }
-      }
-      // West/North tie-ins ONLY if neighbor is a generator/substation (not another power line, to avoid duplicate spans)
-      if (x - 1 >= 0 && hasConductorAt[(x - 1) * size + z] && !lineStateAt.has((x - 1) * size + z)) {
-        spans.push({ mx: x * CELL_SIZE, mz: (z + 0.5) * CELL_SIZE, ew: true, state: st });
-      }
-      if (z - 1 >= 0 && hasConductorAt[x * size + (z - 1)] && !lineStateAt.has(x * size + (z - 1))) {
-        spans.push({ mx: (x + 0.5) * CELL_SIZE, mz: z * CELL_SIZE, ew: false, state: st });
-      }
+      });
+
+      poles.computeBoundingSphere();
+      arms.computeBoundingSphere();
+      insulators.computeBoundingSphere();
+      this.powerLinesGroup.add(poles, arms, insulators);
     }
 
+    // 2. Stretched Twin Catenary Overhead Cables (drooping gracefully across up to POWER_MAX_SPAN tiles)
     if (spans.length > 0) {
-      const thickness = (powerHighlight ? 0.055 : 0.022) * CELL_SIZE;
-      const wireGeo = new THREE.BoxGeometry(1, thickness, thickness);
+      const CATENARY_SEGS = 6;
+      const radius = (powerHighlight ? 0.026 : 0.013) * CELL_SIZE;
+      const chordGeo = new THREE.CylinderGeometry(radius, radius, 1, 6);
       const wireMat = new THREE.MeshBasicMaterial({
         transparent: powerHighlight,
-        opacity: powerHighlight ? 0.95 : 1.0,
+        opacity: powerHighlight ? 0.96 : 1.0,
       });
-      const wires = new THREE.InstancedMesh(wireGeo, wireMat, spans.length * 2);
-      const rotY = new THREE.Matrix4().makeRotationY(Math.PI / 2);
-      const scaleMat = new THREE.Matrix4().makeScale(CELL_SIZE, 1, 1);
+      const totalChords = spans.length * 2 * CATENARY_SEGS;
+      const wires = new THREE.InstancedMesh(chordGeo, wireMat, totalChords);
+
+      const upAxis = new THREE.Vector3(0, 1, 0);
+      const p0 = new THREE.Vector3();
+      const p1 = new THREE.Vector3();
+      const delta = new THREE.Vector3();
+      const mid = new THREE.Vector3();
+      const quat = new THREE.Quaternion();
+      const scaleVec = new THREE.Vector3();
 
       let wi = 0;
-      for (const s of spans) {
-        const hex = s.state === 'energized'
-          ? (powerHighlight ? 0xffeb3b : 0x37474f)
-          : s.state === 'overloaded'
+      for (const sp of spans) {
+        const stA = conductorState(sp.fromId);
+        const stB = conductorState(sp.toId);
+        const state = (stA === 'overloaded' || stB === 'overloaded')
+          ? 'overloaded'
+          : (stA === 'energized' || stB === 'energized')
+            ? 'energized'
+            : 'unenergized';
+
+        const hex = state === 'energized'
+          ? (powerHighlight ? 0xffeb3b : 0x2f3e46)
+          : state === 'overloaded'
             ? 0xff7043
             : (powerHighlight ? 0x78909c : 0x546e7a);
         color.setHex(hex);
-        for (const offset of [-0.14 * CELL_SIZE, 0.14 * CELL_SIZE]) {
-          const tx = s.ew ? s.mx : s.mx + offset;
-          const tz = s.ew ? s.mz + offset : s.mz;
-          transform.makeTranslation(tx, wireY, tz);
-          if (!s.ew) transform.multiply(rotY);
-          transform.multiply(scaleMat);
-          wires.setMatrixAt(wi, transform);
-          wires.setColorAt(wi, color);
-          wi++;
+
+        const ax = sp.ax * CELL_SIZE;
+        const az = sp.az * CELL_SIZE;
+        const bx = sp.bx * CELL_SIZE;
+        const bz = sp.bz * CELL_SIZE;
+        const dx = bx - ax;
+        const dz = bz - az;
+        const horizLen = Math.hypot(dx, dz) || 0.001;
+        const perpX = (-dz / horizLen) * 0.18 * CELL_SIZE;
+        const perpZ = (dx / horizLen) * 0.18 * CELL_SIZE;
+        const sagMax = Math.min(0.32, 0.042 * Math.max(1, sp.distance)) * CELL_SIZE;
+
+        for (const side of [-1, 1]) {
+          const ox = side * perpX;
+          const oz = side * perpZ;
+          for (let s = 0; s < CATENARY_SEGS; s++) {
+            const t0 = s / CATENARY_SEGS;
+            const t1 = (s + 1) / CATENARY_SEGS;
+            const y0 = wireY - 4 * sagMax * t0 * (1 - t0);
+            const y1 = wireY - 4 * sagMax * t1 * (1 - t1);
+
+            p0.set(ax + dx * t0 + ox, y0, az + dz * t0 + oz);
+            p1.set(ax + dx * t1 + ox, y1, az + dz * t1 + oz);
+            delta.subVectors(p1, p0);
+            const segLen = delta.length();
+            mid.addVectors(p0, p1).multiplyScalar(0.5);
+            quat.setFromUnitVectors(upAxis, delta.normalize());
+            scaleVec.set(1, segLen * 1.02, 1);
+
+            transform.compose(mid, quat, scaleVec);
+            wires.setMatrixAt(wi, transform);
+            wires.setColorAt(wi, color);
+            wi++;
+          }
         }
       }
+      wires.count = wi;
       wires.computeBoundingSphere();
       this.powerLinesGroup.add(wires);
     }

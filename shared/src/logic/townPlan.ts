@@ -646,7 +646,8 @@ class TownPlanner {
       utilityAnchors.push({ type, x, z });
     }
 
-    // Lay underground water & sewage mains under all streets, plus L-connectors to facilities & power lines
+    // Lay underground water & sewage mains under streets; zoned neighborhoods conduct
+    // electricity automatically, so only stretch spaced power pylons to outlying utilities.
     const waterSet = new Set<number>();
     const sewageSet = new Set<number>();
     const powerSet = new Set<number>();
@@ -663,6 +664,41 @@ class TownPlanner {
       const sz = z1 >= z0 ? 1 : -1;
       for (let z = z0; z !== z1 + sz; z += sz) addConduit(set, type, x1, z);
     };
+    const connectSpacedPylons = (x0: number, z0: number, x1: number, z1: number) => {
+      const dx = x1 - x0;
+      const dz = z1 - z0;
+      const dist = Math.hypot(dx, dz);
+      if (dist <= 3) return;
+      const segs = Math.max(1, Math.ceil(dist / 5));
+      for (let i = 0; i <= segs; i++) {
+        const t = i / segs;
+        let px = Math.round(x0 + dx * t);
+        let pz = Math.round(z0 + dz * t);
+        if (!this.inside(px, pz)) continue;
+        if (this.grid[px][pz].terrain === 'water') {
+          // Nudge onto dry bank if crossing a narrow stream
+          for (const [ox, oz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            if (this.inside(px + ox, pz + oz) && this.grid[px + ox][pz + oz].terrain !== 'water') {
+              px += ox;
+              pz += oz;
+              break;
+            }
+          }
+        }
+        addConduit(powerSet, BuildingType.UTILITY_POWER_LINE, px, pz);
+      }
+    };
+
+    const zonedCells: Array<[number, number]> = [];
+    for (const item of this.plan) {
+      if (
+        item.type === BuildingType.ZONE_RESIDENTIAL
+        || item.type === BuildingType.ZONE_COMMERCIAL
+        || item.type === BuildingType.ZONE_INDUSTRIAL
+      ) {
+        zonedCells.push([item.position.x, item.position.z]);
+      }
+    }
 
     let roadAnchor: [number, number] | null = null;
     for (let x = 0; x < this.n; x++) {
@@ -673,28 +709,35 @@ class TownPlanner {
           }
           addConduit(waterSet, BuildingType.UTILITY_WATER_PIPE, x, z);
           addConduit(sewageSet, BuildingType.UTILITY_SEWAGE_PIPE, x, z);
-          if (this.roadAt(x, z) === MAIN_STREET || this.roadAt(x, z) === AVENUE || (x + z) % 2 === 0) {
-            addConduit(powerSet, BuildingType.UTILITY_POWER_LINE, x, z);
-          }
         }
       }
     }
 
     if (roadAnchor) {
       for (const anchor of utilityAnchors) {
+        let nearestTown: [number, number] = roadAnchor;
+        let bestDist = Math.hypot(anchor.x - roadAnchor[0], anchor.z - roadAnchor[1]);
+        for (const [zx, zz] of zonedCells) {
+          const d = Math.hypot(anchor.x - zx, anchor.z - zz);
+          if (d < bestDist) {
+            bestDist = d;
+            nearestTown = [zx, zz];
+          }
+        }
+
         if (anchor.type === BuildingType.WATER_PUMP_STATION || anchor.type === BuildingType.WATER_TOWER) {
           connectManhat(waterSet, BuildingType.UTILITY_WATER_PIPE, anchor.x, anchor.z, roadAnchor[0], roadAnchor[1]);
-          connectManhat(powerSet, BuildingType.UTILITY_POWER_LINE, anchor.x, anchor.z, roadAnchor[0], roadAnchor[1]);
+          if (bestDist > 3) connectSpacedPylons(anchor.x, anchor.z, nearestTown[0], nearestTown[1]);
         } else if (anchor.type === BuildingType.SEWAGE_PUMP_STATION || anchor.type === BuildingType.WATER_SEWAGE_PLANT) {
           connectManhat(sewageSet, BuildingType.UTILITY_SEWAGE_PIPE, anchor.x, anchor.z, roadAnchor[0], roadAnchor[1]);
-          connectManhat(powerSet, BuildingType.UTILITY_POWER_LINE, anchor.x, anchor.z, roadAnchor[0], roadAnchor[1]);
+          if (bestDist > 3) connectSpacedPylons(anchor.x, anchor.z, nearestTown[0], nearestTown[1]);
         } else if (
           anchor.type === BuildingType.ENERGY_COAL_PLANT
           || anchor.type === BuildingType.ENERGY_SOLAR_FARM
           || anchor.type === BuildingType.ENERGY_WIND_TURBINE
           || anchor.type === BuildingType.ENERGY_SUBSTATION
         ) {
-          connectManhat(powerSet, BuildingType.UTILITY_POWER_LINE, anchor.x, anchor.z, roadAnchor[0], roadAnchor[1]);
+          if (bestDist > 4) connectSpacedPylons(anchor.x, anchor.z, nearestTown[0], nearestTown[1]);
         }
       }
     }

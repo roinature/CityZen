@@ -112,18 +112,19 @@ export {
 export type { PlacementCostQuote, PlacementResult, WaterfrontFacing } from './logic/placement.js';
 export {
   WATER_SOURCE_THRESHOLD,
+  POWER_MAX_SPAN, POWER_PYLON_STEP,
   POWER_LINE_RADIUS, POWER_GENERATOR_RADIUS, POWER_SUBSTATION_RADIUS, POWER_URBAN_HOP_LIMIT,
   WATER_PIPE_RADIUS, WATER_FACILITY_RADIUS, WATER_TOWER_RADIUS,
   SEWAGE_PIPE_RADIUS, SEWAGE_FACILITY_RADIUS,
   CELL_FLAG_POWER, CELL_FLAG_WATER, CELL_FLAG_SEWAGE, CELL_FLAG_WATER_SOURCE,
   getWaterSourceInfo, hasWaterSourceInFootprint,
   isGeneratorBuilding, isPowerConductorBuilding, isWaterFacilityBuilding, isSewageFacilityBuilding,
-  getBuildingUtilityProfile, evaluateCityUtilities, getCellUtilityCoverage,
+  computePowerCableSpans, getBuildingUtilityProfile, evaluateCityUtilities, getCellUtilityCoverage,
 } from './logic/utilities.js';
 export type {
   WaterSourceKind, WaterSourceInfo,
   PowerSupplyState, WaterSupplyState, SewageSupplyState,
-  BuildingUtilityStatus, PowerSubgridInfo, UtilityGridReport, UtilityResourceProfile,
+  BuildingUtilityStatus, PowerCableSpan, PowerSubgridInfo, UtilityGridReport, UtilityResourceProfile,
 } from './logic/utilities.js';
 export { createStarterLayout, getStarterEntranceX, isStarterEntranceRoad } from './logic/starterLayout.js';
 export {

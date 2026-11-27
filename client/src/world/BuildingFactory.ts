@@ -138,31 +138,29 @@ function buildConduitPreview(
   const hasNS = conn.n || conn.s;
 
   if (type === BuildingType.UTILITY_POWER_LINE) {
-    // Steel transmission pole + directional crossarm(s) + half-span wires matching build direction
-    add(new THREE.CylinderGeometry(0.08, 0.11, 0.05, 10), 0x78909c, 0, 0.025, 0);
-    add(new THREE.CylinderGeometry(0.024, 0.04, 1.05, 8), 0x90a4ae, 0, 0.55, 0);
+    // Tall transmission pylon + braced crossarm + twin suspension insulators (cables stretch dynamically between pylons)
+    const ns = (hasNS && !hasEW) || (!hasEW && !hasNS && orientation === 'NS');
+    add(new THREE.CylinderGeometry(0.11, 0.13, 0.05, 10), 0x607d8b, 0, 0.025, 0);
+    add(new THREE.CylinderGeometry(0.052, 0.072, 0.11, 8), 0x78909c, 0, 0.08, 0);
+    add(new THREE.CylinderGeometry(0.022, 0.042, 1.08, 8), 0x90a4ae, 0, 0.58, 0);
+    add(new THREE.ConeGeometry(0.024, 0.09, 6), 0xcfd8dc, 0, 1.16, 0);
 
-    // Crossarm sits perpendicular to wire direction (both arms if forming a corner/junction)
-    if (hasEW || (!hasEW && !hasNS)) {
-      add(new THREE.BoxGeometry(0.05, 0.035, 0.52), 0xb0bec5, 0, 1.02, 0);
-      for (const s of [-0.16, 0.16]) {
-        add(new THREE.CylinderGeometry(0.022, 0.022, 0.08, 8), 0xffd54f, 0, 0.97, s);
+    if (ns) {
+      add(new THREE.BoxGeometry(0.56, 0.036, 0.055), 0xb0bec5, 0, 1.06, 0);
+      for (const s of [-0.18, 0.18]) {
+        const brace = new THREE.BoxGeometry(0.18, 0.022, 0.022);
+        brace.rotateZ(s > 0 ? 0.55 : -0.55);
+        add(brace, 0x90a4ae, s * 0.55, 0.99, 0);
+        add(new THREE.CylinderGeometry(0.022, 0.028, 0.08, 8), 0xffd54f, s, 1.01, 0);
       }
-    }
-    if (hasNS) {
-      add(new THREE.BoxGeometry(0.52, 0.035, 0.05), 0xb0bec5, 0, 1.02, 0);
-      for (const s of [-0.16, 0.16]) {
-        add(new THREE.CylinderGeometry(0.022, 0.022, 0.08, 8), 0xffd54f, s, 0.97, 0);
+    } else {
+      add(new THREE.BoxGeometry(0.055, 0.036, 0.56), 0xb0bec5, 0, 1.06, 0);
+      for (const s of [-0.18, 0.18]) {
+        const brace = new THREE.BoxGeometry(0.022, 0.022, 0.18);
+        brace.rotateX(s > 0 ? -0.55 : 0.55);
+        add(brace, 0x90a4ae, 0, 0.99, s * 0.55);
+        add(new THREE.CylinderGeometry(0.022, 0.028, 0.08, 8), 0xffd54f, 0, 1.01, s);
       }
-    }
-
-    // Half-span overhead conductor wires extending to connected cell edges
-    const wireY = 0.98;
-    for (const s of [-0.14, 0.14]) {
-      if (conn.e) add(new THREE.BoxGeometry(0.5, 0.024, 0.024), 0xffeb3b, 0.25, wireY, s);
-      if (conn.w) add(new THREE.BoxGeometry(0.5, 0.024, 0.024), 0xffeb3b, -0.25, wireY, s);
-      if (conn.s) add(new THREE.BoxGeometry(0.024, 0.024, 0.5), 0xffeb3b, s, wireY, 0.25);
-      if (conn.n) add(new THREE.BoxGeometry(0.024, 0.024, 0.5), 0xffeb3b, s, wireY, -0.25);
     }
   } else {
     const pipeColor = type === BuildingType.UTILITY_WATER_PIPE ? 0x29b6f6 : 0x26a69a;

@@ -2,10 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   BuildingType,
+  CELL_FLAG_POWER,
   CityRoom,
   DEFAULT_TOWN,
   ZoneDensity,
   canPlaceBuilding,
+  computePowerCableSpans,
   createEmptyGrid,
   evaluateCityUtilities,
   getWaterSourceInfo,
@@ -51,17 +53,65 @@ test('power grid models subgrid islands, MW load vs generation, priority dispatc
   assert.equal(report.summary.brownoutBuildings, 1);
   assert.equal(report.summary.unpoweredBuildings, 1);
 
-  // Add a Coal Plant (80 MW) at (20, 5) and wire Power Lines + Substation to merge into one healthy grid
-  room.placeBuilding('p1', { x: 20, z: 5 }, BuildingType.ENERGY_COAL_PLANT);
-  const linePositions = [];
-  for (let x = 5; x <= 20; x++) linePositions.push({ x, z: 5 });
-  const wired = room.placeBuildings('p1', { positions: linePositions, type: BuildingType.UTILITY_POWER_LINE });
+  // Add a Coal Plant (80 MW) at (22, 5) — 15 tiles away from the factories — and bridge the gap
+  // with just TWO spaced Power Line pylons at (11, 5) and (17, 5) (6-tile stretched spans, no 1-tile chain!)
+  room.placeBuilding('p1', { x: 22, z: 5 }, BuildingType.ENERGY_COAL_PLANT);
+  report = evaluateCityUtilities(room.state);
+  assert.equal(report.summary.powerSubgrids, 3, 'Unconnected Coal Plant forms a 3rd separate subgrid');
+  assert.equal(report.summary.unpoweredBuildings, 1, 'Coal Plant at (22,5) should not reach (7,5) before stretching cables');
+
+  const wired = room.placeBuildings('p1', {
+    positions: [{ x: 11, z: 5 }, { x: 17, z: 5 }],
+    type: BuildingType.UTILITY_POWER_LINE,
+  });
   assert.equal(wired.success, true);
 
+  const spans = computePowerCableSpans(room.state.buildings);
+  assert.equal(spans.length, 2, 'Expected 2 clean non-overlapping stretched spans: (11,5)-(17,5) and (17,5)-CoalPlant');
+
   report = evaluateCityUtilities(room.state);
+  assert.equal(report.summary.powerSubgrids, 2, 'Coal Plant and Solar Farm merge through stretched spans + zoned factories');
   assert.equal(report.summary.poweredBuildings, 3);
   assert.equal(report.summary.brownoutBuildings, 0);
   assert.equal(report.summary.unpoweredBuildings, 0);
+});
+
+test('zoned districts pass electricity automatically across blocks and streets without internal power lines', () => {
+  const room = makeCleanRoom();
+
+  // Place a Wind Turbine (8 MW) on the West edge at (4, 10)
+  room.placeBuilding('p1', { x: 4, z: 10 }, BuildingType.ENERGY_WIND_TURBINE);
+
+  // Lay a long zoned neighborhood from x = 9 to x = 29, including empty (level 0) zones
+  // and a 2-tile Avenue gap at x = 18..19 — NO power lines anywhere inside the district!
+  for (let x = 9; x <= 29; x++) {
+    if (x === 18 || x === 19) {
+      if (x === 18) room.placeBuilding('p1', { x: 18, z: 10 }, BuildingType.ROAD_AVENUE, undefined, 'NS');
+      continue;
+    }
+    room.placeBuilding('p1', { x, z: 10 }, BuildingType.ZONE_RESIDENTIAL, ZoneDensity.LOW);
+  }
+  // Only develop the far-East house at (29, 10) — 25 tiles away from the Wind Turbine!
+  const farEastHome = room.state.buildings.find(
+    b => b.type === BuildingType.ZONE_RESIDENTIAL && b.position.x === 29,
+  )!;
+  farEastHome.developmentLevel = 1;
+
+  // Also stretch a single pylon from (33, 10) (within range 4 of the East zone at 29) to (38, 10)
+  // to power an outlying Clinic at (41, 10) — electricity flows right through the zoned area!
+  room.placeBuildings('p1', {
+    positions: [{ x: 33, z: 10 }, { x: 38, z: 10 }],
+    type: BuildingType.UTILITY_POWER_LINE,
+  });
+  room.placeBuilding('p1', { x: 41, z: 10 }, BuildingType.HEALTH_CLINIC);
+
+  const report = evaluateCityUtilities(room.state);
+  assert.equal(report.summary.unpoweredBuildings, 0, 'Both far-East home and outlying clinic should receive power through the zoned district');
+  assert.equal(report.summary.poweredBuildings, 2);
+  assert.ok(
+    (report.cellFlags[20 * report.gridSize + 10] & CELL_FLAG_POWER) !== 0,
+    'Empty zoned lots across the avenue should carry CELL_FLAG_POWER coverage',
+  );
 });
 
 test('water pumps require water sources, need power to pump, and pressurize connected pipes & upland towers', () => {

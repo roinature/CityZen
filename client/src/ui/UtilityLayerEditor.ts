@@ -67,16 +67,18 @@ function formatBuildingSpec(type: BuildingType): string {
     ? `$${def.cost / 1000}k`
     : `$${def.cost.toLocaleString()}`;
   const parts = [costLabel];
-  if (isUtilityConduit(type)) {
+  if (type === BuildingType.UTILITY_POWER_LINE) {
+    parts.push('span 6', 'range 4');
+  } else if (isUtilityConduit(type)) {
     parts.push('drag');
   } else {
     parts.push(`${def.size.w}\u00D7${def.size.d}`);
   }
-  if (e.powerGenerationMW) parts.push(`+${e.powerGenerationMW} MW`);
+  if (e.powerGenerationMW) parts.push(`+${e.powerGenerationMW} MW`, 'range 6');
   if (e.waterSupplyM3) parts.push(`${e.waterSupplyM3} m\u00B3/h`);
   if (e.sewageCapacityM3) parts.push(`${e.sewageCapacityM3} m\u00B3/h`);
   if (e.requiresWaterSource) parts.push('source');
-  if (type === BuildingType.ENERGY_SUBSTATION) parts.push('7-tile');
+  if (type === BuildingType.ENERGY_SUBSTATION) parts.push('range 9');
   return parts.join(' \u00B7 ');
 }
 
@@ -384,11 +386,11 @@ export class UtilityLayerEditor {
       } else if (s.powerDemandMW > s.powerGenerationMW) {
         this.hintEl.textContent = `Grid overloaded (${s.powerDemandMW.toFixed(1)} / ${s.powerGenerationMW.toFixed(1)} MW)! Add generators to stop brownouts and blackouts.`;
       } else if (s.unpoweredBuildings > 0) {
-        this.hintEl.textContent = `${s.unpoweredBuildings} building${s.unpoweredBuildings === 1 ? ' is' : 's are'} outside grid reach. Drag Power Lines or place a Substation.`;
+        this.hintEl.textContent = `${s.unpoweredBuildings} building${s.unpoweredBuildings === 1 ? ' is' : 's are'} outside grid reach. Stretch Power Lines to the edge of your zoned district (zones pass electricity automatically).`;
       } else if (s.powerSubgrids > 1) {
-        this.hintEl.textContent = `${s.powerSubgrids} isolated power subgrids detected. Link them with Power Lines to share reserve capacity.`;
+        this.hintEl.textContent = `${s.powerSubgrids} separate power subgrids detected. Stretch Power Lines across unzoned gaps to share reserve MW.`;
       } else {
-        this.hintEl.textContent = 'Power grid healthy. Zones require Electricity + Water to upgrade past Level 1.';
+        this.hintEl.textContent = 'Power grid healthy! Zoned neighborhoods conduct electricity automatically; stretch Power Lines only across unzoned gaps.';
       }
     } else if (this.activeLayer === 'water') {
       const totalBld = s.wateredBuildings + s.unwateredBuildings;

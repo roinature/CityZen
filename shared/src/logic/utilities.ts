@@ -18,11 +18,17 @@ import type { UtilitySummary } from '../types/resources.js';
 /** Minimum water-table / shoreline richness required to act as a primary water source. */
 export const WATER_SOURCE_THRESHOLD = 0.55;
 
-/** Local electrical distribution radii (Chebyshev tiles) around energized grid elements. */
-export const POWER_LINE_RADIUS = 2;
-export const POWER_GENERATOR_RADIUS = 4;
-export const POWER_SUBSTATION_RADIUS = 7;
-export const POWER_URBAN_HOP_LIMIT = 2;
+/** Maximum Euclidean span (in tiles between footprints) for stretched overhead power cables. */
+export const POWER_MAX_SPAN = 6;
+/** Default target spacing (in tiles) between pylons when dragging overhead power lines. */
+export const POWER_PYLON_STEP = 5;
+
+/** Local electrical distribution radii (Euclidean tiles) around energized grid elements. */
+export const POWER_LINE_RADIUS = 4;
+export const POWER_GENERATOR_RADIUS = 6;
+export const POWER_SUBSTATION_RADIUS = 9;
+/** Maximum street/intersection gap (in tiles) across which contiguous zoned areas pass electricity. */
+export const POWER_URBAN_HOP_LIMIT = 3;
 
 /** Local pipe / facility delivery & collection radii (Chebyshev tiles). */
 export const WATER_PIPE_RADIUS = 3;
@@ -81,6 +87,19 @@ export interface PowerSubgridInfo {
   loadPct: number;
   overloaded: boolean;
   generatorCount: number;
+}
+
+export interface PowerCableSpan {
+  fromId: string;
+  toId: string;
+  /** Cable attachment point on `fromId` in grid tile coordinates (e.g. `x + 0.5`). */
+  ax: number;
+  az: number;
+  /** Cable attachment point on `toId` in grid tile coordinates (e.g. `x + 0.5`). */
+  bx: number;
+  bz: number;
+  /** Minimum Euclidean distance (in tiles) between the two conductor footprints. */
+  distance: number;
 }
 
 export interface UtilityGridReport {
@@ -408,6 +427,137 @@ function stampSquare(
   }
 }
 
+function stampCircle(
+  target: Int16Array,
+  size: number,
+  cx: number,
+  cz: number,
+  radius: number,
+  subnetId: number,
+  preferSubnet?: (current: number, incoming: number) => boolean,
+): void {
+  const rSq = (radius + 0.35) * (radius + 0.35);
+  const x0 = Math.max(0, cx - radius);
+  const x1 = Math.min(size - 1, cx + radius);
+  const z0 = Math.max(0, cz - radius);
+  const z1 = Math.min(size - 1, cz + radius);
+  for (let x = x0; x <= x1; x++) {
+    const dx = x - cx;
+    const row = x * size;
+    for (let z = z0; z <= z1; z++) {
+      const dz = z - cz;
+      if (dx * dx + dz * dz > rSq) continue;
+      const cur = target[row + z];
+      if (cur === -1 || (cur !== subnetId && preferSubnet?.(cur, subnetId))) {
+        target[row + z] = subnetId;
+      }
+    }
+  }
+}
+
+/**
+ * Computes stretched overhead cable spans between power pylons, substations, and generators.
+ * Conductors within `maxSpan` Euclidean tiles link together; Relative Neighborhood Graph (RNG)
+ * pruning removes redundant overlapping chords while strictly preserving full subgrid connectivity.
+ */
+export function computePowerCableSpans(
+  buildings: readonly PlacedBuilding[],
+  maxSpan = POWER_MAX_SPAN,
+): PowerCableSpan[] {
+  interface ConductorNode {
+    id: string;
+    x0: number;
+    z0: number;
+    x1: number;
+    z1: number;
+    w: number;
+    d: number;
+    cx: number;
+    cz: number;
+  }
+
+  const nodes: ConductorNode[] = [];
+  for (const b of buildings) {
+    if (!isPowerConductorBuilding(b.type)) continue;
+    const { w, d } = effectiveFootprint(b.type, b.orientation);
+    nodes.push({
+      id: b.id,
+      x0: b.position.x,
+      z0: b.position.z,
+      x1: b.position.x + w - 1,
+      z1: b.position.z + d - 1,
+      w,
+      d,
+      cx: b.position.x + w * 0.5,
+      cz: b.position.z + d * 0.5,
+    });
+  }
+
+  const n = nodes.length;
+  if (n < 2) return [];
+
+  const footDist = (a: ConductorNode, b: ConductorNode): number => {
+    const dx = Math.max(0, a.x0 - b.x1, b.x0 - a.x1);
+    const dz = Math.max(0, a.z0 - b.z1, b.z0 - a.z1);
+    return Math.hypot(dx, dz);
+  };
+  const centerDist = (a: ConductorNode, b: ConductorNode): number =>
+    Math.hypot(a.cx - b.cx, a.cz - b.cz);
+
+  // Collect all candidate pairs within maxSpan and index neighbors per node
+  const candidates: Array<{ i: number; j: number; fDist: number; cDist: number }> = [];
+  const adj = Array.from({ length: n }, () => new Map<number, number>());
+
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      const fDist = footDist(nodes[i], nodes[j]);
+      if (fDist <= maxSpan + 1e-6) {
+        const cDist = centerDist(nodes[i], nodes[j]);
+        candidates.push({ i, j, fDist, cDist });
+        adj[i].set(j, cDist);
+        adj[j].set(i, cDist);
+      }
+    }
+  }
+
+  const clampAnchor = (origin: number, span: number, targetCenter: number): number => {
+    if (span <= 1) return origin + 0.5;
+    const rel = targetCenter - origin;
+    return origin + Math.max(0.5, Math.min(span - 0.5, rel));
+  };
+
+  const spans: PowerCableSpan[] = [];
+  for (const { i, j, fDist, cDist } of candidates) {
+    let shadowed = false;
+    const adjI = adj[i];
+    const adjJ = adj[j];
+    const limit = cDist * 0.99;
+    for (const [k, dik] of adjI) {
+      if (k === j || dik >= limit) continue;
+      const dkj = adjJ.get(k);
+      if (dkj !== undefined && dkj < limit) {
+        shadowed = true;
+        break;
+      }
+    }
+    if (shadowed) continue;
+
+    const a = nodes[i];
+    const b = nodes[j];
+    spans.push({
+      fromId: a.id,
+      toId: b.id,
+      ax: clampAnchor(a.x0, a.w, b.cx),
+      az: clampAnchor(a.z0, a.d, b.cz),
+      bx: clampAnchor(b.x0, b.w, a.cx),
+      bz: clampAnchor(b.z0, b.d, a.cz),
+      distance: fDist,
+    });
+  }
+
+  return spans;
+}
+
 /**
  * Evaluates the city's Electricity, Water, and Sewage networks:
  * 1. Power Grid: connected subgrids of generators, substations, and power lines;
@@ -438,13 +588,16 @@ export function evaluateCityUtilities(state: CityState): UtilityGridReport {
   const waterCellNodes: string[][] = Array.from({ length: totalCells }, () => []);
   const sewageCellNodes: string[][] = Array.from({ length: totalCells }, () => []);
   const urbanConductive = new Uint8Array(totalCells);
+  const pavedRoadCell = new Uint8Array(totalCells);
   const byId = new Map<string, PlacedBuilding>();
+  const powerConductors: PlacedBuilding[] = [];
 
   for (const b of state.buildings) {
     byId.set(b.id, b);
     const { w, d } = effectiveFootprint(b.type, b.orientation);
 
     if (isPowerConductorBuilding(b.type)) {
+      powerConductors.push(b);
       for (let dx = 0; dx < w; dx++) {
         for (let dz = 0; dz < d; dz++) {
           const cx = b.position.x + dx, cz = b.position.z + dz;
@@ -477,11 +630,22 @@ export function evaluateCityUtilities(state: CityState): UtilityGridReport {
       }
     }
 
-    // Developed buildings & paved streets pass low-voltage service drops 1-2 tiles across a block
-    const conductsBlock = (isZone(b.type) && (b.developmentLevel ?? 0) > 0)
-      || (isRoad(b.type) && b.type !== BuildingType.ROAD_DIRT)
-      || (!isZone(b.type) && !isRoad(b.type) && !isUtilityConduit(b.type));
-    if (conductsBlock) {
+    if (isRoad(b.type) && b.type !== BuildingType.ROAD_DIRT) {
+      for (let dx = 0; dx < w; dx++) {
+        for (let dz = 0; dz < d; dz++) {
+          const cx = b.position.x + dx, cz = b.position.z + dz;
+          if (cx >= 0 && cx < size && cz >= 0 && cz < size) {
+            pavedRoadCell[cx * size + cz] = 1;
+          }
+        }
+      }
+    }
+
+    // All zoned lots (even empty newly-zoned cells) and non-road/non-conduit buildings
+    // pass low-voltage electricity continuously across contiguous city districts.
+    const conductsDistrict = isZone(b.type)
+      || (!isRoad(b.type) && !isUtilityConduit(b.type) && !isPowerConductorBuilding(b.type));
+    if (conductsDistrict) {
       for (let dx = 0; dx < w; dx++) {
         for (let dz = 0; dz < d; dz++) {
           const cx = b.position.x + dx, cz = b.position.z + dz;
@@ -546,8 +710,151 @@ export function evaluateCityUtilities(state: CityState): UtilityGridReport {
     return { compOfBuilding, compMembers };
   };
 
-  // ── PASS 1: Power Grid ─────────────────────────────────────
-  const powerComps = buildComponents(powerCellNodes);
+  // ── PASS 1: Power Grid (Stretched Spans + Range + Zoned Conduction) ──
+  // 1a. Group contiguous zoned & civic blocks into Urban Clusters (hopping across streets/avenues <= 3 tiles)
+  const urbanClusterOfCell = new Int32Array(totalCells).fill(-1);
+  const urbanClusters: number[][] = [];
+  const hopR = POWER_URBAN_HOP_LIMIT;
+  const hopSqMax = hopR * hopR + 1; // <= 10 (3.16 tiles: crosses 1-tile streets, 2-tile avenues & intersections)
+
+  for (let idx = 0; idx < totalCells; idx++) {
+    if (!urbanConductive[idx] || urbanClusterOfCell[idx] !== -1) continue;
+    const uId = urbanClusters.length;
+    const cells: number[] = [];
+    const queue = [idx];
+    urbanClusterOfCell[idx] = uId;
+
+    while (queue.length > 0) {
+      const cur = queue.pop()!;
+      cells.push(cur);
+      const cx = Math.floor(cur / size);
+      const cz = cur % size;
+      const x0 = Math.max(0, cx - hopR);
+      const x1 = Math.min(size - 1, cx + hopR);
+      const z0 = Math.max(0, cz - hopR);
+      const z1 = Math.min(size - 1, cz + hopR);
+      for (let nx = x0; nx <= x1; nx++) {
+        const dx = nx - cx;
+        const row = nx * size;
+        for (let nz = z0; nz <= z1; nz++) {
+          const dz = nz - cz;
+          if (dx * dx + dz * dz > hopSqMax) continue;
+          const nIdx = row + nz;
+          if (urbanConductive[nIdx] && urbanClusterOfCell[nIdx] === -1) {
+            urbanClusterOfCell[nIdx] = uId;
+            queue.push(nIdx);
+          }
+        }
+      }
+    }
+    urbanClusters.push(cells);
+  }
+
+  // 1b. Union-Find uniting overhead conductors (via stretched cable spans <= POWER_MAX_SPAN)
+  //     AND bridging conductors that energize the same contiguous Urban Cluster!
+  const kCond = powerConductors.length;
+  const ufCount = kCond + urbanClusters.length;
+  const ufParent = new Int32Array(ufCount);
+  for (let i = 0; i < ufCount; i++) ufParent[i] = i;
+  const ufFind = (x: number): number => {
+    let r = x;
+    while (ufParent[r] !== r) r = ufParent[r];
+    let c = x;
+    while (c !== r) {
+      const next = ufParent[c];
+      ufParent[c] = r;
+      c = next;
+    }
+    return r;
+  };
+  const ufUnion = (a: number, b: number): void => {
+    const ra = ufFind(a);
+    const rb = ufFind(b);
+    if (ra !== rb) ufParent[rb] = ra;
+  };
+
+  const condIdxById = new Map<string, number>();
+  powerConductors.forEach((b, i) => condIdxById.set(b.id, i));
+
+  const cableSpans = computePowerCableSpans(powerConductors, POWER_MAX_SPAN);
+  for (const span of cableSpans) {
+    const ia = condIdxById.get(span.fromId);
+    const ib = condIdxById.get(span.toId);
+    if (ia !== undefined && ib !== undefined) ufUnion(ia, ib);
+  }
+
+  // Track unenergized conductor aura too so buildings near dead pylons report 'blackout'
+  const anyConductorAura = new Uint8Array(totalCells);
+  for (let ci = 0; ci < kCond; ci++) {
+    const b = powerConductors[ci];
+    const radius = b.type === BuildingType.ENERGY_SUBSTATION
+      ? POWER_SUBSTATION_RADIUS
+      : isGeneratorBuilding(b.type)
+        ? POWER_GENERATOR_RADIUS
+        : POWER_LINE_RADIUS;
+    const rSq = (radius + 0.35) * (radius + 0.35);
+    const { w, d } = effectiveFootprint(b.type, b.orientation);
+
+    for (let fx = 0; fx < w; fx++) {
+      for (let fz = 0; fz < d; fz++) {
+        const cx = b.position.x + fx;
+        const cz = b.position.z + fz;
+        const x0 = Math.max(0, cx - radius);
+        const x1 = Math.min(size - 1, cx + radius);
+        const z0 = Math.max(0, cz - radius);
+        const z1 = Math.min(size - 1, cz + radius);
+        for (let x = x0; x <= x1; x++) {
+          const dx = x - cx;
+          const row = x * size;
+          for (let z = z0; z <= z1; z++) {
+            const dz = z - cz;
+            if (dx * dx + dz * dz > rSq) continue;
+            const cellIdx = row + z;
+            anyConductorAura[cellIdx] = 1;
+            const uId = urbanClusterOfCell[cellIdx];
+            if (uId !== -1) {
+              ufUnion(ci, kCond + uId);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Propagate dead-conductor aura across connected urban clusters as well
+  for (let uId = 0; uId < urbanClusters.length; uId++) {
+    const cells = urbanClusters[uId];
+    let touchesConductor = false;
+    for (const cIdx of cells) {
+      if (anyConductorAura[cIdx]) {
+        touchesConductor = true;
+        break;
+      }
+    }
+    if (touchesConductor) {
+      for (const cIdx of cells) anyConductorAura[cIdx] = 1;
+    }
+  }
+
+  // Group conductors into unified subgrids
+  const rootToSubgrid = new Map<number, number>();
+  const powerCompMembers: string[][] = [];
+  const powerCompOfBuilding = new Map<string, number>();
+
+  for (let ci = 0; ci < kCond; ci++) {
+    const root = ufFind(ci);
+    let cid = rootToSubgrid.get(root);
+    if (cid === undefined) {
+      cid = powerCompMembers.length;
+      rootToSubgrid.set(root, cid);
+      powerCompMembers.push([]);
+    }
+    const bid = powerConductors[ci].id;
+    powerCompMembers[cid].push(bid);
+    powerCompOfBuilding.set(bid, cid);
+  }
+  const powerComps = { compOfBuilding: powerCompOfBuilding, compMembers: powerCompMembers };
+
   const subgridGenMW: number[] = [];
   const subgridGenCount: number[] = [];
   const subgridGenCenters: Position[][] = [];
@@ -573,6 +880,7 @@ export function evaluateCityUtilities(state: CityState): UtilityGridReport {
   const powerCoverage = new Int16Array(totalCells).fill(-1);
   const preferMoreGen = (cur: number, inc: number) => subgridGenMW[inc] > subgridGenMW[cur];
 
+  // Stamp circular power range around energized pylons, substations, and generators
   for (let cid = 0; cid < powerComps.compMembers.length; cid++) {
     if (subgridGenMW[cid] <= 0) continue;
     for (const bid of powerComps.compMembers[cid]) {
@@ -585,34 +893,37 @@ export function evaluateCityUtilities(state: CityState): UtilityGridReport {
       const { w, d } = effectiveFootprint(b.type, b.orientation);
       for (let dx = 0; dx < w; dx++) {
         for (let dz = 0; dz < d; dz++) {
-          stampSquare(powerCoverage, size, b.position.x + dx, b.position.z + dz, radius, cid, preferMoreGen);
+          stampCircle(powerCoverage, size, b.position.x + dx, b.position.z + dz, radius, cid, preferMoreGen);
         }
       }
     }
   }
 
-  // Street-level block hop (up to POWER_URBAN_HOP_LIMIT tiles along contiguous buildings/streets)
-  let frontier: number[] = [];
-  for (let idx = 0; idx < totalCells; idx++) {
-    if (powerCoverage[idx] !== -1 && urbanConductive[idx]) frontier.push(idx);
-  }
-  for (let hop = 0; hop < POWER_URBAN_HOP_LIMIT && frontier.length > 0; hop++) {
-    const nextFrontier: number[] = [];
-    for (const idx of frontier) {
-      const subId = powerCoverage[idx];
-      const cx = Math.floor(idx / size);
-      const cz = idx % size;
-      for (const [dx, dz] of CARDINAL_DIRS) {
-        const nx = cx + dx, nz = cz + dz;
-        if (nx < 0 || nx >= size || nz < 0 || nz >= size) continue;
-        const nIdx = nx * size + nz;
-        if (powerCoverage[nIdx] === -1 && urbanConductive[nIdx]) {
-          powerCoverage[nIdx] = subId;
-          nextFrontier.push(nIdx);
+  // Flood electricity across every energized Urban Cluster (plus adjacent street frontage)
+  for (let uId = 0; uId < urbanClusters.length; uId++) {
+    const cid = rootToSubgrid.get(ufFind(kCond + uId));
+    if (cid === undefined || subgridGenMW[cid] <= 0) continue;
+    for (const cIdx of urbanClusters[uId]) {
+      const cur = powerCoverage[cIdx];
+      if (cur === -1 || (cur !== cid && preferMoreGen(cur, cid))) {
+        powerCoverage[cIdx] = cid;
+      }
+      const cx = Math.floor(cIdx / size);
+      const cz = cIdx % size;
+      for (let dx = -1; dx <= 1; dx++) {
+        const nx = cx + dx;
+        if (nx < 0 || nx >= size) continue;
+        const row = nx * size;
+        for (let dz = -1; dz <= 1; dz++) {
+          const nz = cz + dz;
+          if (nz < 0 || nz >= size) continue;
+          const rIdx = row + nz;
+          if (pavedRoadCell[rIdx] && powerCoverage[rIdx] === -1) {
+            powerCoverage[rIdx] = cid;
+          }
         }
       }
     }
-    frontier = nextFrontier;
   }
 
   for (let idx = 0; idx < totalCells; idx++) {
@@ -636,21 +947,13 @@ export function evaluateCityUtilities(state: CityState): UtilityGridReport {
       for (let dz = 0; dz < d; dz++) {
         const cx = b.position.x + dx, cz = b.position.z + dz;
         if (cx < 0 || cx >= size || cz < 0 || cz >= size) continue;
-        const sub = powerCoverage[cx * size + cz];
+        const cellIdx = cx * size + cz;
+        const sub = powerCoverage[cellIdx];
         if (sub !== -1 && (bestSubgrid === -1 || subgridGenMW[sub] > subgridGenMW[bestSubgrid])) {
           bestSubgrid = sub;
         }
-        // Check if near an unenergized power line/substation (within 2 tiles)
-        if (bestSubgrid === -1 && profile.powerDemandMW > 0) {
-          for (let rx = -2; rx <= 2 && !touchedDeadPowerLine; rx++) {
-            for (let rz = -2; rz <= 2; rz++) {
-              const px = cx + rx, pz = cz + rz;
-              if (px >= 0 && px < size && pz >= 0 && pz < size && powerCellNodes[px * size + pz].length > 0) {
-                touchedDeadPowerLine = true;
-                break;
-              }
-            }
-          }
+        if (bestSubgrid === -1 && profile.powerDemandMW > 0 && anyConductorAura[cellIdx]) {
+          touchedDeadPowerLine = true;
         }
       }
     }
@@ -737,8 +1040,6 @@ export function evaluateCityUtilities(state: CityState): UtilityGridReport {
 
   const powerLineState = new Map<string, 'energized' | 'overloaded' | 'unenergized'>();
   for (const [bid, cid] of powerComps.compOfBuilding) {
-    const b = byId.get(bid)!;
-    if (b.type !== BuildingType.UTILITY_POWER_LINE && b.type !== BuildingType.ENERGY_SUBSTATION) continue;
     if (subgridGenMW[cid] <= 0) powerLineState.set(bid, 'unenergized');
     else if (subgridOverloaded.has(cid)) powerLineState.set(bid, 'overloaded');
     else powerLineState.set(bid, 'energized');
