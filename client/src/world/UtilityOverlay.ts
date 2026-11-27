@@ -402,35 +402,54 @@ export class UtilityOverlay {
     hubs.computeBoundingSphere();
     this.layerGroup.add(hubs);
 
-    // Cylindrical pipe segments connecting adjacent pipe/facility cells
-    const segs: Array<{ mx: number; mz: number; ew: boolean; hex: number }> = [];
+    // Cylindrical pipe segments connecting adjacent pipe/facility cells (plus directional barrel for isolated single tiles)
+    const segs: Array<{ mx: number; mz: number; ew: boolean; len: number; hex: number }> = [];
     for (const p of pipes) {
       const { x, z } = p.position;
       const hex = colorForPipe(p.id);
-      if (x + 1 < size && hasNetworkAt[(x + 1) * size + z]) {
-        segs.push({ mx: (x + 1) * CELL_SIZE, mz: (z + 0.5) * CELL_SIZE, ew: true, hex });
+      const hasE = x + 1 < size && Boolean(hasNetworkAt[(x + 1) * size + z]);
+      const hasW = x - 1 >= 0 && Boolean(hasNetworkAt[(x - 1) * size + z]);
+      const hasS = z + 1 < size && Boolean(hasNetworkAt[x * size + (z + 1)]);
+      const hasN = z - 1 >= 0 && Boolean(hasNetworkAt[x * size + (z - 1)]);
+
+      if (!hasE && !hasW && !hasS && !hasN) {
+        // Standalone single pipe: orient barrel along its placed build direction
+        segs.push({
+          mx: (x + 0.5) * CELL_SIZE,
+          mz: (z + 0.5) * CELL_SIZE,
+          ew: p.orientation !== 'NS',
+          len: CELL_SIZE * 0.88,
+          hex,
+        });
+        continue;
       }
-      if (z + 1 < size && hasNetworkAt[x * size + (z + 1)]) {
-        segs.push({ mx: (x + 0.5) * CELL_SIZE, mz: (z + 1) * CELL_SIZE, ew: false, hex });
+
+      if (hasE) {
+        segs.push({ mx: (x + 1) * CELL_SIZE, mz: (z + 0.5) * CELL_SIZE, ew: true, len: CELL_SIZE, hex });
       }
-      if (x - 1 >= 0 && hasNetworkAt[(x - 1) * size + z] && !pipeAt.has((x - 1) * size + z)) {
-        segs.push({ mx: x * CELL_SIZE, mz: (z + 0.5) * CELL_SIZE, ew: true, hex });
+      if (hasS) {
+        segs.push({ mx: (x + 0.5) * CELL_SIZE, mz: (z + 1) * CELL_SIZE, ew: false, len: CELL_SIZE, hex });
       }
-      if (z - 1 >= 0 && hasNetworkAt[x * size + (z - 1)] && !pipeAt.has(x * size + (z - 1))) {
-        segs.push({ mx: (x + 0.5) * CELL_SIZE, mz: z * CELL_SIZE, ew: false, hex });
+      if (hasW && !pipeAt.has((x - 1) * size + z)) {
+        segs.push({ mx: x * CELL_SIZE, mz: (z + 0.5) * CELL_SIZE, ew: true, len: CELL_SIZE, hex });
+      }
+      if (hasN && !pipeAt.has(x * size + (z - 1))) {
+        segs.push({ mx: (x + 0.5) * CELL_SIZE, mz: z * CELL_SIZE, ew: false, len: CELL_SIZE, hex });
       }
     }
 
     if (segs.length > 0) {
-      const cylGeo = new THREE.CylinderGeometry(radius, radius, CELL_SIZE, 12).rotateZ(Math.PI / 2);
+      const cylGeo = new THREE.CylinderGeometry(radius, radius, 1, 12).rotateZ(Math.PI / 2);
       const cylMat = new THREE.MeshStandardMaterial({ roughness: 0.4, metalness: 0.15 });
       const tubes = new THREE.InstancedMesh(cylGeo, cylMat, segs.length);
       tubes.renderOrder = 9;
       const rotY = new THREE.Matrix4().makeRotationY(Math.PI / 2);
+      const scaleMat = new THREE.Matrix4();
 
       segs.forEach((s, i) => {
         transform.makeTranslation(s.mx, pipeY, s.mz);
         if (!s.ew) transform.multiply(rotY);
+        transform.multiply(scaleMat.makeScale(s.len, 1, 1));
         tubes.setMatrixAt(i, transform);
         tubes.setColorAt(i, color.setHex(s.hex));
       });

@@ -7,6 +7,20 @@ export class GridRaycaster {
 
   constructor(private canvas: HTMLCanvasElement) {}
 
+  getWorldPosition(screenX: number, screenY: number, camera: THREE.Camera): { x: number; z: number } | null {
+    const bounds = this.canvas.getBoundingClientRect();
+    const ndc = new THREE.Vector2(
+      ((screenX - bounds.left) / bounds.width) * 2 - 1,
+      -((screenY - bounds.top) / bounds.height) * 2 + 1,
+    );
+
+    this.raycaster.setFromCamera(ndc, camera);
+    const intersection = new THREE.Vector3();
+    const hit = this.raycaster.ray.intersectPlane(this.groundPlane, intersection);
+    if (!hit) return null;
+    return { x: intersection.x, z: intersection.z };
+  }
+
   getGridPosition(screenX: number, screenY: number, camera: THREE.Camera, clampToGrid = false): Position | null {
     const bounds = this.canvas.getBoundingClientRect();
     const ndc = new THREE.Vector2(

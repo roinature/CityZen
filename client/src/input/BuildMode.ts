@@ -10,8 +10,11 @@ import {
   type UtilityLayer,
   type ZoneDensity,
   findGridBuildingToDemolish,
+  isPowerConductorBuilding,
   isRoad,
+  isSewageFacilityBuilding,
   isUtilityConduit,
+  isWaterFacilityBuilding,
   isWaterfront,
   isZone,
   BUILDING_DEFS,
@@ -25,7 +28,11 @@ import {
   replacesRoads,
   resolveWaterfrontOrientation,
 } from '@cityzen/shared';
-import { BuildingFactory } from '../world/BuildingFactory.js';
+import {
+  BuildingFactory,
+  type ConduitConnections,
+  type ConduitDirection,
+} from '../world/BuildingFactory.js';
 import type { GridRect } from '../world/CityBuildings.js';
 import { CITY_STYLES, type CityStyleId } from '../world/CityStyle.js';
 import { GridRaycaster } from './Raycaster.js';
@@ -107,6 +114,10 @@ export class BuildMode {
   private previewMesh: THREE.Group | null = null;
   private previewMeshKey: string | null = null;
   private currentHoverPos: Position | null = null;
+  private currentHoverWorld: { x: number; z: number } | null = null;
+  private lastMoveAnchorWorld: { x: number; z: number } | null = null;
+  private hoverFlowDir: ConduitDirection = 'E';
+  private dragStartWorld: { x: number; z: number } | null = null;
 
   // Tool mode & active utility layer
   private toolMode: ToolMode = 'pointer';
@@ -161,6 +172,7 @@ export class BuildMode {
 
   rotateSelection(): void {
     this.preferredOrientation = this.preferredOrientation === 'EW' ? 'NS' : 'EW';
+    this.hoverFlowDir = this.preferredOrientation === 'NS' ? 'S' : 'E';
     this.lastPreviewKey = null;
   }
 
@@ -223,14 +235,150 @@ export class BuildMode {
   private previewKey(state: CityState | null): string {
     const pos = (p: Position | null) => (p ? `${p.x},${p.z}` : '-');
     const lastId = state?.buildings.length ? state.buildings[state.buildings.length - 1].id : '';
+    const subDragDir = this.isDragging && this.lineDragStart && this.currentHoverPos
+      && this.lineDragStart.x === this.currentHoverPos.x && this.lineDragStart.z === this.currentHoverPos.z
+      ? this.computeActiveDragFlowDir()
+      : '';
     return [
-      this.toolMode, this.activeLayer, this.selectedType, this.selectedDensity, this.preferredOrientation, this.brushSize, this.styleId,
+      this.toolMode, this.activeLayer, this.selectedType, this.selectedDensity,
+      this.preferredOrientation, this.hoverFlowDir, subDragDir, this.brushSize, this.styleId,
       pos(this.currentHoverPos), this.isDragging, pos(this.lineDragStart), pos(this.rectDragStart),
       state?.id, state?.buildings.length, lastId, state?.resources.money, this.unlimitedMoney,
     ].join('|');
   }
 
+  private hasMatchingUtilityNeighbor(state: CityState, x: number, z: number, type: BuildingType): boolean {
+    const cell = state.grid[x]?.[z];
+    if (!cell) return false;
+    if (type === BuildingType.UTILITY_WATER_PIPE) {
+      if (cell.waterPipeId) return true;
+      if (cell.buildingId) {
+        const b = state.buildings.find(item => item.id === cell.buildingId);
+        return Boolean(b && isWaterFacilityBuilding(b.type));
+      }
+      return false;
+    }
+    if (type === BuildingType.UTILITY_SEWAGE_PIPE) {
+      if (cell.sewagePipeId) return true;
+      if (cell.buildingId) {
+        const b = state.buildings.find(item => item.id === cell.buildingId);
+        return Boolean(b && isSewageFacilityBuilding(b.type));
+      }
+      return false;
+    }
+    if (type === BuildingType.UTILITY_POWER_LINE) {
+      if (cell.powerLineId) return true;
+      if (cell.buildingId) {
+        const b = state.buildings.find(item => item.id === cell.buildingId);
+        return Boolean(b && isPowerConductorBuilding(b.type));
+      }
+      return false;
+    }
+    return false;
+  }
+
+  private computeHoverConduitConnections(
+    state: CityState,
+    pos: Position,
+    type: BuildingType,
+    orientation: RoadOrientation,
+  ): ConduitConnections {
+    const n = this.hasMatchingUtilityNeighbor(state, pos.x, pos.z - 1, type);
+    const s = this.hasMatchingUtilityNeighbor(state, pos.x, pos.z + 1, type);
+    const w = this.hasMatchingUtilityNeighbor(state, pos.x - 1, pos.z, type);
+    const e = this.hasMatchingUtilityNeighbor(state, pos.x + 1, pos.z, type);
+    const count = Number(n) + Number(s) + Number(e) + Number(w);
+
+    if (count >= 2) {
+      return { n, s, e, w, flowDir: this.hoverFlowDir };
+    }
+    if (count === 1) {
+      // Connect into the adjacent pipe/facility AND extend outward in the build direction
+      const outN = n || (orientation === 'NS' && this.hoverFlowDir === 'N') || (!n && !s && orientation === 'NS' && !e && !w);
+      const outS = s || (orientation === 'NS' && this.hoverFlowDir === 'S') || (n && orientation === 'NS');
+      const outW = w || (orientation === 'EW' && this.hoverFlowDir === 'W');
+      const outE = e || (orientation === 'EW' && this.hoverFlowDir === 'E') || (w && orientation === 'EW');
+      // If orientation wasn't turned perpendicular, extend straight through opposite the single neighbor
+      if (!outN && !outS && !outE && !outW) {
+        return { n: n || s, s: n || s, e: e || w, w: e || w };
+      }
+      const straightThrough =
+        (n && orientation === 'NS') ? { n: true, s: true, e: false, w: false, flowDir: 'S' as const }
+        : (s && orientation === 'NS') ? { n: true, s: true, e: false, w: false, flowDir: 'N' as const }
+        : (w && orientation === 'EW') ? { n: false, s: false, e: true, w: true, flowDir: 'E' as const }
+        : (e && orientation === 'EW') ? { n: false, s: false, e: true, w: true, flowDir: 'W' as const }
+        : {
+            n: n || (orientation === 'NS' && this.hoverFlowDir === 'N'),
+            s: s || (orientation === 'NS' && this.hoverFlowDir === 'S'),
+            e: e || (orientation === 'EW' && this.hoverFlowDir === 'E'),
+            w: w || (orientation === 'EW' && this.hoverFlowDir === 'W'),
+            flowDir: this.hoverFlowDir,
+          };
+      return straightThrough;
+    }
+
+    return orientation === 'NS'
+      ? { n: true, s: true, e: false, w: false, flowDir: this.hoverFlowDir === 'N' || this.hoverFlowDir === 'S' ? this.hoverFlowDir : 'S' }
+      : { n: false, s: false, e: true, w: true, flowDir: this.hoverFlowDir === 'E' || this.hoverFlowDir === 'W' ? this.hoverFlowDir : 'E' };
+  }
+
+  private computeActiveDragFlowDir(): ConduitDirection {
+    if (this.lineDragStart && this.currentHoverPos) {
+      const dx = this.currentHoverPos.x - this.lineDragStart.x;
+      const dz = this.currentHoverPos.z - this.lineDragStart.z;
+      if (dx !== 0 || dz !== 0) {
+        if (Math.abs(dx) >= Math.abs(dz)) return dx >= 0 ? 'E' : 'W';
+        return dz >= 0 ? 'S' : 'N';
+      }
+    }
+    if (this.dragStartWorld && this.currentHoverWorld) {
+      const wx = this.currentHoverWorld.x - this.dragStartWorld.x;
+      const wz = this.currentHoverWorld.z - this.dragStartWorld.z;
+      if (Math.hypot(wx, wz) >= CELL_SIZE * 0.12) {
+        if (Math.abs(wx) >= Math.abs(wz)) return wx >= 0 ? 'E' : 'W';
+        return wz >= 0 ? 'S' : 'N';
+      }
+    }
+    return this.hoverFlowDir;
+  }
+
+  private computeActiveLineDragOrientation(state?: CityState | null): RoadOrientation {
+    if (this.lineDragStart && this.currentHoverPos) {
+      const dx = this.currentHoverPos.x - this.lineDragStart.x;
+      const dz = this.currentHoverPos.z - this.lineDragStart.z;
+      if (dx !== 0 || dz !== 0) {
+        return computeLineDragOrientation(this.lineDragStart, this.currentHoverPos);
+      }
+    }
+    if (this.dragStartWorld && this.currentHoverWorld) {
+      const wx = this.currentHoverWorld.x - this.dragStartWorld.x;
+      const wz = this.currentHoverWorld.z - this.dragStartWorld.z;
+      if (Math.hypot(wx, wz) >= CELL_SIZE * 0.12) {
+        return Math.abs(wx) >= Math.abs(wz) ? 'EW' : 'NS';
+      }
+    }
+    if (state && this.lineDragStart && this.selectedType) {
+      return this.resolveHoverOrientation(state, this.lineDragStart, this.selectedType) ?? this.preferredOrientation;
+    }
+    return this.preferredOrientation;
+  }
+
   private resolveHoverOrientation(state: CityState, pos: Position, type: BuildingType): RoadOrientation | undefined {
+    if (isUtilityConduit(type)) {
+      const n = this.hasMatchingUtilityNeighbor(state, pos.x, pos.z - 1, type);
+      const s = this.hasMatchingUtilityNeighbor(state, pos.x, pos.z + 1, type);
+      const w = this.hasMatchingUtilityNeighbor(state, pos.x - 1, pos.z, type);
+      const e = this.hasMatchingUtilityNeighbor(state, pos.x + 1, pos.z, type);
+      if ((n || s) && !(e || w)) return 'NS';
+      if ((e || w) && !(n || s)) return 'EW';
+      // Align with underlying road when hovering along a street without existing pipe neighbors
+      const surfaceId = state.grid[pos.x]?.[pos.z]?.buildingId;
+      if (surfaceId) {
+        const road = state.buildings.find(b => b.id === surfaceId && isRoad(b.type));
+        if (road?.orientation) return road.orientation;
+      }
+      return this.preferredOrientation;
+    }
     if (isWaterfront(type)) {
       return resolveWaterfrontOrientation(state.grid, pos, type, state.buildings, this.preferredOrientation);
     }
@@ -298,6 +446,12 @@ export class BuildMode {
     const facing = (isWaterfront(this.selectedType) || this.selectedType === BuildingType.TRANS_HARBOR)
       ? getWaterfrontFacing(state.grid, this.currentHoverPos, this.selectedType, orientation) ?? undefined
       : undefined;
+    const conduitConnections = isUtilityConduit(this.selectedType)
+      ? this.computeHoverConduitConnections(state, this.currentHoverPos, this.selectedType, orientation ?? 'EW')
+      : undefined;
+    const connKey = conduitConnections
+      ? `${Number(conduitConnections.n)}${Number(conduitConnections.s)}${Number(conduitConnections.e)}${Number(conduitConnections.w)}${conduitConnections.flowDir ?? ''}`
+      : '';
 
     const result = canPlaceBuilding(
       state.grid, this.currentHoverPos, this.selectedType,
@@ -305,11 +459,16 @@ export class BuildMode {
       this.selectedDensity ?? undefined, orientation,
     );
 
-    const meshKey = `${this.selectedType}|${result.valid}|${this.styleId}|${orientation ?? ''}|${facing ?? ''}`;
+    const meshKey = `${this.selectedType}|${result.valid}|${this.styleId}|${orientation ?? ''}|${facing ?? ''}|${connKey}`;
     if (!this.previewMesh || this.previewMeshKey !== meshKey) {
       this.disposePreviewOnly();
       this.previewMesh = this.factory.createPreview(
-        this.selectedType, result.valid, CITY_STYLES[this.styleId], orientation, facing,
+        this.selectedType,
+        result.valid,
+        CITY_STYLES[this.styleId],
+        orientation,
+        facing,
+        conduitConnections,
       );
       this.previewMeshKey = meshKey;
       this.scene.add(this.previewMesh);
@@ -407,11 +566,35 @@ export class BuildMode {
   }
 
   hover(x: number, y: number): void {
-    this.currentHoverPos = this.raycaster.getGridPosition(x, y, this.getCamera(), this.isDragging);
+    const cam = this.getCamera();
+    const world = this.raycaster.getWorldPosition(x, y, cam);
+    this.currentHoverWorld = world;
+    if (world && !this.isDragging) {
+      if (!this.lastMoveAnchorWorld) {
+        this.lastMoveAnchorWorld = world;
+      } else {
+        const dx = world.x - this.lastMoveAnchorWorld.x;
+        const dz = world.z - this.lastMoveAnchorWorld.z;
+        if (Math.hypot(dx, dz) >= CELL_SIZE * 0.55) {
+          if (Math.abs(dx) > Math.abs(dz) * 1.2) {
+            this.preferredOrientation = 'EW';
+            this.hoverFlowDir = dx >= 0 ? 'E' : 'W';
+            this.lastMoveAnchorWorld = world;
+          } else if (Math.abs(dz) > Math.abs(dx) * 1.2) {
+            this.preferredOrientation = 'NS';
+            this.hoverFlowDir = dz >= 0 ? 'S' : 'N';
+            this.lastMoveAnchorWorld = world;
+          }
+        }
+      }
+    }
+    this.currentHoverPos = this.raycaster.getGridPosition(x, y, cam, this.isDragging);
   }
 
   clearHover(): void {
     this.currentHoverPos = null;
+    this.currentHoverWorld = null;
+    this.lastMoveAnchorWorld = null;
     this.clearPreview();
     this.clearBulldozePreview();
     this.lastPreviewKey = null;
@@ -422,6 +605,7 @@ export class BuildMode {
     this.hover(x, y);
     if (!this.currentHoverPos || !this.selectedType) return;
     this.isDragging = true;
+    this.dragStartWorld = this.currentHoverWorld ? { ...this.currentHoverWorld } : null;
     if (isRectDragType(this.selectedType)) {
       this.rectDragStart = this.currentHoverPos;
     } else {
@@ -434,7 +618,7 @@ export class BuildMode {
     if (this.isDragging && this.selectedType && this.currentHoverPos) {
       const type = this.selectedType;
       if (this.lineDragStart && isLineDragType(type)) {
-        const orientation = computeLineDragOrientation(this.lineDragStart, this.currentHoverPos);
+        const orientation = this.computeActiveLineDragOrientation(this.currentCityState);
         const { w, d } = getEffectiveSize(type, orientation);
         const positions = computeStraightLine(this.lineDragStart, this.currentHoverPos, w, d);
         this.onPaint?.({ positions, type, orientation });
@@ -450,6 +634,7 @@ export class BuildMode {
   cancelInteraction(): void {
     this.isDragging = false;
     this.lineDragStart = null;
+    this.dragStartWorld = null;
     this.rectDragStart = null;
     this.lastPreviewKey = null;
     this.clearLineDragPreview();
@@ -533,9 +718,13 @@ export class BuildMode {
     this.clearLineDragPreview();
     if (!this.lineDragStart || !this.currentHoverPos || !this.selectedType) return;
 
-    const orientation = computeLineDragOrientation(this.lineDragStart, this.currentHoverPos);
-    const { w: effW, d: effD } = getEffectiveSize(this.selectedType, orientation);
+    const type = this.selectedType;
+    const orientation = this.computeActiveLineDragOrientation(state);
+    const flowDir = this.computeActiveDragFlowDir();
+    const { w: effW, d: effD } = getEffectiveSize(type, orientation);
     const positions = computeStraightLine(this.lineDragStart, this.currentHoverPos, effW, effD);
+    const strokeCells = new Set(positions.map(p => `${p.x},${p.z}`));
+    const conduit = isUtilityConduit(type);
 
     this.lineDragPreviewGroup = new THREE.Group();
     const w = effW * CELL_SIZE;
@@ -544,13 +733,14 @@ export class BuildMode {
     let totalCost = 0;
     let gradingCost = 0;
 
-    for (const pos of positions) {
+    for (let idx = 0; idx < positions.length; idx++) {
+      const pos = positions[idx];
       const placeable = canPlaceBuilding(
-        state.grid, pos, this.selectedType, state.resources, true, state.buildings, undefined, orientation,
+        state.grid, pos, type, state.resources, true, state.buildings, undefined, orientation,
       ).valid;
       let segValid = false;
       if (placeable) {
-        const quote = getPlacementCost(state.grid, pos, this.selectedType, undefined, orientation, leveled);
+        const quote = getPlacementCost(state.grid, pos, type, undefined, orientation, leveled);
         const nextTotal = totalCost + quote.totalCost;
         segValid = this.canAfford(state, nextTotal);
         totalCost = nextTotal;
@@ -560,8 +750,30 @@ export class BuildMode {
         }
       }
 
+      let conduitConnections: ConduitConnections | undefined;
+      if (conduit) {
+        if (positions.length === 1) {
+          conduitConnections = {
+            ...this.computeHoverConduitConnections(state, pos, type, orientation),
+            flowDir,
+          };
+        } else {
+          const isLast = idx === positions.length - 1;
+          const isFirst = idx === 0;
+          const hasAt = (nx: number, nz: number) =>
+            strokeCells.has(`${nx},${nz}`) || this.hasMatchingUtilityNeighbor(state, nx, nz, type);
+          conduitConnections = {
+            n: hasAt(pos.x, pos.z - 1) || (isLast && flowDir === 'N') || (isFirst && flowDir === 'S' && !hasAt(pos.x, pos.z - 1)),
+            s: hasAt(pos.x, pos.z + 1) || (isLast && flowDir === 'S') || (isFirst && flowDir === 'N' && !hasAt(pos.x, pos.z + 1)),
+            w: hasAt(pos.x - 1, pos.z) || (isLast && flowDir === 'W') || (isFirst && flowDir === 'E' && !hasAt(pos.x - 1, pos.z)),
+            e: hasAt(pos.x + 1, pos.z) || (isLast && flowDir === 'E') || (isFirst && flowDir === 'W' && !hasAt(pos.x + 1, pos.z)),
+            flowDir,
+          };
+        }
+      }
+
       const ghost = this.factory.createGhostPreview(
-        this.selectedType, orientation, CITY_STYLES[this.styleId], segValid,
+        type, orientation, CITY_STYLES[this.styleId], segValid, conduitConnections,
       );
       ghost.position.set(
         pos.x * CELL_SIZE + w / 2,

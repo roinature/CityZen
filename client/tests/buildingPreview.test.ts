@@ -45,6 +45,45 @@ test('BuildingFactory.createPreview builds multi-part non-shadow 3D models for a
   }
 });
 
+test('pipeline and power-line previews align geometry with build direction and neighbor junctions', () => {
+  const factory = new BuildingFactory();
+
+  // Model child[0] holds the 3D conduit geometry (child[1..5] are the 1x1 footprint pad/frame)
+  const ewPipe = factory.createGhostPreview(
+    BuildingType.UTILITY_WATER_PIPE,
+    'EW',
+    CITY_STYLES.classic,
+    true,
+    { n: false, s: false, e: true, w: true, flowDir: 'E' },
+  );
+  const nsPipe = factory.createGhostPreview(
+    BuildingType.UTILITY_WATER_PIPE,
+    'NS',
+    CITY_STYLES.classic,
+    true,
+    { n: true, s: true, e: false, w: false, flowDir: 'S' },
+  );
+
+  const ewModelBox = new THREE.Box3().setFromObject(ewPipe.children[0]);
+  const nsModelBox = new THREE.Box3().setFromObject(nsPipe.children[0]);
+
+  // EW pipe spans full cell along X and stays narrow along Z; NS pipe spans full cell along Z and stays narrow along X
+  assert.ok((ewModelBox.max.x - ewModelBox.min.x) > (ewModelBox.max.z - ewModelBox.min.z) * 2.5);
+  assert.ok((nsModelBox.max.z - nsModelBox.min.z) > (nsModelBox.max.x - nsModelBox.min.x) * 2.5);
+
+  // L-elbow (North + East) extends to -Z and +X edges while staying centered near 0 on +Z and -X
+  const elbow = factory.createGhostPreview(
+    BuildingType.UTILITY_SEWAGE_PIPE,
+    'EW',
+    CITY_STYLES.classic,
+    true,
+    { n: true, s: false, e: true, w: false, flowDir: 'E' },
+  );
+  const elbowBox = new THREE.Box3().setFromObject(elbow.children[0]);
+  assert.ok(elbowBox.max.x > Math.abs(elbowBox.min.x) * 2, 'Expected L-elbow arm extending East (+X)');
+  assert.ok(Math.abs(elbowBox.min.z) > elbowBox.max.z * 2, 'Expected L-elbow arm extending North (-Z)');
+});
+
 test('CityBuildings.setPreviewClearance hides overlapping zoned buildings and restores them when cleared', () => {
   const cityBuildings = new CityBuildings();
   const placed: PlacedBuilding[] = [

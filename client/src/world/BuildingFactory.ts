@@ -102,36 +102,114 @@ function buildRoundaboutPreview(style: CityStyle): THREE.Group {
   return group;
 }
 
-function buildConduitPreview(type: BuildingType, orientation?: RoadOrientation): THREE.Group {
+export type ConduitDirection = 'N' | 'S' | 'E' | 'W';
+
+export interface ConduitConnections {
+  n: boolean;
+  s: boolean;
+  e: boolean;
+  w: boolean;
+  flowDir?: ConduitDirection;
+}
+
+function defaultConduitConnections(orientation?: RoadOrientation): ConduitConnections {
+  return orientation === 'NS'
+    ? { n: true, s: true, e: false, w: false }
+    : { n: false, s: false, e: true, w: true };
+}
+
+function buildConduitPreview(
+  type: BuildingType,
+  orientation?: RoadOrientation,
+  connections?: ConduitConnections,
+): THREE.Group {
+  const conn = connections && (connections.n || connections.s || connections.e || connections.w)
+    ? connections
+    : defaultConduitConnections(orientation);
+
   const group = new THREE.Group();
   const add = (geo: THREE.BufferGeometry, color: number, x: number, y: number, z: number) => {
-    const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.25 }));
+    const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.28 }));
     mesh.position.set(x, y, z);
     group.add(mesh);
   };
+
+  const hasEW = conn.e || conn.w;
+  const hasNS = conn.n || conn.s;
+
   if (type === BuildingType.UTILITY_POWER_LINE) {
-    // Steel transmission pole + crossarm + glowing amber insulators
+    // Steel transmission pole + directional crossarm(s) + half-span wires matching build direction
     add(new THREE.CylinderGeometry(0.08, 0.11, 0.05, 10), 0x78909c, 0, 0.025, 0);
     add(new THREE.CylinderGeometry(0.024, 0.04, 1.05, 8), 0x90a4ae, 0, 0.55, 0);
-    const ew = orientation === 'EW';
-    add(new THREE.BoxGeometry(ew ? 0.05 : 0.52, 0.035, ew ? 0.52 : 0.05), 0xb0bec5, 0, 1.02, 0);
-    for (const s of [-0.2, 0.2]) {
-      add(new THREE.CylinderGeometry(0.022, 0.022, 0.08, 8), 0xffd54f, ew ? 0 : s, 0.97, ew ? s : 0);
+
+    // Crossarm sits perpendicular to wire direction (both arms if forming a corner/junction)
+    if (hasEW || (!hasEW && !hasNS)) {
+      add(new THREE.BoxGeometry(0.05, 0.035, 0.52), 0xb0bec5, 0, 1.02, 0);
+      for (const s of [-0.16, 0.16]) {
+        add(new THREE.CylinderGeometry(0.022, 0.022, 0.08, 8), 0xffd54f, 0, 0.97, s);
+      }
+    }
+    if (hasNS) {
+      add(new THREE.BoxGeometry(0.52, 0.035, 0.05), 0xb0bec5, 0, 1.02, 0);
+      for (const s of [-0.16, 0.16]) {
+        add(new THREE.CylinderGeometry(0.022, 0.022, 0.08, 8), 0xffd54f, s, 0.97, 0);
+      }
+    }
+
+    // Half-span overhead conductor wires extending to connected cell edges
+    const wireY = 0.98;
+    for (const s of [-0.14, 0.14]) {
+      if (conn.e) add(new THREE.BoxGeometry(0.5, 0.024, 0.024), 0xffeb3b, 0.25, wireY, s);
+      if (conn.w) add(new THREE.BoxGeometry(0.5, 0.024, 0.024), 0xffeb3b, -0.25, wireY, s);
+      if (conn.s) add(new THREE.BoxGeometry(0.024, 0.024, 0.5), 0xffeb3b, s, wireY, 0.25);
+      if (conn.n) add(new THREE.BoxGeometry(0.024, 0.024, 0.5), 0xffeb3b, s, wireY, -0.25);
     }
   } else {
     const pipeColor = type === BuildingType.UTILITY_WATER_PIPE ? 0x29b6f6 : 0x26a69a;
     const collarColor = type === BuildingType.UTILITY_WATER_PIPE ? 0x0288d1 : 0x00796b;
-    const ns = orientation === 'NS';
-    const pipeGeo = ns
-      ? new THREE.CylinderGeometry(0.11, 0.11, 0.94, 14).rotateX(Math.PI / 2)
-      : new THREE.CylinderGeometry(0.11, 0.11, 0.94, 14).rotateZ(Math.PI / 2);
-    add(pipeGeo, pipeColor, 0, 0.14, 0);
-    add(new THREE.CylinderGeometry(0.15, 0.15, 0.12, 14), collarColor, 0, 0.14, 0);
-    for (const end of [-0.38, 0.38]) {
-      const flange = ns
-        ? new THREE.CylinderGeometry(0.135, 0.135, 0.05, 12).rotateX(Math.PI / 2)
-        : new THREE.CylinderGeometry(0.135, 0.135, 0.05, 12).rotateZ(Math.PI / 2);
-      add(flange, collarColor, ns ? 0 : end, 0.14, ns ? end : 0);
+    const arrowColor = type === BuildingType.UTILITY_WATER_PIPE ? 0xb3e5fc : 0xa7ffeb;
+    const y = 0.14;
+    const r = 0.11;
+
+    // Rounded central weld joint + vertical inspection hub so elbows & tees join cleanly
+    add(new THREE.SphereGeometry(r * 1.18, 14, 10), collarColor, 0, y, 0);
+    add(new THREE.CylinderGeometry(r * 1.28, r * 1.28, 0.11, 14), collarColor, 0, y + 0.02, 0);
+
+    const addArm = (dir: ConduitDirection) => {
+      const ns = dir === 'N' || dir === 'S';
+      const sign = dir === 'S' || dir === 'E' ? 1 : -1;
+      const armGeo = ns
+        ? new THREE.CylinderGeometry(r, r, 0.5, 14).rotateX(Math.PI / 2)
+        : new THREE.CylinderGeometry(r, r, 0.5, 14).rotateZ(Math.PI / 2);
+      add(armGeo, pipeColor, ns ? 0 : sign * 0.25, y, ns ? sign * 0.25 : 0);
+
+      const flangeGeo = ns
+        ? new THREE.CylinderGeometry(r * 1.24, r * 1.24, 0.045, 12).rotateX(Math.PI / 2)
+        : new THREE.CylinderGeometry(r * 1.24, r * 1.24, 0.045, 12).rotateZ(Math.PI / 2);
+      add(flangeGeo, collarColor, ns ? 0 : sign * 0.43, y, ns ? sign * 0.43 : 0);
+    };
+
+    if (conn.n) addArm('N');
+    if (conn.s) addArm('S');
+    if (conn.e) addArm('E');
+    if (conn.w) addArm('W');
+
+    // Directional chevron cone on top of the pipe pointing along the active build direction
+    if (conn.flowDir) {
+      const d = conn.flowDir;
+      const cone = new THREE.ConeGeometry(0.085, 0.18, 10);
+      if (d === 'E') cone.rotateZ(-Math.PI / 2);
+      else if (d === 'W') cone.rotateZ(Math.PI / 2);
+      else if (d === 'S') cone.rotateX(Math.PI / 2);
+      else cone.rotateX(-Math.PI / 2);
+      const offset = 0.2;
+      add(
+        cone,
+        arrowColor,
+        d === 'E' ? offset : d === 'W' ? -offset : 0,
+        y + r * 1.22,
+        d === 'S' ? offset : d === 'N' ? -offset : 0,
+      );
     }
   }
   group.scale.setScalar(CELL_SIZE);
@@ -273,6 +351,7 @@ export class BuildingFactory {
     style: CityStyle = CITY_STYLES.classic,
     orientation?: RoadOrientation,
     facing?: WaterfrontFacing,
+    conduitConnections?: ConduitConnections,
   ): THREE.Group {
     const def = BUILDING_DEFS[type];
     const { w: effW, d: effD } = getEffectiveSize(type, orientation);
@@ -316,7 +395,7 @@ export class BuildingFactory {
     }
 
     if (isUtilityConduit(type)) {
-      return styleAsGhostPreview(buildConduitPreview(type, orientation), valid, w, d);
+      return styleAsGhostPreview(buildConduitPreview(type, orientation, conduitConnections), valid, w, d);
     }
 
     if (type === BuildingType.PARK) {
@@ -366,11 +445,12 @@ export class BuildingFactory {
     orientation?: RoadOrientation,
     style: CityStyle = CITY_STYLES.classic,
     valid = true,
+    conduitConnections?: ConduitConnections,
   ): THREE.Group {
     if (isUtilityConduit(type)) {
       const { w: effW, d: effD } = getEffectiveSize(type, orientation);
       return styleAsGhostPreview(
-        buildConduitPreview(type, orientation),
+        buildConduitPreview(type, orientation, conduitConnections),
         valid,
         effW * CELL_SIZE,
         effD * CELL_SIZE,
