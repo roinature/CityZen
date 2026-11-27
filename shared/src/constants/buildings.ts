@@ -762,6 +762,12 @@ export const ZONE_DENSITY_COSTS: Record<ZoneDensity, number> = {
   [ZoneDensity.HIGH]: 100,
 };
 
+/** Extra earthwork cost per steep-slope cell leveled when building a road. */
+export const ROAD_GRADING_COST = 10;
+
+/** Extra cells graded on each side of a road so fronting zones/buildings can be placed. */
+export const ROAD_GRADING_MARGIN = 1;
+
 /** Backward-compatible helper: gets zone level def, defaulting density to MEDIUM. */
 export function getZoneLevelDef(type: ZoneType, density: ZoneDensity | undefined, level: number): ZoneLevelDef {
   const d = density ?? ZoneDensity.MEDIUM;

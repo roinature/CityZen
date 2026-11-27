@@ -1,4 +1,4 @@
-import { getSite } from '@cityzen/shared';
+import { getSite, type Grid } from '@cityzen/shared';
 import { drawSiteMap } from './SiteMap.js';
 import * as THREE from 'three';
 import { BUILDING_DEFS, BuildingType, DEFAULT_GRID_SIZE, CELL_SIZE, getStarterEntranceX } from '@cityzen/shared';
@@ -227,12 +227,12 @@ export function createTerrain(scene: THREE.Scene) {
 
   let activeSite: string | undefined;
   let siteTexture: THREE.CanvasTexture | undefined;
-  function setSite(siteId?: string) {
-    if (activeSite === siteId) return;
+  function setSite(siteId?: string, grid?: Grid) {
+    if (activeSite === siteId && !grid) return;
     activeSite = siteId;
     siteTexture?.dispose();
     const site = getSite(siteId);
-    siteTexture = site ? new THREE.CanvasTexture(drawSiteMap(site.id).canvas) : undefined;
+    siteTexture = site ? new THREE.CanvasTexture(drawSiteMap(site.id, grid).canvas) : undefined;
     if (siteTexture) {
       siteTexture.colorSpace = THREE.SRGBColorSpace;
     }

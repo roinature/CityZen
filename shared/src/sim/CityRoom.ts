@@ -4,11 +4,11 @@ import type { Player } from '../types/player.js';
 import type { Position } from '../types/grid.js';
 import type { GameClock } from '../types/time.js';
 import type { PopulationSummary, ZonePopulationEntry } from '../types/resources.js';
-import { type PlacedBuilding, type RoadOrientation, BuildingType, ZoneDensity, isZone } from '../types/building.js';
+import { type PlacedBuilding, type RoadOrientation, BuildingType, ZoneDensity, isRoad, isZone } from '../types/building.js';
 import { type PlaceBuildingsPayload, S2C } from '../types/events.js';
 import { INITIAL_RESOURCES, MIN_TAX_RATE, MAX_TAX_RATE, DEFAULT_GAME_SPEED } from '../constants/simulation.js';
 import { BUILDING_DEFS, ZONE_DENSITY_COSTS } from '../constants/buildings.js';
-import { canPlaceBuilding, createEmptyGrid, getEffectiveSize, getReplacedBuildings } from '../logic/placement.js';
+import { canPlaceBuilding, createEmptyGrid, getEffectiveSize, getPlacementCost, getReplacedBuildings, levelRoadTerrain } from '../logic/placement.js';
 import { createStarterLayout } from '../logic/starterLayout.js';
 import { planTown, type TownSettings } from '../logic/townPlan.js';
 import { applySiteTerrain } from '../terrain/sites.js';
@@ -225,13 +225,16 @@ export class CityRoom {
       return { success: false, error: result.reason };
     }
 
+    // Quote total cost (including road grading) before leveling clears steep terrain.
+    const { totalCost: cost } = getPlacementCost(
+      this.state.grid, position, type, density, orientation,
+    );
+
     // A roundabout replaces the roads under it; non-zone buildings replace zoned tiles.
     for (const replaced of getReplacedBuildings(this.state.grid, position, type, this.state.buildings, orientation)) {
       this.demolishBuilding(replaced.position);
     }
 
-    const def = BUILDING_DEFS[type];
-    const cost = isZone(type) && density ? ZONE_DENSITY_COSTS[density] : def.cost;
     const building: PlacedBuilding = {
       id: newId(),
       type,
@@ -241,6 +244,12 @@ export class CityRoom {
       ...(isZone(type) ? { developmentLevel: 0, density: density ?? ZoneDensity.MEDIUM } : {}),
       ...(orientation ? { orientation } : {}),
     };
+
+    // Grade steep terrain under and 1 tile alongside roads so the road never breaks
+    // and adjacent lots become buildable.
+    if (isRoad(type)) {
+      levelRoadTerrain(this.state.grid, position, type, orientation);
+    }
 
     // Update grid
     const { w, d } = getEffectiveSize(type, orientation);

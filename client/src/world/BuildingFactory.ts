@@ -314,7 +314,12 @@ export class BuildingFactory {
     return group;
   }
 
-  createGhostPreview(type: BuildingType, orientation?: RoadOrientation, style: CityStyle = CITY_STYLES.classic): THREE.Group {
+  createGhostPreview(
+    type: BuildingType,
+    orientation?: RoadOrientation,
+    style: CityStyle = CITY_STYLES.classic,
+    valid = true,
+  ): THREE.Group {
     const group = new THREE.Group();
 
     const { w: effW, d: effD } = getEffectiveSize(type, orientation);
@@ -324,9 +329,9 @@ export class BuildingFactory {
 
     const geometry = new THREE.BoxGeometry(w * 0.96, 0.05, d * 0.96);
     const material = new THREE.MeshLambertMaterial({
-      color: dirt ? style.dirt : style.asphalt,
+      color: valid ? (dirt ? style.dirt : style.asphalt) : INVALID_PAD,
       transparent: true,
-      opacity: 0.65,
+      opacity: valid ? 0.65 : 0.5,
       depthWrite: false,
     });
     const mesh = new THREE.Mesh(geometry, material);

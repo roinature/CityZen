@@ -304,11 +304,12 @@ export class DriveMode {
     const cz = Math.floor(z);
     if (cx < 0 || cz < 0 || cx >= grid.length || cz >= grid[cx].length) return 'solid';
     const cell = grid[cx][cz];
-    if (cell.terrain) return 'solid';
-    if (!cell.buildingId) return 'ground';
-    const type = this.typeById.get(cell.buildingId);
-    if (!type) return 'ground';
-    return isRoad(type) ? 'road' : 'solid';
+    if (cell.terrain === 'water') return 'solid';
+    if (cell.buildingId) {
+      const type = this.typeById.get(cell.buildingId);
+      if (type) return isRoad(type) ? 'road' : 'solid';
+    }
+    return cell.terrain ? 'solid' : 'ground';
   }
 
   private roadSpeedAt(x: number, z: number): number {

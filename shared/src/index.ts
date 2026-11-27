@@ -97,11 +97,16 @@ export {
   quoteLoan, validateLoanRequest, createLoan, applyLoanPayments,
 } from './logic/loans.js';
 export type { LoanQuote } from './logic/loans.js';
-export { BUILDING_DEFS, ZONE_LEVELS, ZONE_DENSITY_COSTS, getZoneLevelDef } from './constants/buildings.js';
+export { BUILDING_DEFS, ZONE_LEVELS, ZONE_DENSITY_COSTS, ROAD_GRADING_COST, ROAD_GRADING_MARGIN, getZoneLevelDef } from './constants/buildings.js';
 export type { ZoneLevelDef } from './constants/buildings.js';
 
 // Logic
-export { canPlaceBuilding, canReplace, createEmptyGrid, getEffectiveSize, getReplacedBuildings, getReplacedRoads, replacesRoads } from './logic/placement.js';
+export {
+  canPlaceBuilding, canReplace, createEmptyGrid, getEffectiveSize,
+  getPlacementCost, getReplacedBuildings, getReplacedRoads, getRoadGradingCells,
+  levelRoadTerrain, replacesRoads,
+} from './logic/placement.js';
+export type { PlacementCostQuote, PlacementResult } from './logic/placement.js';
 export { createStarterLayout, getStarterEntranceX, isStarterEntranceRoad } from './logic/starterLayout.js';
 export {
   planTown, normalizeTownSettings, TOWN_CHARACTERS, TOWN_CHARACTER_KNOBS, DEFAULT_TOWN,

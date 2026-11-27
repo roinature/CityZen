@@ -1,6 +1,6 @@
 import { DEFAULT_GRID_SIZE } from '../constants/grid.js';
 import { BuildingType, type PlacedBuilding } from '../types/building.js';
-import { createEmptyGrid } from './placement.js';
+import { createEmptyGrid, levelRoadTerrain } from './placement.js';
 
 import { applySiteTerrain } from '../terrain/sites.js';
 
@@ -31,6 +31,7 @@ export function createStarterLayout(cityId: string, ownerId: string, siteId?: st
       placedAt: 0,
       orientation: 'NS',
     });
+    levelRoadTerrain(grid, { x, z }, BuildingType.ROAD_STREET, 'NS');
     grid[x][z].buildingId = id;
   }
 

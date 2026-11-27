@@ -6,6 +6,7 @@ import {
   type EdgeDirection,
   type PlacedBuilding,
   getEffectiveSize,
+  levelRoadTerrain,
   findAdjacentCity,
   getOppositeDirection,
   isZone,
@@ -467,7 +468,7 @@ connect({
       driveMode.stop();
       cameraController.frameCity(city);
     }
-    setSite(city.siteId);
+    setSite(city.siteId, city.grid);
     cityState = city;
     buildMode.setCityState(city);
     cityRenderer.syncState(city);
@@ -491,14 +492,21 @@ connect({
     const existingIds = new Set(cityState.buildings.map(building => building.id));
     const additions = payload.buildings.filter(building => !existingIds.has(building.id));
     if (!additions.length) return;
+    let terrainLeveled = false;
     for (const building of additions) {
       cityState.buildings.push(building);
+      if (isRoad(building.type) && levelRoadTerrain(cityState.grid, building.position, building.type, building.orientation) > 0) {
+        terrainLeveled = true;
+      }
       const { w, d } = getEffectiveSize(building.type, building.orientation);
       for (let dx = 0; dx < w; dx++) {
         for (let dz = 0; dz < d; dz++) {
           cityState.grid[building.position.x + dx][building.position.z + dz].buildingId = building.id;
         }
       }
+    }
+    if (terrainLeveled) {
+      setSite(cityState.siteId, cityState.grid);
     }
 
     cityState.resources = payload.resources;
@@ -697,10 +705,13 @@ buildMode.onPreviewClearance = (rect) => {
   cityRenderer.setPreviewClearance(rect);
 };
 
-buildMode.onDragCostUpdate = (cost, affordable = true) => {
+buildMode.onDragCostUpdate = (cost, affordable = true, gradingCost = 0) => {
   if (cost !== null) {
+    const levelingNote = gradingCost > 0 ? ` (includes $${gradingCost.toLocaleString()} leveling)` : '';
     footerIndicator.show(
-      affordable ? `Cost: $${cost.toLocaleString()}` : `Cost: $${cost.toLocaleString()} — not enough money`,
+      affordable
+        ? `Cost: $${cost.toLocaleString()}${levelingNote}`
+        : `Cost: $${cost.toLocaleString()}${levelingNote} — not enough money`,
       affordable ? 'info' : 'warn',
     );
   } else {

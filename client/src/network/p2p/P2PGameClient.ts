@@ -2,6 +2,8 @@ import { joinRoom, type Room, type RequestAction, type MessageAction } from 'try
 import {
   S2C,
   getEffectiveSize,
+  isRoad,
+  levelRoadTerrain,
   type BuildingDemolishedPayload,
   type BuildingPlacedPayload,
   type BuildingsPlacedPayload,
@@ -516,6 +518,9 @@ export class P2PGameClient implements CityConnection {
     for (const building of buildings) {
       if (existingIds.has(building.id)) continue;
       this.activeRemoteCity.buildings.push(clone(building));
+      if (isRoad(building.type)) {
+        levelRoadTerrain(this.activeRemoteCity.grid, building.position, building.type, building.orientation);
+      }
       const { w, d } = getEffectiveSize(building.type, building.orientation);
       for (let dx = 0; dx < w; dx++) {
         for (let dz = 0; dz < d; dz++) {

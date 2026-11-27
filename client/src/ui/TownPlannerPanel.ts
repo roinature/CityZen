@@ -1,6 +1,7 @@
 import {
-  BuildingType, DEFAULT_TOWN, TOWN_CHARACTERS, TOWN_CHARACTER_KNOBS, getEffectiveSize, isRoad, isZone,
-  normalizeTownSettings, planTown, type CityState, type TownCharacter, type TownSettings,
+  BuildingType, DEFAULT_TOWN, TOWN_CHARACTERS, TOWN_CHARACTER_KNOBS, applySiteTerrain, createEmptyGrid,
+  getEffectiveSize, isRoad, isZone, normalizeTownSettings, planTown,
+  type CityState, type Grid, type TownCharacter, type TownSettings,
 } from '@cityzen/shared';
 
 const SETTINGS_KEY = 'cityzen_town_settings';
@@ -34,6 +35,7 @@ export class TownPlannerPanel {
   private buildButton: HTMLButtonElement;
   private settings: TownSettings;
   private city: CityState | null = null;
+  private baseTerrain: Grid | null = null;
   private confirming = false;
   private busy = false;
   private previewQueued = false;
@@ -123,6 +125,13 @@ export class TownPlannerPanel {
 
   show(city: CityState): void {
     this.city = city;
+    if (city.siteId) {
+      const terrain = createEmptyGrid(city.grid.length);
+      applySiteTerrain(terrain, city.siteId);
+      this.baseTerrain = terrain;
+    } else {
+      this.baseTerrain = city.grid;
+    }
     this.setConfirming(false);
     this.overlay.style.display = 'flex';
     this.sync();
@@ -183,8 +192,8 @@ export class TownPlannerPanel {
   }
 
   private preview(): void {
-    if (!this.city) return;
-    const { grid, buildings } = planTown(this.city.grid, this.settings, 'preview', '');
+    if (!this.city || !this.baseTerrain) return;
+    const { grid, buildings } = planTown(this.baseTerrain, this.settings, 'preview', '');
     const ctx = this.canvas.getContext('2d')!;
     grid.forEach((column, x) => column.forEach((cell, z) => {
       ctx.fillStyle = cell.terrain === 'water' ? '#447f99' : cell.terrain === 'steep' ? '#8f7f5c' : '#b9c79c';

@@ -16,6 +16,7 @@ import {
   DEFAULT_GRID_SIZE,
   canPlaceBuilding,
   getEffectiveSize,
+  getPlacementCost,
   replacesRoads,
 } from '@cityzen/shared';
 import { BuildingFactory } from '../world/BuildingFactory.js';
@@ -126,8 +127,8 @@ export class BuildMode {
   onPlace: ((pos: Position, type: BuildingType, density?: ZoneDensity, orientation?: RoadOrientation) => void) | null = null;
   onDemolish: ((pos: Position) => void) | null = null;
   onEdgeRoadClick: ((direction: EdgeDirection, position: number) => void) | null = null;
-  /** Reports the cost of what is about to be placed (null = nothing), and whether the city can afford it. */
-  onDragCostUpdate: ((cost: number | null, affordable?: boolean) => void) | null = null;
+  /** Reports the cost of what is about to be placed (null = nothing), whether affordable, and any terrain-leveling fee included. */
+  onDragCostUpdate: ((cost: number | null, affordable?: boolean, gradingCost?: number) => void) | null = null;
   /** Footprint whose existing zoned buildings should step aside for a valid hover preview. */
   onPreviewClearance: ((rect: GridRect | null) => void) | null = null;
 
@@ -287,8 +288,13 @@ export class BuildMode {
       this.onPreviewClearance?.(null);
     }
 
-    const unitCost = this.getUnitCost();
-    this.onDragCostUpdate?.(unitCost, this.canAfford(state, unitCost));
+    const { totalCost, gradingCost } = getPlacementCost(
+      state.grid,
+      this.currentHoverPos,
+      this.selectedType,
+      this.selectedDensity ?? undefined,
+    );
+    this.onDragCostUpdate?.(totalCost, this.canAfford(state, totalCost), gradingCost);
   }
 
   private getRectanglePositions(start: Position, end: Position): Position[] {
@@ -480,9 +486,29 @@ export class BuildMode {
     this.lineDragPreviewGroup = new THREE.Group();
     const w = effW * CELL_SIZE;
     const d = effD * CELL_SIZE;
+    const leveled = new Set<string>();
+    let totalCost = 0;
+    let gradingCost = 0;
 
     for (const pos of positions) {
-      const ghost = this.factory.createGhostPreview(this.selectedType, orientation, CITY_STYLES[this.styleId]);
+      const placeable = canPlaceBuilding(
+        state.grid, pos, this.selectedType, state.resources, true, state.buildings, undefined, orientation,
+      ).valid;
+      let segValid = false;
+      if (placeable) {
+        const quote = getPlacementCost(state.grid, pos, this.selectedType, undefined, orientation, leveled);
+        const nextTotal = totalCost + quote.totalCost;
+        segValid = this.canAfford(state, nextTotal);
+        totalCost = nextTotal;
+        gradingCost += quote.gradingCost;
+        for (const cell of quote.gradedCells) {
+          leveled.add(`${cell.x},${cell.z}`);
+        }
+      }
+
+      const ghost = this.factory.createGhostPreview(
+        this.selectedType, orientation, CITY_STYLES[this.styleId], segValid,
+      );
       ghost.position.set(
         pos.x * CELL_SIZE + w / 2,
         0,
@@ -493,10 +519,8 @@ export class BuildMode {
 
     this.scene.add(this.lineDragPreviewGroup);
 
-    // Update cost indicator
-    const def = BUILDING_DEFS[this.selectedType];
-    const totalCost = positions.length * def.cost;
-    this.onDragCostUpdate?.(totalCost, this.canAfford(state, totalCost));
+    // Update cost indicator (includes deduplicated terrain-leveling fee)
+    this.onDragCostUpdate?.(totalCost, this.canAfford(state, totalCost), gradingCost);
   }
 
   private clearLineDragPreview(): void {
