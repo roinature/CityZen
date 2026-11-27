@@ -2286,6 +2286,54 @@ body:not(.in-city) .density-picker {
 .earth-panel small { display: block; margin-top: 14px; color: #bdc8c3; }
 .earth-panel a { color: inherit; }
 
+.worldmap-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.worldmap-invite-btn {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #e6f4ea;
+  background: #234d44;
+  border: 1px solid #6cb899;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.worldmap-invite-btn:hover { background: #2d6256; }
+
+.site-status-badge {
+  display: inline-block !important;
+  margin-top: 4px;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 999px;
+}
+.site-status-yours { background: #1e4d3b; color: #b6f0cd; border: 1px solid #4ca97d; }
+.site-status-online { background: #1c3f59; color: #b5e0ff; border: 1px solid #4c9bd6; }
+.site-status-cached { background: #4b3d1e; color: #f6dc9c; border: 1px solid #c29b45; }
+.site-status-offline { background: #31383c; color: #b8c2c7; border: 1px solid #5c686e; }
+
+.hud-readonly-pill {
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #ffe29e;
+  background: rgba(88, 66, 20, 0.85);
+  border: 1px solid rgba(236, 185, 76, 0.65);
+  white-space: nowrap;
+}
+
+body.read-only-city .toolbar {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
 /* Town planner */
 .option-row select,
 .option-row input[type="number"] {

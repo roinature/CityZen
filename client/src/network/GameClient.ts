@@ -41,6 +41,10 @@ export interface GameCallbacks {
   onPopulationUpdate?: (summary: PopulationSummary) => void;
   onMigrationEvent?: (payload: MigrationEventPayload) => void;
   onWorldTick?: (payload: WorldTickPayload) => void;
+  /** Fired when viewing an offline peer's cached city (read-only) or returning to live editing. */
+  onReadOnlyChange?: (readOnly: boolean, reason?: string) => void;
+  /** Fired when connected WebRTC peer count changes (P2P mode). */
+  onPeerStatusChange?: (peerCount: number) => void;
 }
 
 export class GameClient implements CityConnection {

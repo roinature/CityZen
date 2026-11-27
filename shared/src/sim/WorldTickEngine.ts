@@ -28,6 +28,14 @@ export interface WorldBroadcaster {
   toCity(cityId: string, event: string, payload: unknown): void;
 }
 
+export interface WorldTickEngineOptions {
+  /**
+   * Called when residents of a locally simulated city want to migrate to a
+   * connected city that is not hosted locally (e.g., owned by a remote peer).
+   */
+  onRemoteMigration?: (fromCityId: string, toCityId: string, personIds: string[]) => void;
+}
+
 export class WorldTickEngine {
   private interval: ReturnType<typeof setInterval> | null = null;
   private lastGameYear: number;
@@ -38,6 +46,7 @@ export class WorldTickEngine {
     private getRooms: () => TickRoom[],
     private populationManager: PopulationManager,
     private broadcaster: WorldBroadcaster,
+    private options?: WorldTickEngineOptions,
   ) {
     this.lastGameYear = worldState.clock.gameYear;
     this.lastGameDay = worldState.clock.gameDay;
@@ -148,8 +157,13 @@ export class WorldTickEngine {
       }
     }
 
-    // Update world total population
-    this.worldState.totalPopulation = this.populationManager.getTotalPopulation();
+    // Update world total population (local population pool + any remote peer cities)
+    const localRoomIds = new Set(rooms.map(r => r.id));
+    let remotePopulation = 0;
+    for (const c of this.worldState.cities) {
+      if (!localRoomIds.has(c.cityId)) remotePopulation += c.population;
+    }
+    this.worldState.totalPopulation = this.populationManager.getTotalPopulation() + remotePopulation;
 
     // Broadcast world tick to all clients
     this.broadcaster.toAll(S2C.WORLD_TICK, {
@@ -167,10 +181,16 @@ export class WorldTickEngine {
     const cities = this.worldState.cities;
     if (cities.length < 2) return;
 
-    // Aggregate migrations per route for broadcasting
+    const localRoomIds = new Set(this.getRooms().map(r => r.id));
+
+    // Aggregate local migrations per route for broadcasting, and remote ones for P2P handoff
     const migrationRoutes = new Map<string, { fromCityId: string; toCityId: string; count: number }>();
+    const remoteRoutes = new Map<string, { fromCityId: string; toCityId: string; personIds: string[] }>();
 
     for (const cityEntry of cities) {
+      // Only simulate outbound migration for cities hosted by this engine
+      if (!localRoomIds.has(cityEntry.cityId)) continue;
+
       const connectedCities = findConnectedCities(cityEntry, cities);
       if (connectedCities.length === 0) continue;
 
@@ -178,9 +198,25 @@ export class WorldTickEngine {
       const candidates = evaluateMigration(cityEntry, persons, connectedCities);
 
       for (const candidate of candidates) {
+        const routeKey = `${candidate.fromCityId}->${candidate.toCityId}`;
+
+        if (!localRoomIds.has(candidate.toCityId)) {
+          if (!this.options?.onRemoteMigration) continue;
+          const existingRemote = remoteRoutes.get(routeKey);
+          if (existingRemote) {
+            existingRemote.personIds.push(candidate.personId);
+          } else {
+            remoteRoutes.set(routeKey, {
+              fromCityId: candidate.fromCityId,
+              toCityId: candidate.toCityId,
+              personIds: [candidate.personId],
+            });
+          }
+          continue;
+        }
+
         this.populationManager.migrate(candidate.personId, candidate.fromCityId, candidate.toCityId);
 
-        const routeKey = `${candidate.fromCityId}->${candidate.toCityId}`;
         const existing = migrationRoutes.get(routeKey);
         if (existing) {
           existing.count++;
@@ -192,6 +228,10 @@ export class WorldTickEngine {
           });
         }
       }
+    }
+
+    for (const route of remoteRoutes.values()) {
+      this.options?.onRemoteMigration?.(route.fromCityId, route.toCityId, route.personIds);
     }
 
     // Broadcast migration events to affected city channels

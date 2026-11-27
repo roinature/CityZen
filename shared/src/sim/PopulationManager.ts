@@ -39,7 +39,7 @@ function randomAge(): number {
 
 // ── Compact serialization format ────────────────────────────
 // [id, age, cityId, p, s, l, e, c, a, sa, birthTick, residenceZoneId?]
-type SerializedPerson = [string, number, string | null, number, number, number, number, number, number, number, number, string | null | undefined];
+export type SerializedPerson = [string, number, string | null, number, number, number, number, number, number, number, number, string | null | undefined];
 
 // Two decimals is plenty for 0–100 satisfaction scores and keeps the saved
 // JSON small (full-precision floats, and especially tiny ones, bloat it).
@@ -221,6 +221,41 @@ export class PopulationManager {
     person.cityId = toCityId;
     person.residenceZoneId = null; // Will be re-assigned in next zone assignment pass
     this.addToCityIndex(toCityId, personId);
+  }
+
+  /**
+   * Remove a set of residents from a local city and return them serialized for
+   * peer-to-peer transfer to another city's owner.
+   */
+  extractCityPersons(cityId: string, personIds: string[]): SerializedPerson[] {
+    const extracted: SerializedPerson[] = [];
+    for (const personId of personIds) {
+      const person = this.persons.get(personId);
+      if (!person || person.cityId !== cityId) continue;
+      this.removeFromCityIndex(cityId, personId);
+      this.persons.delete(personId);
+      extracted.push(serializePerson({ ...person, residenceZoneId: null }));
+    }
+    return extracted;
+  }
+
+  /**
+   * Admit serialized persons transferred from another peer into a local city.
+   * Clears their previous zone assignment so they settle into local housing.
+   */
+  admitPersons(cityId: string, data: unknown[]): number {
+    let admitted = 0;
+    for (const tuple of data) {
+      if (!Array.isArray(tuple) || tuple.length < 11) continue;
+      const person = deserializePerson(tuple as SerializedPerson);
+      if (this.persons.has(person.id)) continue;
+      person.cityId = cityId;
+      person.residenceZoneId = null;
+      this.persons.set(person.id, person);
+      this.addToCityIndex(cityId, person.id);
+      admitted++;
+    }
+    return admitted;
   }
 
   /** Get all persons in a city. */

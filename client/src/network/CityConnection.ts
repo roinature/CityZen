@@ -25,4 +25,8 @@ export interface CityConnection {
   setGameSpeed(speed: number, playerId?: string): Promise<void>;
   leave(playerId?: string): Promise<void>;
   disconnect(): void;
+  /** Optional local backup export (P2P mode). */
+  exportBackup?(): Promise<string>;
+  /** Optional local backup import (P2P mode). Returns true if applied. */
+  importBackup?(rawJson: string): Promise<boolean>;
 }

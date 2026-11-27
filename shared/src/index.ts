@@ -136,7 +136,8 @@ export * from './terrain/sites.js';
 // Simulation runtime (runs on the server or in a peer-to-peer host's browser)
 export { newId } from './sim/id.js';
 export { PopulationManager } from './sim/PopulationManager.js';
+export type { SerializedPerson } from './sim/PopulationManager.js';
 export { CityRoom } from './sim/CityRoom.js';
 export type { CityMessageSink } from './sim/CityRoom.js';
 export { WorldTickEngine } from './sim/WorldTickEngine.js';
-export type { TickRoom, WorldBroadcaster } from './sim/WorldTickEngine.js';
+export type { TickRoom, WorldBroadcaster, WorldTickEngineOptions } from './sim/WorldTickEngine.js';

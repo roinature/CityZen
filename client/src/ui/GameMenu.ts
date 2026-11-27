@@ -1,6 +1,7 @@
 import type { CityListItem } from '@cityzen/shared';
 
 export interface GameMenuCallbacks {
+  isP2P?: boolean;
   onSave: () => void;
   onLoadCity: (cityId: string) => void;
   onRestart: () => void;
@@ -8,6 +9,8 @@ export interface GameMenuCallbacks {
   onOptions: () => void;
   onPlanTown: () => void;
   onResume: () => void;
+  onExportBackup?: () => void | Promise<void>;
+  onImportBackup?: (rawJson: string) => void | Promise<void>;
   fetchCities: () => Promise<CityListItem[]>;
 }
 
@@ -34,7 +37,9 @@ export class GameMenu {
           <button class="menu-btn" data-action="load">Load Game</button>
           <button class="menu-btn" data-action="plan">Town Planner</button>
           <button class="menu-btn" data-action="options">Options</button>
-          <button class="menu-btn" data-action="connect-x" style="background-color: #000; color: #fff;">Connect X</button>
+          ${callbacks.onExportBackup ? '<button class="menu-btn" data-action="export-backup">Export Backup (.json)</button>' : ''}
+          ${callbacks.onImportBackup ? '<button class="menu-btn" data-action="import-backup">Import Backup</button>' : ''}
+          ${callbacks.isP2P ? '' : '<button class="menu-btn" data-action="connect-x" style="background-color: #000; color: #fff;">Connect X</button>'}
           <button class="menu-btn" data-action="restart">Restart City</button>
           <button class="menu-btn menu-btn-danger" data-action="end">End Game</button>
         </div>
@@ -76,6 +81,8 @@ export class GameMenu {
           case 'load': this.showLoadPanel(); break;
           case 'plan': this.hide(); this.callbacks.onPlanTown(); break;
           case 'options': this.hide(); this.callbacks.onOptions(); break;
+          case 'export-backup': void this.callbacks.onExportBackup?.(); break;
+          case 'import-backup': this.promptImportBackup(); break;
           case 'connect-x': window.location.href = '/api/auth/twitter'; break;
           case 'restart': this.handleRestart(); break;
           case 'end': this.handleEndGame(); break;
@@ -140,6 +147,23 @@ export class GameMenu {
         this.statusEl.textContent = '';
       }
     }, 3000);
+  }
+
+  private promptImportBackup(): void {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,application/json';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        await this.callbacks.onImportBackup?.(text);
+      } catch {
+        this.showStatus('Could not read backup file');
+      }
+    };
+    input.click();
   }
 
   private handleRestart(): void {
