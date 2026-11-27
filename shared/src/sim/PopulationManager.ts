@@ -1,23 +1,20 @@
-import { v4 as uuid } from 'uuid';
+import { newId as uuid } from './id.js';
+import type { PopulationSummary, ZonePopulationEntry } from '../types/resources.js';
+import type { PlacedBuilding, ZoneType } from '../types/building.js';
+import { BuildingType, isZone } from '../types/building.js';
 import {
   type Person,
-  type PopulationSummary,
-  type PlacedBuilding,
-  type ZonePopulationEntry,
   LifeStage,
   MaslowNeed,
   MASLOW_NEEDS_ORDERED,
-  MASLOW_LERP_RATE,
-  BuildingType,
-  isZone,
-  getZoneLevelDef,
   getLifeStage,
   getPersonHappiness,
   createDefaultMaslow,
-  getDeathProbability,
-  adjustTargetsForLifeStage,
-} from '@cityzen/shared';
-import type { ZoneType } from '@cityzen/shared';
+} from '../types/person.js';
+import { MASLOW_LERP_RATE } from '../constants/simulation.js';
+import { getZoneLevelDef } from '../constants/buildings.js';
+import { getDeathProbability } from '../logic/death.js';
+import { adjustTargetsForLifeStage } from '../logic/maslow.js';
 
 // ── Age distribution for generating initial population ──────
 const AGE_DISTRIBUTION: Array<{ min: number; max: number; weight: number }> = [

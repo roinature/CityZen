@@ -23,7 +23,9 @@ import {
   type WorldState,
   type PopulationSummary,
   type TownSettings,
+  type CityListItem,
 } from '@cityzen/shared';
+import type { CityConnection } from './CityConnection.js';
 
 export interface GameCallbacks {
   onWorldState: (world: WorldState) => void;
@@ -41,7 +43,7 @@ export interface GameCallbacks {
   onWorldTick?: (payload: WorldTickPayload) => void;
 }
 
-export class GameClient {
+export class GameClient implements CityConnection {
   private serverUrl: string;
   private supabase!: SupabaseClient;
   private callbacks: GameCallbacks;
@@ -95,6 +97,11 @@ export class GameClient {
       console.error('Failed to fetch world state:', err);
       return false;
     }
+  }
+
+  async listCities(): Promise<CityListItem[]> {
+    const res = await fetch(`${this.serverUrl}/api/cities`);
+    return res.json();
   }
 
   private async subscribeToCityChannel(cityId: string): Promise<void> {

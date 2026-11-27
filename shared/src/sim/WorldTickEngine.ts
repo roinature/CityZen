@@ -1,31 +1,32 @@
+import type { WorldState } from '../types/world.js';
+import type { CityState } from '../types/city.js';
+import type { GameClock } from '../types/time.js';
+import type { PopulationSummary, ZonePopulationEntry } from '../types/resources.js';
+import { type MigrationEventPayload, S2C } from '../types/events.js';
 import {
-  type WorldState,
-  type MigrationEventPayload,
-  type ZonePopulationEntry,
-  S2C,
-  TICK_INTERVAL_MS,
-  GAME_MS_PER_TICK,
-  TICKS_PER_GAME_DAY,
-  DAYS_PER_GAME_YEAR,
-  MAX_GAME_SPEED,
-  MaslowNeed,
-  calculateHousingCapacity,
-  calculateBirthCount,
-  calculateCityMaslowCapacity,
-  calculateBaseMaslowTargets,
-  calculateBudgetPenalty,
-  calculateTaxPenalty,
-  calculateImmigrationCount,
-  calculateEmigrationCount,
-  WORLD_POOL_RESERVE,
-  WORLD_POOL_RESERVE_PER_CITY,
-  WORLD_POOL_GROWTH_PER_CITY,
-  findConnectedCities,
-  evaluateMigration,
-} from '@cityzen/shared';
-import type { GameRoom } from './GameRoom.js';
+  TICK_INTERVAL_MS, GAME_MS_PER_TICK, TICKS_PER_GAME_DAY, DAYS_PER_GAME_YEAR, MAX_GAME_SPEED,
+  WORLD_POOL_RESERVE, WORLD_POOL_RESERVE_PER_CITY, WORLD_POOL_GROWTH_PER_CITY,
+} from '../constants/simulation.js';
+import { MaslowNeed } from '../types/person.js';
+import { calculateHousingCapacity, calculateBudgetPenalty, calculateTaxPenalty } from '../logic/resources.js';
+import { calculateBirthCount } from '../logic/birth.js';
+import { calculateCityMaslowCapacity, calculateBaseMaslowTargets } from '../logic/maslow.js';
+import { calculateImmigrationCount, calculateEmigrationCount } from '../logic/immigration.js';
+import { findConnectedCities, evaluateMigration } from '../logic/migration.js';
 import type { PopulationManager } from './PopulationManager.js';
-import { broadcastToAll, broadcastToChannel } from '../realtime/supabaseBroadcast.js';
+
+/** What the tick engine needs from each city it drives. */
+export interface TickRoom {
+  id: string;
+  state: CityState;
+  worldTick(clock: GameClock, summary?: PopulationSummary, zonePopulations?: ZonePopulationEntry[]): void;
+}
+
+/** Where world-level events go: everyone, or one city's players. */
+export interface WorldBroadcaster {
+  toAll(event: string, payload: unknown): void;
+  toCity(cityId: string, event: string, payload: unknown): void;
+}
 
 export class WorldTickEngine {
   private interval: ReturnType<typeof setInterval> | null = null;
@@ -34,11 +35,17 @@ export class WorldTickEngine {
 
   constructor(
     private worldState: WorldState,
-    private getRooms: () => GameRoom[],
+    private getRooms: () => TickRoom[],
     private populationManager: PopulationManager,
+    private broadcaster: WorldBroadcaster,
   ) {
     this.lastGameYear = worldState.clock.gameYear;
     this.lastGameDay = worldState.clock.gameDay;
+  }
+
+  /** Advance the world by one tick. start() calls this on a timer. */
+  step(): void {
+    this.tick();
   }
 
   start(): void {
@@ -145,7 +152,7 @@ export class WorldTickEngine {
     this.worldState.totalPopulation = this.populationManager.getTotalPopulation();
 
     // Broadcast world tick to all clients
-    broadcastToAll(S2C.WORLD_TICK, {
+    this.broadcaster.toAll(S2C.WORLD_TICK, {
       clock,
       totalPopulation: this.worldState.totalPopulation,
       citySummaries: this.worldState.cities.map(c => ({
@@ -195,8 +202,8 @@ export class WorldTickEngine {
         toCityId: route.toCityId,
         reason: 'low_happiness',
       };
-      broadcastToChannel(`city:${route.fromCityId}`, S2C.MIGRATION_EVENT, payload);
-      broadcastToChannel(`city:${route.toCityId}`, S2C.MIGRATION_EVENT, payload);
+      this.broadcaster.toCity(route.fromCityId, S2C.MIGRATION_EVENT, payload);
+      this.broadcaster.toCity(route.toCityId, S2C.MIGRATION_EVENT, payload);
 
       const fromName = this.worldState.cities.find(c => c.cityId === route.fromCityId)?.name ?? route.fromCityId;
       const toName = this.worldState.cities.find(c => c.cityId === route.toCityId)?.name ?? route.toCityId;

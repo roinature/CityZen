@@ -47,13 +47,37 @@ import { FooterIndicator } from './ui/FooterIndicator.js';
 import { CompassIndicator } from './ui/CompassIndicator.js';
 import { ZoomControl } from './ui/ZoomControl.js';
 import { MessageManager } from './ui/MessageManager.js';
-import { GameClient } from './network/GameClient.js';
+import { GameClient, type GameCallbacks } from './network/GameClient.js';
+import type { CityConnection } from './network/CityConnection.js';
+import { P2PGameClient } from './network/p2p/P2PGameClient.js';
 import { SoundManager } from './audio/SoundManager.js';
 import { TownPlannerPanel } from './ui/TownPlannerPanel.js';
 import { CityLoading } from './ui/CityLoading.js';
 
 const SERVER_URL = window.location.origin;
-const SESSION_KEY = 'cityzen_session';
+
+/**
+ * Peer-to-peer mode (prototype): `?room=<id>` plays with friends over WebRTC,
+ * with no game server. `?p2p` alone starts a new room.
+ */
+function getP2PRoom(): string | null {
+  const params = new URLSearchParams(window.location.search);
+  let room = params.get('room');
+  if (!room && params.has('p2p')) {
+    room = crypto.randomUUID().slice(0, 8);
+    params.delete('p2p');
+    params.set('room', room);
+    window.history.replaceState({}, '', `${window.location.pathname}?${params}`);
+  }
+  return room && /^[\w-]{4,64}$/.test(room) ? room : null;
+}
+const P2P_ROOM = getP2PRoom();
+
+function connect(callbacks: GameCallbacks): Promise<CityConnection> {
+  return P2P_ROOM ? P2PGameClient.create(P2P_ROOM, callbacks) : GameClient.create(SERVER_URL, callbacks);
+}
+// A peer-to-peer room remembers its own city, separate from the server game.
+const SESSION_KEY = P2P_ROOM ? `cityzen_session_p2p_${P2P_ROOM}` : 'cityzen_session';
 const PLAYER_ID_KEY = 'cityzen_player_id';
 
 interface SavedSession {
@@ -351,6 +375,16 @@ const driveButton = addHudAction('Drive', toggleDriving);
 driveButton.setAttribute('aria-pressed', 'false');
 driveMode.onExit = () => driveButton.setAttribute('aria-pressed', 'false');
 
+if (P2P_ROOM) {
+  addHudAction('Invite Friends', () => {
+    const link = `${window.location.origin}${window.location.pathname}?room=${P2P_ROOM}`;
+    navigator.clipboard.writeText(link).then(
+      () => footerIndicator.toast('Invite link copied. Friends who open it join this city.', 4000),
+      () => footerIndicator.toast(`Share this link: ${link}`, 8000),
+    );
+  }, 'Invite');
+}
+
 const nightButton = addHudAction('Night View', () => {
   isNight = !isNight;
   lighting.setNight(isNight);
@@ -363,9 +397,9 @@ nightButton.setAttribute('aria-pressed', 'false');
 let currentPlayerName = 'Player';
 
 // --- Network ---
-let gameClient!: GameClient;
+let gameClient!: CityConnection;
 
-GameClient.create(SERVER_URL, {
+connect({
   onWorldState: (world) => {
     worldState = world;
     worldMap.updateWorld(world);
@@ -565,7 +599,9 @@ GameClient.create(SERVER_URL, {
   } else {
     // Auto-rejoin saved session or show lobby
     const savedSession = loadSession();
-    if (savedSession) {
+    // In a peer-to-peer room the city may be gone (a new room, or the host restarted it elsewhere).
+    const sessionCityExists = !P2P_ROOM || worldState?.cities.some(c => c.cityId === savedSession?.cityId);
+    if (savedSession && sessionCityExists) {
       currentPlayerName = savedSession.playerName;
       beginCityLoad('Loading your city…');
       gameClient.joinCity(savedSession.cityId, savedSession.playerName, playerId);
@@ -688,8 +724,7 @@ const gameMenu = new GameMenu(uiRoot, {
     }
   },
   fetchCities: async () => {
-    const res = await fetch(`${SERVER_URL}/api/cities`);
-    return res.json();
+    return gameClient.listCities();
   },
   onRestart: () => {
     driveMode.stop();
@@ -1030,4 +1065,15 @@ function generateResourceMessages(previousState: any, currentResources: any, cit
     messageManager.addMessage(message);
     soundManager.triggerNotification();
   }
+}
+
+// Dev-only handle for poking the game from the console or browser tests.
+if (import.meta.env.DEV) {
+  Object.assign(window, {
+    __cityzen: {
+      get client() { return gameClient; },
+      get city() { return cityState; },
+      get world() { return worldState; },
+    },
+  });
 }
