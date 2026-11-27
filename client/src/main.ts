@@ -43,6 +43,7 @@ import { GridRaycaster } from './input/Raycaster.js';
 import { BuildTools, type ToolMode } from './ui/BuildTools.js';
 import { FinancePanel } from './ui/FinancePanel.js';
 import { MaslowPanel } from './ui/MaslowPanel.js';
+import { ShareModal } from './ui/ShareModal.js';
 import { FooterIndicator } from './ui/FooterIndicator.js';
 import { CompassIndicator } from './ui/CompassIndicator.js';
 import { ZoomControl } from './ui/ZoomControl.js';
@@ -419,28 +420,15 @@ function setReadOnlyCity(readOnly: boolean, reason?: string): void {
   }
 }
 
+const shareModal = new ShareModal(uiRoot, {
+  onCopySuccess: () => footerIndicator.toast('World invite link copied. Friends who open it share this Earth.', 4000),
+  onCopyFallback: (link) => footerIndicator.toast(`Share this link: ${link}`, 8000),
+});
+
 function shareWorldInvite(): void {
   if (!P2P_WORLD) return;
   const link = `${window.location.origin}${window.location.pathname}?world=${P2P_WORLD}`;
-  if (typeof navigator.share === 'function') {
-    navigator.share({
-      title: 'CityZen Earth',
-      text: 'Join my Earth world in CityZen to build side by side!',
-      url: link,
-    }).catch((err: unknown) => {
-      if ((err as { name?: string })?.name === 'AbortError') return;
-      copyInviteFallback(link);
-    });
-    return;
-  }
-  copyInviteFallback(link);
-}
-
-function copyInviteFallback(link: string): void {
-  navigator.clipboard.writeText(link).then(
-    () => footerIndicator.toast('World invite link copied. Friends who open it share this Earth.', 4000),
-    () => footerIndicator.toast(`Share this link: ${link}`, 8000),
-  );
+  shareModal.show(link);
 }
 
 if (P2P_WORLD) {
@@ -924,7 +912,9 @@ addHudAction('Menu', () => {
 window.addEventListener('keydown', (e) => {
   if (e.code !== 'Escape' || cityAdvisor.isOpen()) return;
 
-  if (maslowPanel.isVisible()) {
+  if (shareModal.isVisible()) {
+    shareModal.hide();
+  } else if (maslowPanel.isVisible()) {
     maslowPanel.hide();
   } else if (financePanel.isVisible()) {
     financePanel.hide();
@@ -952,7 +942,7 @@ window.addEventListener('keydown', (e) => {
   if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
   const el = e.target as HTMLElement | null;
   if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
-  if (!cityState || !gameClient || cityAdvisor.isOpen() || gameMenu.isVisible() || optionsPanel.isVisible() || townPlanner.isVisible()) return;
+  if (!cityState || !gameClient || cityAdvisor.isOpen() || shareModal.isVisible() || gameMenu.isVisible() || optionsPanel.isVisible() || townPlanner.isVisible()) return;
 
   if (e.code === 'KeyC') {
     toggleDriving();
