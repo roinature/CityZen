@@ -63,17 +63,20 @@ const LAYER_META: ReadonlyArray<{
 function formatBuildingSpec(type: BuildingType): string {
   const def = BUILDING_DEFS[type];
   const e = def.effects;
-  const parts = [`$${def.cost.toLocaleString()}`];
+  const costLabel = def.cost >= 10_000 && def.cost % 1000 === 0
+    ? `$${def.cost / 1000}k`
+    : `$${def.cost.toLocaleString()}`;
+  const parts = [costLabel];
   if (isUtilityConduit(type)) {
-    parts.push('drag line');
+    parts.push('drag');
   } else {
     parts.push(`${def.size.w}\u00D7${def.size.d}`);
   }
   if (e.powerGenerationMW) parts.push(`+${e.powerGenerationMW} MW`);
   if (e.waterSupplyM3) parts.push(`${e.waterSupplyM3} m\u00B3/h`);
   if (e.sewageCapacityM3) parts.push(`${e.sewageCapacityM3} m\u00B3/h`);
-  if (e.requiresWaterSource) parts.push('water source');
-  if (type === BuildingType.ENERGY_SUBSTATION) parts.push('7-tile grid');
+  if (e.requiresWaterSource) parts.push('source');
+  if (type === BuildingType.ENERGY_SUBSTATION) parts.push('7-tile');
   return parts.join(' \u00B7 ');
 }
 
@@ -259,7 +262,7 @@ export class UtilityLayerEditor {
       <span class="utility-tool-swatch" style="background:#ef5350"></span>
       <span class="utility-tool-meta">
         <strong>${bulldozeLabel}</strong>
-        <small>Removes ${layer} layer items only</small>
+        <small>Remove ${layer} items</small>
       </span>
     `;
     this.bulldozeBtn.addEventListener('click', () => this.callbacks.onSelectBulldoze(layer));
@@ -310,36 +313,49 @@ export class UtilityLayerEditor {
 
   private updateStatusDots(): void {
     const s = this.lastReport?.summary;
-    const setDot = (layer: UtilityLayer, status: 'ok' | 'warn' | 'alert' | 'idle') => {
+    const setTabStatus = (layer: UtilityLayer, status: 'ok' | 'warn' | 'alert' | 'idle', tooltip?: string) => {
       const dot = this.tabDots.get(layer);
-      if (!dot) return;
-      dot.dataset.status = status;
+      const btn = this.tabButtons.get(layer);
+      if (dot) dot.dataset.status = status;
+      if (btn) {
+        btn.dataset.status = status;
+        if (tooltip) btn.title = tooltip;
+      }
     };
     if (!s) {
-      setDot('power', 'idle');
-      setDot('water', 'idle');
-      setDot('sewage', 'idle');
+      setTabStatus('power', 'idle');
+      setTabStatus('water', 'idle');
+      setTabStatus('sewage', 'idle');
       return;
     }
 
     const consumers = s.poweredBuildings + s.unpoweredBuildings;
-    setDot(
+    setTabStatus(
       'power',
       s.unpoweredBuildings > 0 ? 'alert'
         : s.brownoutBuildings > 0 || s.powerLoadPct > 90 ? 'warn'
         : consumers > 0 || s.powerGenerationMW > 0 ? 'ok' : 'idle',
+      `Power: ${s.powerDemandMW.toFixed(1)} / ${s.powerGenerationMW.toFixed(1)} MW` +
+        (s.unpoweredBuildings > 0 ? ` (${s.unpoweredBuildings} unpowered)` : '') +
+        ' — click to edit (L)',
     );
-    setDot(
+    setTabStatus(
       'water',
       s.unwateredBuildings > 0 ? 'alert'
         : s.waterLoadPct > 90 ? 'warn'
         : consumers > 0 || s.waterSupplyM3 > 0 ? 'ok' : 'idle',
+      `Water: ${s.waterDemandM3} / ${s.waterSupplyM3} m³/h` +
+        (s.unwateredBuildings > 0 ? ` (${s.unwateredBuildings} dry)` : '') +
+        ' — click to edit (L)',
     );
-    setDot(
+    setTabStatus(
       'sewage',
       s.backedUpBuildings > 0 ? 'alert'
         : s.sewageLoadPct > 90 ? 'warn'
         : consumers > 0 || s.sewageCapacityM3 > 0 ? 'ok' : 'idle',
+      `Sewage: ${s.sewageDemandM3} / ${s.sewageCapacityM3} m³/h` +
+        (s.backedUpBuildings > 0 ? ` (${s.backedUpBuildings} backed up)` : '') +
+        ' — click to edit (L)',
     );
   }
 

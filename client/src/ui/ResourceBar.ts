@@ -1,10 +1,8 @@
 import {
-  evaluateCityUtilities,
   MAX_GAME_SPEED,
   type CityState,
   type GameClock,
   type ResourceState,
-  type UtilityLayer,
 } from '@cityzen/shared';
 import { LOW_HAPPINESS } from './happinessAdvice.js';
 
@@ -13,6 +11,7 @@ const SPEED_LABELS = ['Ⅱ', '1×', '2×', '3×'];
 export class ResourceBar {
   private container: HTMLDivElement;
   private moneyEl: HTMLSpanElement;
+  private treasuryButton: HTMLButtonElement;
   private popEl: HTMLSpanElement;
   private happyEl: HTMLSpanElement;
   private happinessButton: HTMLButtonElement;
@@ -24,16 +23,13 @@ export class ResourceBar {
   private demandComEl: HTMLDivElement;
   private demandIndEl: HTMLDivElement;
   private clockEl: HTMLSpanElement;
-  private utilPowerBtn: HTMLButtonElement;
-  private utilWaterBtn: HTMLButtonElement;
-  private utilSewageBtn: HTMLButtonElement;
   private speedSelect: HTMLSelectElement;
   private speedBtns: HTMLButtonElement[] = [];
   private requestedSpeed: { speed: number; expiresAt: number } | null = null;
 
   onGameSpeedChange: ((speed: number) => void) | null = null;
   onOpenAdvisor: (() => void) | null = null;
-  onSelectUtilityLayer: ((layer: UtilityLayer) => void) | null = null;
+  onOpenFinance: (() => void) | null = null;
   private unlimited = false;
 
   constructor(parent: HTMLElement) {
@@ -45,14 +41,13 @@ export class ResourceBar {
           <span class="resource-label">CityZen</span>
           <strong id="res-city-name"></strong>
         </div>
-        <div class="resource-actions"></div>
       </div>
       <div class="resource-metrics">
         <div class="resource-stats">
-          <div class="resource-item">
+          <button type="button" class="resource-item treasury-btn" title="Open City Finances">
             <span class="resource-label">Treasury</span>
             <span class="resource-value" id="res-money"></span>
-          </div>
+          </button>
           <div class="resource-item">
             <span class="resource-label">Population</span>
             <span class="resource-value" id="res-pop"></span>
@@ -61,11 +56,6 @@ export class ResourceBar {
             <span class="resource-label">Happiness</span>
             <span class="resource-value" id="res-happy"></span>
           </button>
-          <div class="resource-utilities" role="group" aria-label="Utility networks">
-            <button type="button" class="util-pill" id="res-util-power" title="Open Electricity Grid Layer"></button>
-            <button type="button" class="util-pill" id="res-util-water" title="Open Water & Hydrology Layer"></button>
-            <button type="button" class="util-pill" id="res-util-sewage" title="Open Sewage & Drainage Layer"></button>
-          </div>
         </div>
         <div class="resource-item clock-item">
           <span class="resource-value" id="res-clock"></span>
@@ -73,7 +63,7 @@ export class ResourceBar {
           <select class="speed-select" aria-label="Game speed"></select>
         </div>
       </div>
-      <span class="app-version" title="Client build version">${__APP_VERSION__}</span>
+      <div class="resource-actions"></div>
     `;
     this.actions = this.container.querySelector('.resource-actions')!;
     parent.appendChild(this.container);
@@ -99,19 +89,12 @@ export class ResourceBar {
     this.cityNameEl = this.container.querySelector('#res-city-name')!;
     this.clockEl = this.container.querySelector('#res-clock')!;
     this.moneyEl = this.container.querySelector('#res-money')!;
+    this.treasuryButton = this.container.querySelector('.treasury-btn')!;
+    this.treasuryButton.addEventListener('click', () => this.onOpenFinance?.());
     this.popEl = this.container.querySelector('#res-pop')!;
     this.happyEl = this.container.querySelector('#res-happy')!;
     this.happinessButton = this.container.querySelector('.happiness-advisor')!;
     this.happinessButton.addEventListener('click', () => this.onOpenAdvisor?.());
-    this.utilPowerBtn = this.container.querySelector('#res-util-power')!;
-    this.utilWaterBtn = this.container.querySelector('#res-util-water')!;
-    this.utilSewageBtn = this.container.querySelector('#res-util-sewage')!;
-    this.utilPowerBtn.addEventListener('click', () => this.onSelectUtilityLayer?.('power'));
-    this.utilWaterBtn.addEventListener('click', () => this.onSelectUtilityLayer?.('water'));
-    this.utilSewageBtn.addEventListener('click', () => this.onSelectUtilityLayer?.('sewage'));
-    this.utilPowerBtn.textContent = '\u26A1 0 MW';
-    this.utilWaterBtn.textContent = '\uD83D\uDCA7 0 m\u00B3';
-    this.utilSewageBtn.textContent = '\uD83D\uDEB0 0 m\u00B3';
     this.demandResEl = this.demand.querySelector('#demand-res')!;
     this.demandComEl = this.demand.querySelector('#demand-com')!;
     this.demandIndEl = this.demand.querySelector('#demand-ind')!;
@@ -163,7 +146,9 @@ export class ResourceBar {
     const money = Math.floor(resources.money);
     this.moneyEl.textContent = this.unlimited ? '\u221E' : `${money < 0 ? '−' : ''}$${Math.abs(money).toLocaleString()}`;
     this.moneyEl.classList.toggle('budget-negative', !this.unlimited && money < 0);
-    this.moneyEl.title = money < 0 ? 'In debt: city services are degrading. Raise taxes or cut upkeep.' : '';
+    this.treasuryButton.title = money < 0
+      ? 'In debt: city services are degrading. Click to open City Finances.'
+      : 'Open City Finances';
     // Flash on purchases and refunds (bigger jumps than the per-tick trickle)
     if (!this.unlimited && this.lastMoney !== null && Math.abs(money - this.lastMoney) >= 5) {
       this.flashMoney(money > this.lastMoney);
@@ -191,24 +176,6 @@ export class ResourceBar {
       this.cityNameEl.textContent = state.name;
       this.cityNameEl.title = state.name;
       if (state.clock) this.updateClock(state.clock);
-    }
-
-    const util = resources.utilities ?? (state ? evaluateCityUtilities(state).summary : undefined);
-    if (util) {
-      this.utilPowerBtn.textContent = `\u26A1 ${util.powerDemandMW.toFixed(0)}/${util.powerGenerationMW.toFixed(0)} MW`;
-      this.utilPowerBtn.dataset.alert = util.unpoweredBuildings > 0 ? 'bad' : util.brownoutBuildings > 0 ? 'warn' : 'ok';
-      this.utilPowerBtn.title = `Power: ${util.powerDemandMW.toFixed(1)} / ${util.powerGenerationMW.toFixed(1)} MW` +
-        (util.unpoweredBuildings > 0 ? ` (${util.unpoweredBuildings} unpowered)` : '') + ' — click to edit Power Layer';
-
-      this.utilWaterBtn.textContent = `\uD83D\uDCA7 ${util.waterDemandM3}/${util.waterSupplyM3} m\u00B3`;
-      this.utilWaterBtn.dataset.alert = util.unwateredBuildings > 0 ? 'bad' : util.waterLoadPct > 90 ? 'warn' : 'ok';
-      this.utilWaterBtn.title = `Water: ${util.waterDemandM3} / ${util.waterSupplyM3} m³/h` +
-        (util.unwateredBuildings > 0 ? ` (${util.unwateredBuildings} dry)` : '') + ' — click to edit Water Layer';
-
-      this.utilSewageBtn.textContent = `\uD83D\uDEB0 ${util.sewageDemandM3}/${util.sewageCapacityM3} m\u00B3`;
-      this.utilSewageBtn.dataset.alert = util.backedUpBuildings > 0 ? 'bad' : util.sewageLoadPct > 90 ? 'warn' : 'ok';
-      this.utilSewageBtn.title = `Sewage: ${util.sewageDemandM3} / ${util.sewageCapacityM3} m³/h` +
-        (util.backedUpBuildings > 0 ? ` (${util.backedUpBuildings} unconnected/backed up)` : '') + ' — click to edit Sewage Layer';
     }
 
     // Update demand bars

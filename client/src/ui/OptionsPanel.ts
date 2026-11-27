@@ -63,7 +63,10 @@ export class OptionsPanel {
     this.overlay.style.display = 'none';
     this.overlay.innerHTML = `
       <div class="options-panel">
-        <h2>Options</h2>
+        <div class="menu-header">
+          <h2>Options</h2>
+          <button type="button" class="hud-button menu-close-btn" id="opt-close" aria-label="Close Options">×</button>
+        </div>
         <div class="options-list">
           <div class="option-row">
             <label for="opt-style">City Style</label>
@@ -79,22 +82,6 @@ export class OptionsPanel {
             <span class="option-value" id="opt-skyline-val"></span>
           </div>
           <div class="option-row">
-            <label for="opt-crossings">Crosswalks</label>
-            <input type="checkbox" id="opt-crossings" />
-          </div>
-          <div class="option-row">
-            <label for="opt-trees">Trees</label>
-            <input type="checkbox" id="opt-trees" />
-          </div>
-          <div class="option-row">
-            <label for="opt-grid">Show Grid</label>
-            <input type="checkbox" id="opt-grid" />
-          </div>
-          <div class="option-row">
-            <label for="opt-cars">Show Traffic &amp; Boats</label>
-            <input type="checkbox" id="opt-cars" />
-          </div>
-          <div class="option-row">
             <label for="opt-max-cars">Max Cars</label>
             <input type="range" id="opt-max-cars" min="0" max="50" step="5" />
             <span class="option-value" id="opt-max-cars-val"></span>
@@ -104,23 +91,17 @@ export class OptionsPanel {
             <input type="range" id="opt-cam-speed" min="10" max="80" step="5" />
             <span class="option-value" id="opt-cam-speed-val"></span>
           </div>
-          <div class="option-row">
-            <label for="opt-shadows">Shadows</label>
-            <input type="checkbox" id="opt-shadows" />
+          <div class="options-toggle-grid">
+            <label class="option-toggle"><input type="checkbox" id="opt-grid" /><span>Show Grid</span></label>
+            <label class="option-toggle"><input type="checkbox" id="opt-cars" /><span>Traffic &amp; Boats</span></label>
+            <label class="option-toggle"><input type="checkbox" id="opt-crossings" /><span>Crosswalks</span></label>
+            <label class="option-toggle"><input type="checkbox" id="opt-trees" /><span>Trees</span></label>
+            <label class="option-toggle"><input type="checkbox" id="opt-shadows" /><span>Shadows</span></label>
+            <label class="option-toggle"><input type="checkbox" id="opt-post" /><span>Glow &amp; Grading</span></label>
+            <label class="option-toggle"><input type="checkbox" id="opt-unlimited" /><span>Unlimited Money</span></label>
+            <label class="option-toggle"><input type="checkbox" id="opt-sound" /><span>Sound Enabled</span></label>
           </div>
-          <div class="option-row">
-            <label for="opt-post">Glow &amp; Color Grading</label>
-            <input type="checkbox" id="opt-post" />
-          </div>
-          <div class="option-row">
-            <label for="opt-unlimited">Unlimited Money</label>
-            <input type="checkbox" id="opt-unlimited" />
-          </div>
-          <hr style="border:none;border-top:1px solid rgba(255,255,255,0.15);margin:8px 0" />
-          <div class="option-row">
-            <label for="opt-sound">Sound</label>
-            <input type="checkbox" id="opt-sound" />
-          </div>
+          <div class="menu-divider"></div>
           <div class="option-row">
             <label for="opt-master-vol">Master Volume</label>
             <input type="range" id="opt-master-vol" min="0" max="100" step="5" />
@@ -150,6 +131,7 @@ export class OptionsPanel {
       if (e.target === this.overlay) this.hide();
     });
 
+    this.overlay.querySelector('#opt-close')!.addEventListener('click', () => this.hide());
     this.overlay.querySelector('#opt-back')!.addEventListener('click', () => this.hide());
     this.overlay.querySelector('#opt-reset')!.addEventListener('click', () => {
       this.options = { ...DEFAULT_OPTIONS };

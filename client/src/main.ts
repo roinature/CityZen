@@ -293,10 +293,6 @@ const utilityLayerEditor = new UtilityLayerEditor(cityHud, {
   },
 });
 
-resourceBar.onSelectUtilityLayer = (layer) => {
-  setActiveLayer(cityRenderer.getActiveLayer() === layer ? 'surface' : layer);
-};
-
 function setActiveLayer(layer: UtilityLayer): void {
   buildMode.setActiveLayer(layer);
   const report = cityRenderer.setActiveLayer(layer);
@@ -345,6 +341,15 @@ const cityAdvisor = new CityAdvisor(uiRoot, action => {
   }
 });
 
+const toggleFinancePanel = () => {
+  if (!cityState) return;
+  toolbar.close();
+  financePanel.update(cityState);
+  financePanel.toggle();
+};
+
+resourceBar.onOpenFinance = toggleFinancePanel;
+
 resourceBar.onOpenAdvisor = () => {
   if (!cityState) return;
   toolbar.close();
@@ -379,40 +384,45 @@ function refreshCityAdvisor(city: CityState): void {
   soundManager.triggerNotification();
 }
 
-function addHudAction(label: string, onClick: () => void, compactLabel?: string): HTMLButtonElement {
+interface HudActionOptions {
+  compactLabel?: string;
+  title?: string;
+  iconSvg?: string;
+  iconOnly?: boolean;
+}
+
+function addHudAction(label: string, onClick: () => void, options: HudActionOptions = {}): HTMLButtonElement {
   const button = document.createElement('button');
-  button.className = 'hud-button';
-  button.textContent = label;
-  if (compactLabel) {
-    const full = document.createElement('span');
-    full.className = 'hud-label-full';
-    full.textContent = label;
-    const compact = document.createElement('span');
-    compact.className = 'hud-label-compact';
-    compact.textContent = compactLabel;
-    button.replaceChildren(full, compact);
-    button.setAttribute('aria-label', label);
+  button.type = 'button';
+  button.className = options.iconOnly ? 'hud-button hud-icon-button' : 'hud-button';
+  button.title = options.title ?? label;
+  button.setAttribute('aria-label', label);
+
+  if (options.iconOnly && options.iconSvg) {
+    button.innerHTML = options.iconSvg;
+  } else if (options.compactLabel || options.iconSvg) {
+    const iconHtml = options.iconSvg ? `<span class="hud-btn-icon" aria-hidden="true">${options.iconSvg}</span>` : '';
+    if (options.compactLabel) {
+      button.innerHTML = `${iconHtml}<span class="hud-label-full">${label}</span><span class="hud-label-compact">${options.compactLabel}</span>`;
+    } else {
+      button.innerHTML = `${iconHtml}<span>${label}</span>`;
+    }
+  } else {
+    button.textContent = label;
   }
+
   button.addEventListener('click', onClick);
   resourceBar.actions.appendChild(button);
   return button;
 }
 
-addHudAction('View', () => {
-  footerIndicator.toast(`${CAMERA_VIEWS[optionsPanel.nextCameraView()].label} view`);
-});
-addHudAction('Finance', () => {
-  if (!cityState) return;
-  toolbar.close();
-  financePanel.update(cityState);
-  financePanel.toggle();
-});
-addHudAction('City Needs', () => {
+addHudAction('Finance', toggleFinancePanel, { title: 'City Finances & Loans' });
+addHudAction('Needs', () => {
   if (!cityState) return;
   toolbar.close();
   if (cityState.resources.populationSummary) maslowPanel.update(cityState.resources.populationSummary);
   maslowPanel.toggle();
-}, 'Needs');
+}, { title: 'Citizen Needs (Maslow Pyramid)' });
 // --- Drive mode: take a car through the city ---
 // Drive → click a spot on the map → the car starts on the nearest road there.
 const driveRaycaster = new GridRaycaster(canvas);
@@ -456,13 +466,35 @@ function toggleDriving(): void {
   setDrivePicking(true);
   footerIndicator.toast('Click a road on the map to start driving', 4000);
 }
-const driveButton = addHudAction('Drive', toggleDriving);
+const driveButton = addHudAction('Drive', toggleDriving, { title: 'Drive through the city (C)' });
 driveButton.setAttribute('aria-pressed', 'false');
 driveMode.onExit = () => driveButton.setAttribute('aria-pressed', 'false');
 
+addHudAction('Switch camera view', () => {
+  footerIndicator.toast(`${CAMERA_VIEWS[optionsPanel.nextCameraView()].label} view`);
+}, {
+  iconOnly: true,
+  title: 'Switch camera view (V)',
+  iconSvg: '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2 14 5.2v5.6L8 14 2 10.8V5.2L8 2Z"/><path d="M2 5.2 8 8.4l6-3.2M8 8.4V14"/></svg>',
+});
+
+const nightButton = addHudAction('Night View', () => {
+  isNight = !isNight;
+  lighting.setNight(isNight);
+  sceneManager.setDayNight(isNight);
+  boatManager.setNight(isNight);
+  nightButton.setAttribute('aria-pressed', String(isNight));
+}, {
+  iconOnly: true,
+  title: 'Toggle Day / Night View',
+  iconSvg: '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 9.8A5.8 5.8 0 0 1 6.2 2.5a5.8 5.8 0 1 0 7.3 7.3Z"/></svg>',
+});
+nightButton.setAttribute('aria-pressed', 'false');
+
 const readOnlyPill = document.createElement('span');
 readOnlyPill.className = 'hud-readonly-pill';
-readOnlyPill.textContent = 'Read-Only · Owner offline';
+readOnlyPill.textContent = 'Read-Only';
+readOnlyPill.title = 'Read-only view — city owner is offline';
 readOnlyPill.hidden = true;
 resourceBar.actions.appendChild(readOnlyPill);
 
@@ -496,17 +528,11 @@ function shareWorldInvite(): void {
 }
 
 if (P2P_WORLD) {
-  addHudAction('Invite Friends', shareWorldInvite, 'Invite');
+  addHudAction('Invite', shareWorldInvite, {
+    title: 'Invite friends to this Earth',
+    iconSvg: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="3.5" r="2"/><circle cx="4" cy="8" r="2"/><circle cx="12" cy="12.5" r="2"/><path d="M5.8 7l4.4-2.5M5.8 9l4.4 2.5"/></svg>',
+  });
 }
-
-const nightButton = addHudAction('Night View', () => {
-  isNight = !isNight;
-  lighting.setNight(isNight);
-  sceneManager.setDayNight(isNight);
-  boatManager.setNight(isNight);
-  nightButton.setAttribute('aria-pressed', String(isNight));
-}, 'Night');
-nightButton.setAttribute('aria-pressed', 'false');
 
 // --- Session ---
 let currentPlayerName = 'Player';
@@ -899,6 +925,7 @@ const gameMenu = new GameMenu(uiRoot, {
     }
     if (cityState) townPlanner.show(cityState);
   },
+  onInvite: P2P_WORLD ? shareWorldInvite : undefined,
   onExportBackup: P2P_WORLD ? async () => {
     if (!gameClient.exportBackup) return;
     const json = await gameClient.exportBackup();
@@ -983,6 +1010,9 @@ addHudAction('Menu', () => {
   if (!cityState) return;
   toolbar.close();
   gameMenu.show();
+}, {
+  title: 'Game Menu (Esc)',
+  iconSvg: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/></svg>',
 });
 
 // --- ESC key handler ---

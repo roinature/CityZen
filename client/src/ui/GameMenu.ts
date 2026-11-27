@@ -8,6 +8,7 @@ export interface GameMenuCallbacks {
   onEndGame: () => void;
   onOptions: () => void;
   onPlanTown: () => void;
+  onInvite?: () => void;
   onResume: () => void;
   onExportBackup?: () => void | Promise<void>;
   onImportBackup?: (rawJson: string) => void | Promise<void>;
@@ -20,6 +21,7 @@ export class GameMenu {
   private statusEl: HTMLDivElement;
   private menuPanel: HTMLDivElement;
   private loadPanel: HTMLDivElement;
+  private confirmingAction: 'restart' | 'end' | null = null;
 
   constructor(parent: HTMLElement, callbacks: GameMenuCallbacks) {
     this.callbacks = callbacks;
@@ -29,29 +31,44 @@ export class GameMenu {
     this.overlay.style.display = 'none';
     this.overlay.innerHTML = `
       <div class="menu-panel" id="menu-main-panel">
-        <h2>Menu</h2>
+        <div class="menu-header">
+          <h2>Menu</h2>
+          <button type="button" class="hud-button menu-close-btn" data-action="resume" aria-label="Resume Game">×</button>
+        </div>
         <div class="menu-status" id="menu-status"></div>
         <div class="menu-buttons">
-          <button class="menu-btn" data-action="resume">Resume Game</button>
-          <button class="menu-btn" data-action="save">Save Game</button>
-          <button class="menu-btn" data-action="load">Load Game</button>
-          <button class="menu-btn" data-action="plan">Town Planner</button>
-          <button class="menu-btn" data-action="options">Options</button>
-          ${callbacks.onExportBackup ? '<button class="menu-btn" data-action="export-backup">Export Backup (.json)</button>' : ''}
-          ${callbacks.onImportBackup ? '<button class="menu-btn" data-action="import-backup">Import Backup</button>' : ''}
+          <button class="menu-btn menu-btn-primary" data-action="resume">Resume Game</button>
+          <div class="menu-grid">
+            <button class="menu-btn" data-action="save">Save Game</button>
+            <button class="menu-btn" data-action="load">Load City</button>
+            <button class="menu-btn" data-action="plan">Town Planner</button>
+            <button class="menu-btn" data-action="options">Options</button>
+            ${callbacks.onExportBackup ? '<button class="menu-btn" data-action="export-backup">Export Backup</button>' : ''}
+            ${callbacks.onImportBackup ? '<button class="menu-btn" data-action="import-backup">Import Backup</button>' : ''}
+          </div>
+          ${callbacks.onInvite ? '<button class="menu-btn" data-action="invite">Invite Friends</button>' : ''}
           ${callbacks.isP2P ? '' : '<button class="menu-btn" data-action="connect-x" style="background-color: #000; color: #fff;">Connect X</button>'}
-          <button class="menu-btn" data-action="restart">Restart City</button>
-          <button class="menu-btn menu-btn-danger" data-action="end">End Game</button>
+          <div class="menu-divider"></div>
+          <div class="menu-grid menu-danger-row">
+            <button class="menu-btn menu-btn-danger" data-action="restart">Restart City</button>
+            <button class="menu-btn menu-btn-danger" data-action="end">Exit to Earth</button>
+          </div>
         </div>
-        <div class="menu-hint">Press ESC to close</div>
+        <div class="menu-footer">
+          <span class="app-version" title="Client build version">${__APP_VERSION__}</span>
+          <span class="menu-hint">ESC to close</span>
+        </div>
       </div>
       <div class="menu-panel load-panel" id="menu-load-panel" style="display:none">
-        <h2>Load City</h2>
+        <div class="menu-header">
+          <h2>Load City</h2>
+          <button type="button" class="hud-button menu-close-btn" id="load-close-btn" aria-label="Close">×</button>
+        </div>
         <div class="load-city-list" id="load-city-list">
           <div class="load-loading">Loading...</div>
         </div>
-        <div style="margin-top:16px">
-          <button class="menu-btn" id="load-back-btn">Back</button>
+        <div style="margin-top:12px">
+          <button class="menu-btn" id="load-back-btn" style="width:100%">Back</button>
         </div>
       </div>
     `;
@@ -65,6 +82,7 @@ export class GameMenu {
       this.loadPanel.style.display = 'none';
       this.menuPanel.style.display = '';
     });
+    this.overlay.querySelector('#load-close-btn')!.addEventListener('click', () => this.hide());
 
     // Click outside panel to close
     this.overlay.addEventListener('click', (e) => {
@@ -72,26 +90,31 @@ export class GameMenu {
     });
 
     // Button handlers
-    this.overlay.querySelectorAll('.menu-btn').forEach((btn) => {
+    this.overlay.querySelectorAll('[data-action]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const action = (btn as HTMLElement).dataset.action;
+        if (action !== 'restart' && action !== 'end') {
+          this.resetConfirmations();
+        }
         switch (action) {
           case 'resume': this.hide(); this.callbacks.onResume(); break;
           case 'save': this.callbacks.onSave(); break;
-          case 'load': this.showLoadPanel(); break;
+          case 'load': void this.showLoadPanel(); break;
           case 'plan': this.hide(); this.callbacks.onPlanTown(); break;
           case 'options': this.hide(); this.callbacks.onOptions(); break;
+          case 'invite': this.hide(); this.callbacks.onInvite?.(); break;
           case 'export-backup': void this.callbacks.onExportBackup?.(); break;
           case 'import-backup': this.promptImportBackup(); break;
           case 'connect-x': window.location.href = '/api/auth/twitter'; break;
-          case 'restart': this.handleRestart(); break;
-          case 'end': this.handleEndGame(); break;
+          case 'restart': this.handleConfirmAction('restart', 'Confirm Restart', () => this.callbacks.onRestart()); break;
+          case 'end': this.handleConfirmAction('end', 'Confirm Exit', () => this.callbacks.onEndGame()); break;
         }
       });
     });
   }
 
   show(): void {
+    this.resetConfirmations();
     this.overlay.style.display = 'flex';
     this.menuPanel.style.display = '';
     this.loadPanel.style.display = 'none';
@@ -99,6 +122,7 @@ export class GameMenu {
   }
 
   hide(): void {
+    this.resetConfirmations();
     this.overlay.style.display = 'none';
   }
 
@@ -166,47 +190,33 @@ export class GameMenu {
     input.click();
   }
 
-  private handleRestart(): void {
-    // Replace the restart button with a confirmation
-    const btn = this.overlay.querySelector('[data-action="restart"]') as HTMLButtonElement;
-    const originalText = btn.textContent;
-    btn.textContent = 'Are you sure? Click again';
-    btn.classList.add('menu-btn-confirm');
-
-    const handler = () => {
-      this.callbacks.onRestart();
-      btn.textContent = originalText;
-      btn.classList.remove('menu-btn-confirm');
-      btn.removeEventListener('click', handler);
-      this.hide();
-    };
-
-    // Replace click listener temporarily
-    btn.replaceWith(btn.cloneNode(true));
-    const newBtn = this.overlay.querySelector('[data-action="restart"]') as HTMLButtonElement;
-    newBtn.textContent = 'Are you sure? Click again';
-    newBtn.classList.add('menu-btn-confirm');
-    newBtn.addEventListener('click', () => {
-      this.callbacks.onRestart();
-      newBtn.textContent = originalText;
-      newBtn.classList.remove('menu-btn-confirm');
-      this.hide();
-    }, { once: true });
+  private resetConfirmations(): void {
+    this.confirmingAction = null;
+    const restartBtn = this.overlay.querySelector('[data-action="restart"]') as HTMLButtonElement | null;
+    if (restartBtn) {
+      restartBtn.textContent = 'Restart City';
+      restartBtn.classList.remove('menu-btn-confirm');
+    }
+    const endBtn = this.overlay.querySelector('[data-action="end"]') as HTMLButtonElement | null;
+    if (endBtn) {
+      endBtn.textContent = 'Exit to Earth';
+      endBtn.classList.remove('menu-btn-confirm');
+    }
   }
 
-  private handleEndGame(): void {
-    const btn = this.overlay.querySelector('[data-action="end"]') as HTMLButtonElement;
-    const originalText = btn.textContent;
-
-    btn.replaceWith(btn.cloneNode(true));
-    const newBtn = this.overlay.querySelector('[data-action="end"]') as HTMLButtonElement;
-    newBtn.textContent = 'Confirm? Click again';
-    newBtn.classList.add('menu-btn-confirm');
-    newBtn.addEventListener('click', () => {
-      this.callbacks.onEndGame();
-      newBtn.textContent = originalText;
-      newBtn.classList.remove('menu-btn-confirm');
+  private handleConfirmAction(action: 'restart' | 'end', confirmLabel: string, onConfirm: () => void): void {
+    if (this.confirmingAction === action) {
+      this.resetConfirmations();
+      onConfirm();
       this.hide();
-    }, { once: true });
+      return;
+    }
+    this.resetConfirmations();
+    this.confirmingAction = action;
+    const btn = this.overlay.querySelector(`[data-action="${action}"]`) as HTMLButtonElement | null;
+    if (btn) {
+      btn.textContent = confirmLabel;
+      btn.classList.add('menu-btn-confirm');
+    }
   }
 }
