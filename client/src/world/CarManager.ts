@@ -1,7 +1,10 @@
 import * as THREE from 'three';
-import { type CityState, type PlacedBuilding, CELL_SIZE, isRoad } from '@cityzen/shared';
+import { type CityState, type PlacedBuilding, CELL_SIZE, getEffectiveSize, isRoad } from '@cityzen/shared';
 import {
+  DX,
+  DZ,
   RoadNetwork,
+  TURN_SPEED,
   isXAxis,
   movementsConflict,
   positionAt,
@@ -12,6 +15,12 @@ import {
   type Tile,
 } from './traffic/RoadNetwork.js';
 import { TrafficLights, signalFor } from './traffic/TrafficLights.js';
+import {
+  SERVICE_FLEETS,
+  SERVICE_PROFILES,
+  createServiceVehicleMesh,
+  type ServiceKind,
+} from './ServiceVehicles.js';
 
 const CAR_COLORS = [0xe53935, 0x1e88e5, 0xfdd835, 0x43a047, 0xff8f00, 0x8e24aa, 0xeceff1, 0x37474f];
 const CARS_PER_ROAD = 0.15; // one car per ~7 road tiles
@@ -67,6 +76,76 @@ interface Car {
   age: number;
   /** ≥ 0 while shrinking away. */
   leaving: number;
+  /** Set on vehicles sent out by a service building. */
+  service?: ServiceTrip;
+}
+
+interface ServiceTrip {
+  kind: ServiceKind;
+  /** Building id of the depot it returns to. */
+  home: string;
+  stopsLeft: number;
+  returning: boolean;
+  /** Seconds left parked at the current stop (≤ 0 when driving). */
+  dwell: number;
+  flashers: THREE.MeshStandardMaterial[];
+}
+
+/** A service building and the road cell its vehicles pull out onto. */
+interface Depot {
+  id: string;
+  kind: ServiceKind;
+  fleet: number;
+  tile: Tile;
+  /** Heading from the road cell into the building. */
+  side: number;
+  /** Earliest time the next vehicle may leave. */
+  next: number;
+}
+
+const MAX_SERVICE_VEHICLES = 40;
+const DRIVEWAY_SPEED = 0.9;
+const MIN_TRIP = 6;
+
+const rand = ([a, b]: readonly [number, number]): number => a + Math.random() * (b - a);
+
+/** Adds points before the start of a path (they lead into its first point). */
+function prependPoints(path: Path, pts: [number, number][], speed: number): void {
+  const xs: number[] = [], zs: number[] = [], ss: number[] = [], sp: number[] = [];
+  let s = 0;
+  const all: [number, number][] = [...pts, [path.xs[0], path.zs[0]]];
+  for (let i = 0; i < all.length - 1; i++) {
+    const len = Math.hypot(all[i + 1][0] - all[i][0], all[i + 1][1] - all[i][1]);
+    if (len < 1e-4) continue;
+    xs.push(all[i][0]); zs.push(all[i][1]); ss.push(s); sp.push(speed);
+    s += len;
+  }
+  if (!xs.length) return;
+  path.xs = [...xs, ...path.xs];
+  path.zs = [...zs, ...path.zs];
+  path.ss = [...ss, ...path.ss.map(v => v + s)];
+  path.speed = [...sp, ...path.speed];
+  path.stepS = path.stepS.map(v => v + s);
+  path.length += s;
+  for (const e of path.events) {
+    e.sEntry += s;
+    e.sExit += s;
+  }
+}
+
+/** Adds points after the end of a path. */
+function appendPoints(path: Path, pts: [number, number][], speed: number): void {
+  for (const [x, z] of pts) {
+    const k = path.xs.length - 1;
+    const len = Math.hypot(x - path.xs[k], z - path.zs[k]);
+    if (len < 1e-4) continue;
+    path.speed[k] = speed;
+    path.xs.push(x);
+    path.zs.push(z);
+    path.ss.push(path.ss[k] + len);
+    path.speed.push(speed);
+    path.length = path.ss[k] + len;
+  }
 }
 
 /** The car the player drives, as other traffic sees it. */
@@ -118,6 +197,7 @@ export class CarManager {
   private nearby: Car[] = [];
   /** Stand-in for the player's car: an obstacle that is always "waiting legitimately". */
   private player: Car | null = null;
+  private depots = new Map<string, Depot>();
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -156,6 +236,7 @@ export class CarManager {
   clear(): void {
     for (const car of this.cars) this.removeMesh(car);
     this.cars = [];
+    this.depots.clear();
     this.network = null;
     this.roadSig = '';
     this.lastBuildings = null;
@@ -182,6 +263,7 @@ export class CarManager {
     }
 
     this.adjustCarCount(net, dt);
+    this.dispatchServices(net);
     this.buildHash();
 
     // Who is in (or cleared into) which junction.
@@ -224,6 +306,18 @@ export class CarManager {
         this.cars.splice(i, 1);
       }
     }
+
+    // Light bars: sirens flash on the way out, work beacons whenever out.
+    for (const car of this.cars) {
+      const sv = car.service;
+      if (!sv || !sv.flashers.length) continue;
+      const emergency = SERVICE_PROFILES[sv.kind].emergency;
+      const on = emergency ? !sv.returning : true;
+      const tick = Math.floor(this.time * (emergency ? 7 : 2.5) + car.id);
+      sv.flashers.forEach((m, i) => {
+        m.emissiveIntensity = on && (tick + i) % 2 === 0 ? 2.2 : 0.15;
+      });
+    }
   }
 
   // ── Network ───────────────────────────────────────────────
@@ -241,12 +335,14 @@ export class CarManager {
     if (sig === this.roadSig && this.network) {
       // Lots changed (zones grew, buildings placed): refresh trip ends only.
       this.network.setEndpoints(buildings);
+      this.refreshDepots(this.network, buildings);
       return;
     }
     this.roadSig = sig;
     const net = new RoadNetwork(buildings, state.grid.length);
     this.network = net;
     this.lights.rebuild(net.junctions);
+    this.refreshDepots(net, buildings);
 
     // Keep cars whose remaining route still exists; the rest pull away.
     for (const car of this.cars) {
@@ -281,10 +377,10 @@ export class CarManager {
   private adjustCarCount(net: RoadNetwork, dt: number): void {
     const desired = Math.min(this.maxCarLimit, Math.floor(net.tiles.length * CARS_PER_ROAD));
     let active = 0;
-    for (const car of this.cars) if (car.leaving < 0) active++;
+    for (const car of this.cars) if (car.leaving < 0 && !car.service) active++;
 
     for (let i = this.cars.length - 1; i >= 0 && active > desired; i--) {
-      if (this.cars[i].leaving < 0) {
+      if (this.cars[i].leaving < 0 && !this.cars[i].service) {
         this.cars[i].leaving = 0;
         active--;
       }
@@ -380,6 +476,234 @@ export class CarManager {
       if ((car.x - x) ** 2 + (car.z - z) ** 2 < radius * radius) return true;
     }
     return false;
+  }
+
+  // ── Service vehicles ──────────────────────────────────────
+
+  /** Finds every service building and the road cell its vehicles use. */
+  private refreshDepots(net: RoadNetwork, buildings: readonly PlacedBuilding[]): void {
+    const next = new Map<string, Depot>();
+    for (const b of buildings) {
+      const cfg = SERVICE_FLEETS[b.type];
+      if (!cfg) continue;
+      const access = this.findAccess(net, b);
+      if (!access) continue;
+      const old = this.depots.get(b.id);
+      next.set(b.id, {
+        id: b.id, kind: cfg.kind, fleet: cfg.fleet,
+        tile: access.tile, side: access.side,
+        next: old?.next ?? this.time + 1 + Math.random() * 6,
+      });
+    }
+    this.depots = next;
+  }
+
+  /** The road cell fronting a building closest to its middle, with the heading into the building. */
+  private findAccess(net: RoadNetwork, b: PlacedBuilding): { tile: Tile; side: number } | null {
+    const { w, d } = getEffectiveSize(b.type, b.orientation);
+    const cx = b.position.x + w / 2, cz = b.position.z + d / 2;
+    let best: { tile: Tile; side: number } | null = null;
+    let bestScore = Infinity;
+    const visit = (x: number, z: number, side: number) => {
+      const t = net.tileAt(x, z);
+      if (!t || t.roundabout || t.junction || !t.links) return;
+      const score = Math.hypot(x + 0.5 - cx, z + 0.5 - cz);
+      if (score < bestScore) {
+        bestScore = score;
+        best = { tile: t, side };
+      }
+    };
+    for (let dx = 0; dx < w; dx++) {
+      visit(b.position.x + dx, b.position.z - 1, 1);
+      visit(b.position.x + dx, b.position.z + d, 3);
+    }
+    for (let dz = 0; dz < d; dz++) {
+      visit(b.position.x - 1, b.position.z + dz, 0);
+      visit(b.position.x + w, b.position.z + dz, 2);
+    }
+    return best;
+  }
+
+  /** Short drive between the road lane and the inside of the depot. */
+  private driveway(depot: Depot, inbound: boolean, travelDir: number): [number, number][] {
+    const { tile, side } = depot;
+    const cx = tile.x + 0.5, cz = tile.z + 0.5;
+    // Angle the drive towards the direction of travel so it reads as a turn.
+    const lead = inbound ? 0.18 : -0.18;
+    const edge: [number, number] = [
+      cx + DX[side] * 0.5 + DX[travelDir] * lead,
+      cz + DZ[side] * 0.5 + DZ[travelDir] * lead,
+    ];
+    const inside: [number, number] = [cx + DX[side] * 0.95, cz + DZ[side] * 0.95];
+    return inbound ? [edge, inside] : [inside, edge];
+  }
+
+  private pickStop(net: RoadNetwork, from: Tile): Tile | null {
+    const candidates = net.endpoints;
+    if (!candidates.length) return null;
+    let fallback: Tile | null = null;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const t = pick(candidates);
+      if (t === from) continue;
+      fallback ??= t;
+      if (Math.abs(t.x - from.x) + Math.abs(t.z - from.z) >= MIN_TRIP) return t;
+    }
+    return fallback;
+  }
+
+  private dispatchServices(net: RoadNetwork): void {
+    if (!this.depots.size) return;
+    const out = new Map<string, number>();
+    let total = 0;
+    for (const car of this.cars) {
+      if (!car.service) continue;
+      out.set(car.service.home, (out.get(car.service.home) ?? 0) + 1);
+      total++;
+    }
+    for (const depot of this.depots.values()) {
+      if (total >= MAX_SERVICE_VEHICLES) return;
+      if (this.time < depot.next || (out.get(depot.id) ?? 0) >= depot.fleet) continue;
+      const car = this.spawnService(net, depot);
+      if (!car) {
+        depot.next = this.time + 2;
+        continue;
+      }
+      this.cars.push(car);
+      total++;
+      // Stagger the rest of the fleet.
+      depot.next = this.time + 3 + Math.random() * 6;
+    }
+  }
+
+  /** Plans a route from `start` and builds its path, or null when unreachable. */
+  private planTrip(
+    net: RoadNetwork, start: Tile, startDirs: readonly number[], goal: Tile,
+  ): { steps: { tile: Tile; dir: number }[]; path: Path } | null {
+    let steps = net.findRoute(start, startDirs, { tile: goal, exitDir: -1 });
+    if ((!steps || steps.length < 2) && startDirs.length < 4) {
+      steps = net.findRoute(start, [0, 1, 2, 3], { tile: goal, exitDir: -1 });
+    }
+    if (!steps || steps.length < 2) return null;
+    steps[0] = { tile: steps[0].tile, dir: steps[1].dir };
+    const path = net.buildPath({ steps, entering: false, exitDir: -1 }, Math.random() < 0.5 ? 0 : 1);
+    if (path.xs.length < 2) return null;
+    return { steps, path };
+  }
+
+  private spawnService(net: RoadNetwork, depot: Depot): Car | null {
+    const profile = SERVICE_PROFILES[depot.kind];
+    const goal = this.pickStop(net, depot.tile);
+    if (!goal) return null;
+    const trip = this.planTrip(net, depot.tile, [0, 1, 2, 3], goal);
+    if (!trip) return null;
+    const { steps, path } = trip;
+    if (this.isOccupied(path.xs[0], path.zs[0], SPAWN_CLEARANCE)) return null;
+    for (let k = 0; k < path.speed.length; k++) path.speed[k] *= profile.speed;
+    prependPoints(path, this.driveway(depot, false, steps[0].dir), DRIVEWAY_SPEED);
+
+    const { group, flashers } = createServiceVehicleMesh(depot.kind);
+    this.scene.add(group);
+    const car: Car = {
+      id: this.nextId++,
+      mesh: group,
+      tiles: steps.map(st => st.tile),
+      dirs: steps.map(st => st.dir),
+      finalDir: steps[steps.length - 1].dir,
+      exiting: false,
+      // Emerges from the building at full size rather than popping in.
+      entering: true,
+      path,
+      s: 0,
+      v: 0,
+      seg: 0,
+      x: path.xs[0],
+      z: path.zs[0],
+      yaw: 0,
+      ev: 0,
+      permitted: false,
+      movement: null,
+      leader: null,
+      leaderGap: Infinity,
+      controlGap: Infinity,
+      ignoreLeader: false,
+      waitMemo: 0,
+      stuck: 0,
+      stuckTotal: 0,
+      ghost: 0,
+      age: 0,
+      leaving: -1,
+      service: {
+        kind: depot.kind,
+        home: depot.id,
+        stopsLeft: Math.round(rand(profile.stops)),
+        returning: false,
+        dwell: 0,
+        flashers,
+      },
+    };
+    this.place(car);
+    return car;
+  }
+
+  /** After a stop: on to the next one, or back to base. Returns false if the vehicle should leave. */
+  private continueService(car: Car): boolean {
+    const sv = car.service!;
+    const net = this.network;
+    const last = car.tiles[car.tiles.length - 1];
+    const start = last && net ? net.tileAt(last.x, last.z) : undefined;
+    if (!net || !start) return false;
+    const profile = SERVICE_PROFILES[sv.kind];
+    const lastDir = car.dirs[car.dirs.length - 1];
+
+    sv.stopsLeft--;
+    let trip: ReturnType<CarManager['planTrip']> = null;
+    let depot: Depot | undefined;
+    if (sv.stopsLeft > 0) {
+      const goal = this.pickStop(net, start);
+      if (goal) trip = this.planTrip(net, start, [lastDir], goal);
+      if (trip) for (let k = 0; k < trip.path.speed.length; k++) trip.path.speed[k] *= profile.speed;
+    }
+    if (!trip) {
+      depot = this.depots.get(sv.home);
+      if (!depot) return false;
+      sv.returning = true;
+      sv.stopsLeft = 0;
+      if (depot.tile === start) {
+        // Already outside: just pull in.
+        const path: Path = {
+          xs: [car.x], zs: [car.z], ss: [0], speed: [DRIVEWAY_SPEED],
+          stepS: [0], length: 0, events: [],
+        };
+        appendPoints(path, this.driveway(depot, true, lastDir), DRIVEWAY_SPEED);
+        if (path.xs.length < 2) return false;
+        this.setPath(car, path, [start], [lastDir]);
+        return true;
+      }
+      trip = this.planTrip(net, start, [lastDir], depot.tile);
+      if (!trip) return false;
+    }
+
+    const { steps, path } = trip;
+    if (Math.hypot(path.xs[0] - car.x, path.zs[0] - car.z) > 1e-3) {
+      prependPoints(path, [[car.x, car.z]], Math.min(TURN_SPEED, path.speed[0]));
+    }
+    if (depot) appendPoints(path, this.driveway(depot, true, steps[steps.length - 1].dir), DRIVEWAY_SPEED);
+    this.setPath(car, path, steps.map(st => st.tile), steps.map(st => st.dir));
+    return true;
+  }
+
+  private setPath(car: Car, path: Path, tiles: Tile[], dirs: number[]): void {
+    car.path = path;
+    car.tiles = tiles;
+    car.dirs = dirs;
+    car.finalDir = dirs[dirs.length - 1];
+    car.s = 0;
+    car.seg = 0;
+    car.ev = 0;
+    car.permitted = false;
+    car.movement = null;
+    car.stuck = 0;
+    car.stuckTotal = 0;
   }
 
   // ── Perception ────────────────────────────────────────────
@@ -585,6 +909,16 @@ export class CarManager {
 
   /** Advances one car; returns false once it should be removed. */
   private move(car: Car, dt: number): boolean {
+    const sv = car.service;
+    if (sv && sv.dwell > 0 && car.leaving < 0) {
+      // Parked at a stop: lights keep flashing, traffic finds its way round.
+      car.v = 0;
+      car.age += dt;
+      sv.dwell -= dt;
+      if (sv.dwell <= 0 && !this.continueService(car)) car.leaving = 0;
+      this.place(car, dt);
+      return true;
+    }
     const path = car.path;
     car.age += dt;
     car.ghost -= dt;
@@ -622,7 +956,17 @@ export class CarManager {
 
     if (car.s >= path.length - 1e-3) {
       if (car.exiting) return false;
-      if (car.leaving < 0) car.leaving = 0;
+      if (sv && car.leaving < 0) {
+        if (sv.returning) {
+          // Back inside: rest before the next call-out.
+          const depot = this.depots.get(sv.home);
+          if (depot) depot.next = Math.max(depot.next, this.time + rand(SERVICE_PROFILES[sv.kind].rest));
+          car.leaving = 0;
+        } else {
+          sv.dwell = rand(SERVICE_PROFILES[sv.kind].dwell);
+          car.v = 0;
+        }
+      } else if (car.leaving < 0) car.leaving = 0;
     }
 
     this.place(car, dt);
@@ -670,7 +1014,7 @@ export class CarManager {
 let contactShadowTexture: THREE.Texture | null = null;
 
 /** A soft dark oval under the car, shared texture, own geometry and material (cars dispose theirs). */
-function createContactShadow(): THREE.Mesh {
+export function createContactShadow(): THREE.Mesh {
   if (!contactShadowTexture) {
     const canvas = document.createElement('canvas');
     canvas.width = canvas.height = 64;
