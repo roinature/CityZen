@@ -47,13 +47,54 @@ import { FooterIndicator } from './ui/FooterIndicator.js';
 import { CompassIndicator } from './ui/CompassIndicator.js';
 import { ZoomControl } from './ui/ZoomControl.js';
 import { MessageManager } from './ui/MessageManager.js';
-import { GameClient } from './network/GameClient.js';
+import { GameClient, type GameCallbacks } from './network/GameClient.js';
+import type { CityConnection } from './network/CityConnection.js';
+import { P2PGameClient } from './network/p2p/P2PGameClient.js';
 import { SoundManager } from './audio/SoundManager.js';
 import { TownPlannerPanel } from './ui/TownPlannerPanel.js';
 import { CityLoading } from './ui/CityLoading.js';
 
 const SERVER_URL = window.location.origin;
-const SESSION_KEY = 'cityzen_session';
+const LAST_WORLD_KEY = 'cityzen_last_p2p_world';
+
+/**
+ * Distributed peer-to-peer mode is the default: each player owns and stores
+ * their own city locally in IndexedDB and connects to friends in the same
+ * `?world=<id>` over WebRTC. Pass `?server` to use the legacy central server.
+ */
+function resolveP2PWorld(): string | null {
+  const params = new URLSearchParams(window.location.search);
+  if (params.has('server')) return null;
+
+  const valid = (value: string | null): string | null =>
+    value && /^[\w-]{4,64}$/.test(value) ? value : null;
+
+  let world = valid(params.get('world')) ?? valid(params.get('room'));
+  const hadLegacyRoom = !params.get('world') && Boolean(params.get('room'));
+  const hadLegacyP2P = params.has('p2p');
+
+  if (!world) {
+    world = valid(localStorage.getItem(LAST_WORLD_KEY)) ?? crypto.randomUUID().slice(0, 8);
+  }
+  localStorage.setItem(LAST_WORLD_KEY, world);
+
+  if (params.get('world') !== world || hadLegacyRoom || hadLegacyP2P) {
+    params.delete('room');
+    params.delete('p2p');
+    params.set('world', world);
+    window.history.replaceState({}, '', `${window.location.pathname}?${params}`);
+  }
+  return world;
+}
+const P2P_WORLD = resolveP2PWorld();
+
+function connect(callbacks: GameCallbacks): Promise<CityConnection> {
+  return P2P_WORLD
+    ? P2PGameClient.create(P2P_WORLD, playerId, callbacks)
+    : GameClient.create(SERVER_URL, callbacks);
+}
+// Each P2P world remembers its own last visited city separately.
+const SESSION_KEY = P2P_WORLD ? `cityzen_session_p2p_${P2P_WORLD}` : 'cityzen_session';
 const PLAYER_ID_KEY = 'cityzen_player_id';
 
 interface SavedSession {
@@ -93,6 +134,7 @@ function getOrCreatePlayerId(): string {
 // --- State ---
 let cityState: CityState | null = null;
 let worldState: WorldState | null = null;
+let isReadOnlyCity = false;
 const playerId = getOrCreatePlayerId();
 
 // --- Scene setup ---
@@ -186,6 +228,10 @@ const messageManager = new MessageManager(cityHud, {
   }
 });
 const toolbar = new Toolbar(uiRoot, resourceBar.demand, (type: BuildingType, density?: ZoneDensity) => {
+  if (isReadOnlyCity) {
+    footerIndicator.toast('Read-only view — owner is offline', 2500);
+    return;
+  }
   if (buildMode.getSelectedType() === type && !density) {
     setToolMode('pointer');
     return;
@@ -351,6 +397,56 @@ const driveButton = addHudAction('Drive', toggleDriving);
 driveButton.setAttribute('aria-pressed', 'false');
 driveMode.onExit = () => driveButton.setAttribute('aria-pressed', 'false');
 
+const readOnlyPill = document.createElement('span');
+readOnlyPill.className = 'hud-readonly-pill';
+readOnlyPill.textContent = 'Read-Only · Owner offline';
+readOnlyPill.hidden = true;
+resourceBar.actions.appendChild(readOnlyPill);
+
+function setReadOnlyCity(readOnly: boolean, reason?: string): void {
+  const wasReadOnly = isReadOnlyCity;
+  isReadOnlyCity = readOnly;
+  document.body.classList.toggle('read-only-city', readOnly);
+  readOnlyPill.hidden = !readOnly;
+  if (readOnly) {
+    setToolMode('pointer');
+    toolbar.close();
+    financePanel.hide();
+    townPlanner.hide();
+    if (reason) footerIndicator.toast(reason, 5000);
+  } else if (wasReadOnly) {
+    footerIndicator.toast('Owner reconnected — live co-building resumed!', 3500);
+  }
+}
+
+function shareWorldInvite(): void {
+  if (!P2P_WORLD) return;
+  const link = `${window.location.origin}${window.location.pathname}?world=${P2P_WORLD}`;
+  if (typeof navigator.share === 'function') {
+    navigator.share({
+      title: 'CityZen Earth',
+      text: 'Join my Earth world in CityZen to build side by side!',
+      url: link,
+    }).catch((err: unknown) => {
+      if ((err as { name?: string })?.name === 'AbortError') return;
+      copyInviteFallback(link);
+    });
+    return;
+  }
+  copyInviteFallback(link);
+}
+
+function copyInviteFallback(link: string): void {
+  navigator.clipboard.writeText(link).then(
+    () => footerIndicator.toast('World invite link copied. Friends who open it share this Earth.', 4000),
+    () => footerIndicator.toast(`Share this link: ${link}`, 8000),
+  );
+}
+
+if (P2P_WORLD) {
+  addHudAction('Invite Friends', shareWorldInvite, 'Invite');
+}
+
 const nightButton = addHudAction('Night View', () => {
   isNight = !isNight;
   lighting.setNight(isNight);
@@ -363,9 +459,9 @@ nightButton.setAttribute('aria-pressed', 'false');
 let currentPlayerName = 'Player';
 
 // --- Network ---
-let gameClient!: GameClient;
+let gameClient!: CityConnection;
 
-GameClient.create(SERVER_URL, {
+connect({
   onWorldState: (world) => {
     worldState = world;
     worldMap.updateWorld(world);
@@ -532,6 +628,9 @@ GameClient.create(SERVER_URL, {
         footerIndicator.toast(error.message, 4000);
       }
     }
+    if (error.code === 'SITE_CONFLICT') {
+      footerIndicator.toast(error.message, 7000);
+    }
     if (error.code === 'NOT_FOUND') {
       clearSession();
       cityState = null;
@@ -539,6 +638,10 @@ GameClient.create(SERVER_URL, {
       footerIndicator.toast('That city no longer exists', 4000);
       showWorldMap();
     }
+  },
+
+  onReadOnlyChange: (readOnly, reason) => {
+    setReadOnlyCity(readOnly, reason);
   },
 
   onSaved: () => {
@@ -556,16 +659,21 @@ GameClient.create(SERVER_URL, {
   gameClient = client;
 
   // Check for deep-link: ?cityId=xxx
-  const urlCityId = new URLSearchParams(window.location.search).get('cityId');
+  const urlParams = new URLSearchParams(window.location.search);
+  const urlCityId = urlParams.get('cityId');
   if (urlCityId) {
-    // Clear the query param from URL so refreshes don't re-trigger
-    window.history.replaceState({}, '', window.location.pathname);
+    // Clear only cityId so refreshes preserve ?world=<id>
+    urlParams.delete('cityId');
+    const query = urlParams.toString();
+    window.history.replaceState({}, '', query ? `${window.location.pathname}?${query}` : window.location.pathname);
     beginCityLoad('Loading city…');
     gameClient.joinCity(urlCityId, currentPlayerName, playerId);
   } else {
     // Auto-rejoin saved session or show lobby
     const savedSession = loadSession();
-    if (savedSession) {
+    // In a peer-to-peer world the saved city may not be cached locally yet.
+    const sessionCityExists = !P2P_WORLD || worldState?.cities.some(c => c.cityId === savedSession?.cityId);
+    if (savedSession && sessionCityExists) {
       currentPlayerName = savedSession.playerName;
       beginCityLoad('Loading your city…');
       gameClient.joinCity(savedSession.cityId, savedSession.playerName, playerId);
@@ -576,18 +684,22 @@ GameClient.create(SERVER_URL, {
 // --- Build mode wiring ---
 // --- Game speed wiring ---
 resourceBar.onGameSpeedChange = (speed) => {
+  if (isReadOnlyCity) return;
   gameClient.setGameSpeed(speed, playerId);
 };
 
 buildMode.onPlace = (pos, type, density, orientation) => {
+  if (isReadOnlyCity) return;
   gameClient.placeBuilding(pos, type, playerId, density, orientation);
 };
 
 buildMode.onPaint = (stroke) => {
+  if (isReadOnlyCity) return;
   void gameClient.paintBuildings(stroke, playerId);
 };
 
 buildMode.onDemolish = (pos) => {
+  if (isReadOnlyCity) return;
   gameClient.demolish(pos, playerId);
 };
 
@@ -653,11 +765,13 @@ const lobby = new Lobby(uiRoot, {
 
 // --- World Map ---
 const worldMap = new WorldMap(uiRoot, {
+  playerId,
+  onInvite: P2P_WORLD ? shareWorldInvite : undefined,
   onClaimPlot: (siteId, cityName) => {
     beginCityLoad(`Founding ${cityName}…`);
     gameClient.claimPlot(siteId, cityName, currentPlayerName, playerId).catch((err) => {
       console.error('Claim failed:', err);
-      abortCityLoad('Could not reach the server');
+      abortCityLoad('Could not reach the host');
     });
   },
   onEnterCity: (cityId) => {
@@ -665,13 +779,14 @@ const worldMap = new WorldMap(uiRoot, {
     beginCityLoad(`Loading ${name}…`);
     gameClient.joinCity(cityId, currentPlayerName, playerId).catch((err) => {
       console.error('Join failed:', err);
-      abortCityLoad('Could not reach the server');
+      abortCityLoad('Could not load city');
     });
   },
 });
 
 // --- Game Menu ---
 const gameMenu = new GameMenu(uiRoot, {
+  isP2P: Boolean(P2P_WORLD),
   onSave: () => {
     gameClient.save(playerId);
     gameMenu.showStatus('Saving...');
@@ -684,14 +799,17 @@ const gameMenu = new GameMenu(uiRoot, {
       await gameClient.joinCity(cityId, currentPlayerName, playerId);
     } catch (err) {
       console.error('Load city failed:', err);
-      abortCityLoad('Could not reach the server');
+      abortCityLoad('Could not load city');
     }
   },
   fetchCities: async () => {
-    const res = await fetch(`${SERVER_URL}/api/cities`);
-    return res.json();
+    return gameClient.listCities();
   },
   onRestart: () => {
+    if (isReadOnlyCity) {
+      footerIndicator.toast('Read-only view — cannot restart', 2500);
+      return;
+    }
     driveMode.stop();
     cityRenderer.clear();
     edgeRoadIndicator.clear();
@@ -701,6 +819,7 @@ const gameMenu = new GameMenu(uiRoot, {
   onEndGame: async () => {
     await gameClient.save(playerId);
     await gameClient.leave(playerId);
+    setReadOnlyCity(false);
     cityState = null;
     cityRenderer.clear();
     edgeRoadIndicator.clear();
@@ -712,8 +831,39 @@ const gameMenu = new GameMenu(uiRoot, {
     optionsPanel.show();
   },
   onPlanTown: () => {
+    if (isReadOnlyCity) {
+      footerIndicator.toast('Read-only view — Town Planner unavailable', 2500);
+      return;
+    }
     if (cityState) townPlanner.show(cityState);
   },
+  onExportBackup: P2P_WORLD ? async () => {
+    if (!gameClient.exportBackup) return;
+    const json = await gameClient.exportBackup();
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `cityzen-${P2P_WORLD}-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    gameMenu.showStatus('Backup downloaded!');
+  } : undefined,
+  onImportBackup: P2P_WORLD ? async (rawJson: string) => {
+    if (!gameClient.importBackup) return;
+    const ok = await gameClient.importBackup(rawJson);
+    if (!ok) {
+      gameMenu.showStatus('Invalid backup file');
+      return;
+    }
+    gameMenu.showStatus('Backup restored!');
+    await gameClient.leave(playerId);
+    setReadOnlyCity(false);
+    cityState = null;
+    clearSession();
+    gameMenu.hide();
+    showWorldMap();
+  } : undefined,
   onResume: () => {
     // Menu closes itself
   },
@@ -812,6 +962,7 @@ window.addEventListener('keydown', (e) => {
   if (driveMode.isActive() && e.code !== 'Digit1' && e.code !== 'Digit2' && e.code !== 'Digit3') return;
 
   if (e.code === 'Space' && !el?.closest('button, select')) {
+    if (isReadOnlyCity) return;
     e.preventDefault();
     const current = cityState.clock?.speed ?? 1;
     if (current > 0) {
@@ -821,10 +972,12 @@ window.addEventListener('keydown', (e) => {
       gameClient.setGameSpeed(speedBeforePause, playerId);
     }
   } else if (e.code === 'Digit1' || e.code === 'Digit2' || e.code === 'Digit3') {
+    if (isReadOnlyCity) return;
     gameClient.setGameSpeed(Number(e.code.slice(-1)), playerId);
   } else if (e.code === 'KeyV') {
     footerIndicator.toast(`${CAMERA_VIEWS[optionsPanel.nextCameraView()].label} view`);
   } else if (e.code === 'KeyB') {
+    if (isReadOnlyCity) return;
     setToolMode(buildMode.getToolMode() === 'bulldoze' ? 'pointer' : 'bulldoze');
   }
 });
@@ -1030,4 +1183,15 @@ function generateResourceMessages(previousState: any, currentResources: any, cit
     messageManager.addMessage(message);
     soundManager.triggerNotification();
   }
+}
+
+// Dev-only handle for poking the game from the console or browser tests.
+if (import.meta.env.DEV) {
+  Object.assign(window, {
+    __cityzen: {
+      get client() { return gameClient; },
+      get city() { return cityState; },
+      get world() { return worldState; },
+    },
+  });
 }

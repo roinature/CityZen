@@ -2,8 +2,10 @@ import { EARTH_SITES, type WorldState, type SiteId } from '@cityzen/shared';
 import { drawSiteMap } from '../world/SiteMap.js';
 
 interface WorldMapCallbacks {
+  playerId?: string;
   onClaimPlot(siteId: string, cityName: string): void;
   onEnterCity(cityId: string): void;
+  onInvite?: () => void;
 }
 
 export class WorldMap {
@@ -21,7 +23,10 @@ export class WorldMap {
     this.overlay.style.display = 'none';
     this.overlay.innerHTML = `
       <section class="worldmap-panel earth-panel">
-        <h2>Earth</h2>
+        <div class="worldmap-header-row">
+          <h2>Earth</h2>
+          <button type="button" class="worldmap-invite-btn" hidden>Invite Friends</button>
+        </div>
         <p class="worldmap-subtitle">Choose a site to found your city or enter an existing city.</p>
         <div class="earth-filters">
           <label>Continent<select class="continent"></select></label>
@@ -37,6 +42,11 @@ export class WorldMap {
         Elevation: USGS and NOAA via <a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noreferrer">Mapzen Terrain Tiles</a></small>
       </section>`;
     parent.append(this.overlay);
+    const inviteBtn = this.overlay.querySelector('.worldmap-invite-btn') as HTMLButtonElement;
+    if (callbacks.onInvite) {
+      inviteBtn.hidden = false;
+      inviteBtn.onclick = () => callbacks.onInvite?.();
+    }
     this.sites = this.overlay.querySelector('.earth-sites')!;
     this.form = this.overlay.querySelector('form')!;
     this.cityName = this.form.querySelector('input')!;
@@ -60,6 +70,20 @@ export class WorldMap {
     this.render();
   }
 
+  private formatCityBadge(city: NonNullable<WorldState['cities'][number]>): { label: string; kind: string } | null {
+    if (city.online === undefined) return null;
+    if (this.callbacks.playerId && city.ownerId === this.callbacks.playerId) {
+      return { label: 'Yours · Local', kind: 'yours' };
+    }
+    if (city.online) {
+      return { label: `Online · ${city.ownerName}`, kind: 'online' };
+    }
+    if (city.hasCachedSnapshot) {
+      return { label: `Offline · Cached (${city.ownerName})`, kind: 'cached' };
+    }
+    return { label: `Offline · ${city.ownerName}`, kind: 'offline' };
+  }
+
   private render() {
     this.sites.replaceChildren();
     for (const site of EARTH_SITES.filter(site => site.continent === this.continent.value && site.country === this.country.value)) {
@@ -78,8 +102,22 @@ export class WorldMap {
       const terrain = document.createElement('span');
       terrain.textContent = `${min}–${max} m · ${buildable}% buildable`;
       const action = document.createElement('b');
-      action.textContent = city ? `Enter ${city.name}` : 'Available';
+      if (city) {
+        const isOfflineCached = city.online === false && city.hasCachedSnapshot;
+        action.textContent = isOfflineCached ? `Tour ${city.name} (Read-only)` : `Enter ${city.name}`;
+      } else {
+        action.textContent = 'Available';
+      }
       info.append(title, coordinates, terrain, action);
+      if (city) {
+        const badge = this.formatCityBadge(city);
+        if (badge) {
+          const pill = document.createElement('span');
+          pill.className = `site-status-badge site-status-${badge.kind}`;
+          pill.textContent = badge.label;
+          info.append(pill);
+        }
+      }
       button.append(canvas, info);
       button.onclick = () => {
         if (city) return this.callbacks.onEnterCity(city.cityId);
@@ -94,7 +132,8 @@ export class WorldMap {
     legacy.replaceChildren();
     for (const city of this.world?.cities.filter(city => !city.siteId) ?? []) {
       const button = document.createElement('button');
-      button.textContent = `Enter ${city.name} (original city)`;
+      const badge = this.formatCityBadge(city);
+      button.textContent = badge ? `Enter ${city.name} (${badge.label})` : `Enter ${city.name} (original city)`;
       button.onclick = () => this.callbacks.onEnterCity(city.cityId);
       legacy.append(button);
     }

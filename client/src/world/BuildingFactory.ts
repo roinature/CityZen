@@ -50,15 +50,17 @@ export class BuildingFactory {
    * Returns a path to an image file represent the building icon/preview.
    */
   public static getBuildingIcon(type: BuildingType): string | null {
+    const base = import.meta.env.BASE_URL;
+
     // 1. Check mapped infrastructure icons
     if (this.INFRASTRUCTURE_TEXTURES[type]) {
-      return `/textures/buildings/${this.INFRASTRUCTURE_TEXTURES[type]}`;
+      return `${base}textures/buildings/${this.INFRASTRUCTURE_TEXTURES[type]}`;
     }
 
     // 2. Check hardcoded zone fallbacks
-    if (type === BuildingType.ZONE_RESIDENTIAL) return '/textures/buildings/residential_facade.png';
-    if (type === BuildingType.ZONE_COMMERCIAL) return '/textures/buildings/commercial_facade.png';
-    if (type === BuildingType.ZONE_INDUSTRIAL) return '/textures/buildings/industrial_facade.png';
+    if (type === BuildingType.ZONE_RESIDENTIAL) return `${base}textures/buildings/residential_facade.png`;
+    if (type === BuildingType.ZONE_COMMERCIAL) return `${base}textures/buildings/commercial_facade.png`;
+    if (type === BuildingType.ZONE_INDUSTRIAL) return `${base}textures/buildings/industrial_facade.png`;
 
     return null;
   }

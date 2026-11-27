@@ -23,7 +23,9 @@ import {
   type WorldState,
   type PopulationSummary,
   type TownSettings,
+  type CityListItem,
 } from '@cityzen/shared';
+import type { CityConnection } from './CityConnection.js';
 
 export interface GameCallbacks {
   onWorldState: (world: WorldState) => void;
@@ -39,9 +41,13 @@ export interface GameCallbacks {
   onPopulationUpdate?: (summary: PopulationSummary) => void;
   onMigrationEvent?: (payload: MigrationEventPayload) => void;
   onWorldTick?: (payload: WorldTickPayload) => void;
+  /** Fired when viewing an offline peer's cached city (read-only) or returning to live editing. */
+  onReadOnlyChange?: (readOnly: boolean, reason?: string) => void;
+  /** Fired when connected WebRTC peer count changes (P2P mode). */
+  onPeerStatusChange?: (peerCount: number) => void;
 }
 
-export class GameClient {
+export class GameClient implements CityConnection {
   private serverUrl: string;
   private supabase!: SupabaseClient;
   private callbacks: GameCallbacks;
@@ -95,6 +101,11 @@ export class GameClient {
       console.error('Failed to fetch world state:', err);
       return false;
     }
+  }
+
+  async listCities(): Promise<CityListItem[]> {
+    const res = await fetch(`${this.serverUrl}/api/cities`);
+    return res.json();
   }
 
   private async subscribeToCityChannel(cityId: string): Promise<void> {
