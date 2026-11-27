@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {
-  BUILDING_DEFS, BuildingType, CELL_SIZE, ZoneDensity, getEffectiveSize, getZoneLevelDef, isRoad, isZone, type PlacedBuilding, type ZoneType,
+  BUILDING_DEFS, BuildingType, CELL_SIZE, ZoneDensity, getEffectiveSize, getZoneLevelDef, isRoad, isZone,
+  type PlacedBuilding, type RoadOrientation, type ZoneType,
 } from '@cityzen/shared';
 import type { CityStyle } from './CityStyle.js';
 import { SIDES, SIDEWALK, WALK_Y, isPaved, type RoadMap } from './RoadSurface.js';
@@ -10,6 +11,13 @@ import { hasServiceModel } from './ServiceModels.js';
 const HOUSE = 0, SHOP = 1, TOWER = 2, WORKS = 3;
 
 const GROW_SECONDS = 0.6;
+
+export interface GridRect {
+  x: number;
+  z: number;
+  w: number;
+  d: number;
+}
 
 interface Unit {
   key: string;
@@ -23,6 +31,8 @@ interface Unit {
   seed: number;
   /** Roof colour that tells a public building from the rest. */
   accent?: number;
+  /** Grid footprint for zone units so placement hover can temporarily clear them. */
+  cells?: GridRect;
 }
 
 interface Part {
@@ -81,6 +91,7 @@ function easeOutBack(t: number): number {
  */
 function createFacadeMaterial(night: { value: number }): THREE.MeshStandardMaterial {
   const material = new THREE.MeshStandardMaterial({ roughness: 0.82, metalness: 0.02 });
+  material.customProgramCacheKey = () => 'cityzen-facade-v1';
   const varyings = `#include <common>
     varying vec3 vFacade;
     varying vec3 vFacadeNormal;
@@ -203,7 +214,10 @@ export class CityBuildings {
   readonly group = new THREE.Group();
   private night = { value: 0 };
   private known: Set<string> | null = null;
-  private growing: Array<{ parts: Part[]; age: number }> = [];
+  private growing: Array<{ unit: Unit; parts: Part[]; age: number }> = [];
+  private zoneUnitParts: Array<{ cells: GridRect; unit: Unit; parts: Part[] }> = [];
+  private hiddenUnits = new Set<Unit>();
+  private clearedRect: GridRect | null = null;
   private highlighted = false;
   private transform = new THREE.Matrix4();
 
@@ -218,18 +232,46 @@ export class CityBuildings {
   rebuild(buildings: readonly PlacedBuilding[], roads: RoadMap, options: CityBuildingsOptions): void {
     this.disposeMeshes();
     const units = this.layOut(buildings, roads, options);
-    this.addUnits(units, options.style);
+    this.addUnits(units, options.style, this.group, true);
     this.addZoneTints(buildings);
     this.known = new Set(units.map(unit => unit.key));
+    if (this.clearedRect) this.applyPreviewClearance(this.clearedRect);
   }
 
   update(deltaTime: number): void {
     if (!this.growing.length) return;
     for (const entry of this.growing) {
       entry.age += deltaTime / GROW_SECONDS;
-      this.placeParts(entry.parts, entry.age >= 1 ? 1 : easeOutBack(Math.max(0.02, entry.age)));
+      if (!this.hiddenUnits.has(entry.unit)) {
+        this.placeParts(entry.parts, entry.age >= 1 ? 1 : easeOutBack(Math.max(0.02, entry.age)));
+      }
     }
     this.growing = this.growing.filter(entry => entry.age < 1);
+  }
+
+  /** Temporarily hides developed zone buildings overlapping a valid build preview footprint. */
+  setPreviewClearance(rect: GridRect | null): void {
+    this.clearedRect = rect;
+    this.applyPreviewClearance(rect);
+  }
+
+  private applyPreviewClearance(rect: GridRect | null): void {
+    const nextHidden = new Set<Unit>();
+    if (rect) {
+      for (const { cells, unit } of this.zoneUnitParts) {
+        if (cells.x < rect.x + rect.w && cells.x + cells.w > rect.x
+          && cells.z < rect.z + rect.d && cells.z + cells.d > rect.z) {
+          nextHidden.add(unit);
+        }
+      }
+    }
+    for (const { unit, parts } of this.zoneUnitParts) {
+      const wasHidden = this.hiddenUnits.has(unit);
+      const isHidden = nextHidden.has(unit);
+      if (wasHidden && !isHidden) this.placeParts(parts, 1);
+      else if (!wasHidden && isHidden) this.placeParts(parts, 0);
+    }
+    this.hiddenUnits = nextHidden;
   }
 
   highlightZones(highlighted: boolean): void {
@@ -242,6 +284,22 @@ export class CityBuildings {
   clear(): void {
     this.disposeMeshes();
     this.known = null;
+  }
+
+  /** Builds a standalone 3D model for a civic service building centered at (0, 0, 0). */
+  static createServiceModelMesh(type: BuildingType, style: CityStyle, orientation?: RoadOrientation): THREE.Group {
+    const { w, d } = getEffectiveSize(type, orientation);
+    const builder = new CityBuildings();
+    const units = CityBuildings.layoutServiceUnits(type, -w / 2, -d / 2, 'preview', orientation);
+    const group = new THREE.Group();
+    const plaza = new THREE.Mesh(
+      new THREE.BoxGeometry(w * CELL_SIZE, 0.028 * CELL_SIZE, d * CELL_SIZE),
+      new THREE.MeshStandardMaterial({ color: style.concrete, roughness: 0.95 }),
+    );
+    plaza.position.y = 0.014 * CELL_SIZE;
+    group.add(plaza);
+    builder.addUnits(units, style, group, false);
+    return group;
   }
 
   // ── Layout ────────────────────────────────────────────────
@@ -281,33 +339,155 @@ export class CityBuildings {
     for (const b of buildings) {
       if (isRoad(b.type) || isZone(b.type) || hasServiceModel(b.type)
         || b.type === BuildingType.PARK || b.type === BuildingType.PARKING) continue;
-      units.push(...this.service(b));
+      units.push(...CityBuildings.layoutServiceUnits(b.type, b.position.x, b.position.z, b.id, b.orientation));
     }
     return units;
   }
 
-  /** A public building: a main block with a lower entrance wing, in its own colour. */
-  private service(b: PlacedBuilding): Unit[] {
-    const def = BUILDING_DEFS[b.type];
-    const { w, d } = getEffectiveSize(b.type, b.orientation);
-    const { x, z } = b.position;
+  /** Distinct architectural massing for public & civic buildings, with lit windows and coloured roofs. */
+  private static layoutServiceUnits(
+    type: BuildingType, x: number, z: number, id: string, orientation?: RoadOrientation,
+  ): Unit[] {
+    const def = BUILDING_DEFS[type];
+    const { w, d } = getEffectiveSize(type, orientation);
     const color = new THREE.Color(def.color);
-    const accent = color.clone().lerp(new THREE.Color(0x6a6a6a), 0.25).getHex();
-    const wall = color.clone().lerp(new THREE.Color(0xf1ece2), 0.82).getHex();
-    const seed = hash(x, z, 9) * 0.5;
+    const accent = color.clone().lerp(new THREE.Color(0x585c62), 0.2).getHex();
+    const seed = hash(Math.round(x) + 31, Math.round(z) + 17, 9) * 0.5;
     const h = 0.5 + def.height * 0.2;
-    const base = { kind: SHOP, wall, seed, accent };
-    const reach = Math.max(0, Math.min(w, d) - 1) * 0.06;
-    const block = (id: string, x0: number, z0: number, x1: number, z1: number, height: number): Unit => ({
-      ...base, key: `${b.id}:${id}`, x: x + (x0 + x1) / 2, z: z + (z0 + z1) / 2, w: x1 - x0, d: z1 - z0, h: height,
-    });
-    const i = SIDEWALK + 0.04 + reach;
-    if (w === 1 || d === 1) return [block('main', i, i, w - i, d - i, h)];
-    const split = d * 0.6;
-    return [
-      block('main', i, i, w - i, split, h),
-      block('wing', i + w * 0.14, split, w - i - w * 0.14, d - i, h * 0.6),
-    ];
+    const pad = Math.min(w, d) === 1 ? 0.18 : 0.24;
+    const bw = w - 2 * pad;
+    const bd = d - 2 * pad;
+    const defaultWall = color.clone().lerp(new THREE.Color(0xf1ece2), 0.78).getHex();
+
+    const box = (
+      partId: string, u0: number, v0: number, u1: number, v1: number, height: number,
+      opts?: { kind?: number; wall?: number; seedOffset?: number },
+    ): Unit => {
+      const x0 = pad + u0 * bw, x1 = pad + u1 * bw;
+      const z0 = pad + v0 * bd, z1 = pad + v1 * bd;
+      return {
+        key: `${id}:${partId}`,
+        kind: opts?.kind ?? SHOP,
+        wall: opts?.wall ?? defaultWall,
+        seed: (seed + (opts?.seedOffset ?? 0)) % 1,
+        accent,
+        x: x + (x0 + x1) / 2,
+        z: z + (z0 + z1) / 2,
+        w: x1 - x0,
+        d: z1 - z0,
+        h: height,
+      };
+    };
+
+    switch (type) {
+      case BuildingType.EDU_LIBRARY:
+        return [
+          box('hall', 0.04, 0.04, 0.96, 0.76, h, { wall: 0xeadbc5 }),
+          box('portico', 0.2, 0.76, 0.8, 0.98, h * 0.56, { wall: 0xf2e8d8 }),
+        ];
+
+      case BuildingType.POLICE_HQ:
+      case BuildingType.HEALTH_RESEARCH_CENTER: {
+        const wall = color.clone().lerp(new THREE.Color(0xe6ecf2), 0.58).getHex();
+        return [
+          box('tower', 0.26, 0.12, 0.74, 0.66, h * 1.38, { kind: TOWER, wall }),
+          box('west', 0.0, 0.2, 0.26, 0.76, h * 0.68, { kind: TOWER, wall, seedOffset: 0.13 }),
+          box('east', 0.74, 0.2, 1.0, 0.76, h * 0.68, { kind: TOWER, wall, seedOffset: 0.27 }),
+          box('lobby', 0.2, 0.66, 0.8, 0.96, h * 0.44, { kind: SHOP, wall }),
+        ];
+      }
+
+      case BuildingType.POLICE_STATION:
+      case BuildingType.POLICE_ACADEMY: {
+        const wall = color.clone().lerp(new THREE.Color(0xe6ecf2), 0.65).getHex();
+        return [
+          box('precinct', 0.04, 0.06, 0.66, 0.76, h * 1.08, { kind: TOWER, wall }),
+          box('garage', 0.66, 0.18, 0.98, 0.82, h * 0.52, { kind: SHOP, wall, seedOffset: 0.19 }),
+          box('entry', 0.14, 0.76, 0.58, 0.96, h * 0.46, { kind: SHOP, wall }),
+        ];
+      }
+
+      case BuildingType.POLICE_JAIL: {
+        const wall = 0xb5bcc2;
+        return [
+          box('north', 0.02, 0.02, 0.74, 0.26, h * 0.84, { kind: WORKS, wall }),
+          box('south', 0.16, 0.76, 0.84, 0.98, h * 0.66, { kind: WORKS, wall }),
+          box('west', 0.02, 0.26, 0.28, 0.76, h * 0.84, { kind: WORKS, wall }),
+          box('east', 0.72, 0.26, 0.98, 0.76, h * 0.84, { kind: WORKS, wall }),
+          box('watchtower', 0.74, 0.0, 1.0, 0.24, h * 1.32, { kind: TOWER, wall: 0x9ea7ae }),
+        ];
+      }
+
+      case BuildingType.FIRE_STATION:
+      case BuildingType.FIRE_HQ:
+      case BuildingType.FIRE_TRAINING: {
+        const wall = color.clone().lerp(new THREE.Color(0xf0dfd8), 0.56).getHex();
+        return [
+          box('house', 0.04, 0.06, 0.72, 0.56, h * 0.96, { kind: TOWER, wall }),
+          box('bays', 0.04, 0.56, 0.86, 0.96, h * 0.54, { kind: SHOP, wall }),
+          box('drill-tower', 0.74, 0.04, 0.98, 0.34, h * 1.52, { kind: TOWER, wall, seedOffset: 0.21 }),
+        ];
+      }
+
+      case BuildingType.HEALTH_HOSPITAL:
+      case BuildingType.HEALTH_CLINIC: {
+        const wall = 0xf0f4f5;
+        return [
+          box('spine', 0.28, 0.08, 0.72, 0.8, h * 1.2, { kind: TOWER, wall }),
+          box('west-ward', 0.0, 0.18, 0.28, 0.7, h * 0.82, { kind: TOWER, wall, seedOffset: 0.11 }),
+          box('east-ward', 0.72, 0.18, 1.0, 0.7, h * 0.82, { kind: TOWER, wall, seedOffset: 0.23 }),
+          box('er', 0.3, 0.8, 0.7, 0.98, h * 0.4, { kind: SHOP, wall }),
+        ];
+      }
+
+      case BuildingType.EDU_ELEMENTARY:
+      case BuildingType.EDU_HIGH_SCHOOL:
+      case BuildingType.EDU_UNIVERSITY: {
+        const wall = 0xe8d9c3;
+        const blocks = [
+          box('main-hall', 0.04, 0.04, 0.96, 0.42, h * 0.95, { kind: SHOP, wall }),
+          box('west-wing', 0.04, 0.42, 0.32, 0.94, h * 0.74, { kind: SHOP, wall, seedOffset: 0.15 }),
+          box('east-wing', 0.68, 0.42, 0.96, 0.94, h * 0.74, { kind: SHOP, wall, seedOffset: 0.29 }),
+        ];
+        if (type === BuildingType.EDU_UNIVERSITY) {
+          blocks.push(box('bell-tower', 0.41, 0.12, 0.59, 0.36, h * 1.62, { kind: TOWER, wall: 0xdfd0b8 }));
+        }
+        return blocks;
+      }
+
+      case BuildingType.GOV_CITY_HALL:
+      case BuildingType.GOV_COURTHOUSE:
+      case BuildingType.GOV_PARLIAMENT: {
+        const wall = 0xece7dc;
+        return [
+          box('colonnade', 0.08, 0.58, 0.92, 0.94, h * 0.7, { kind: SHOP, wall }),
+          box('west-chamber', 0.04, 0.12, 0.34, 0.58, h * 0.86, { kind: TOWER, wall, seedOffset: 0.14 }),
+          box('east-chamber', 0.66, 0.12, 0.96, 0.58, h * 0.86, { kind: TOWER, wall, seedOffset: 0.28 }),
+          box('cupola', 0.34, 0.16, 0.66, 0.58, h * 1.38, { kind: TOWER, wall: 0xf4f0e6 }),
+        ];
+      }
+
+      case BuildingType.ART_THEATER:
+      case BuildingType.ART_CONCERT_HALL: {
+        const wall = color.clone().lerp(new THREE.Color(0xf2ece6), 0.72).getHex();
+        return [
+          box('fly-tower', 0.14, 0.04, 0.86, 0.38, h * 1.24, { kind: TOWER, wall }),
+          box('auditorium', 0.06, 0.38, 0.94, 0.74, h * 0.88, { kind: SHOP, wall, seedOffset: 0.17 }),
+          box('foyer', 0.16, 0.74, 0.84, 0.96, h * 0.5, { kind: SHOP, wall }),
+        ];
+      }
+
+      case BuildingType.TOUR_MUSEUM:
+      case BuildingType.ART_GALLERY:
+      default: {
+        if (w === 1 || d === 1) return [box('main', 0.06, 0.06, 0.94, 0.94, h)];
+        return [
+          box('west-gallery', 0.02, 0.08, 0.36, 0.9, h * 0.88),
+          box('east-gallery', 0.64, 0.08, 0.98, 0.9, h * 0.88, { seedOffset: 0.21 }),
+          box('atrium', 0.36, 0.16, 0.64, 0.82, h * 1.06, { kind: TOWER }),
+        ];
+      }
+    }
   }
 
   private unit(
@@ -363,12 +543,15 @@ export class CityBuildings {
     }
     if (kind === TOWER || kind === SHOP) h = Math.max(0.45, h * skyline);
 
-    return { key: `${lot.id}:${level}`, kind, x: cx, z: cz, w: bw, d: bd, h, wall, seed: hash(x, z, 9) };
+    return {
+      key: `${lot.id}:${level}`, kind, x: cx, z: cz, w: bw, d: bd, h, wall,
+      seed: hash(x, z, 9), cells: { x, z, w, d },
+    };
   }
 
   // ── Meshes ────────────────────────────────────────────────
 
-  private addUnits(units: Unit[], style: CityStyle): void {
+  private addUnits(units: Unit[], style: CityStyle, targetGroup: THREE.Group, trackZones: boolean): void {
     if (!units.length) return;
     type Draft = Omit<Part, 'mesh' | 'index'> & { color: number };
     const walls: Draft[] = [];
@@ -444,7 +627,7 @@ export class CityBuildings {
         if (list) list.push(part);
         else byUnit.set(draft.unit, [part]);
       });
-      this.group.add(mesh);
+      targetGroup.add(mesh);
       return mesh;
     };
 
@@ -465,10 +648,15 @@ export class CityBuildings {
 
     for (const [unit, parts] of byUnit) {
       this.placeParts(parts, 1);
-      if (this.known && !this.known.has(unit.key)) this.growing.push({ parts, age: 0 });
+      if (trackZones) {
+        if (unit.cells) this.zoneUnitParts.push({ cells: unit.cells, unit, parts });
+        if (this.known && !this.known.has(unit.key)) this.growing.push({ unit, parts, age: 0 });
+      }
     }
-    for (const child of this.group.children) if (child instanceof THREE.InstancedMesh) child.computeBoundingSphere();
-    for (const { parts } of this.growing) this.placeParts(parts, 0.02);
+    for (const child of targetGroup.children) if (child instanceof THREE.InstancedMesh) child.computeBoundingSphere();
+    if (trackZones) {
+      for (const { parts } of this.growing) this.placeParts(parts, 0.02);
+    }
   }
 
   /**
@@ -600,6 +788,8 @@ export class CityBuildings {
 
   private disposeMeshes(): void {
     this.growing = [];
+    this.zoneUnitParts = [];
+    this.hiddenUnits.clear();
     for (const child of [...this.group.children]) {
       this.group.remove(child);
       if (!(child instanceof THREE.InstancedMesh)) continue;

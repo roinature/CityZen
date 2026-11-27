@@ -106,7 +106,7 @@ export function getHappinessAdvice(city: CityState): HappinessAdvice[] {
 
     const candidate = candidates.find(({ def }) =>
       city.grid.some((column, x) => column.some((_, z) =>
-        canPlaceBuilding(city.grid, { x, z }, def.type, city.resources).valid)));
+        canPlaceBuilding(city.grid, { x, z }, def.type, city.resources, false, city.buildings).valid)));
     if (!candidate) {
       if (candidates.length > 0) noRoomForService = true;
       continue;

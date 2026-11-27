@@ -19,8 +19,23 @@ import {
   replacesRoads,
 } from '@cityzen/shared';
 import { BuildingFactory } from '../world/BuildingFactory.js';
+import type { GridRect } from '../world/CityBuildings.js';
+import { CITY_STYLES, type CityStyleId } from '../world/CityStyle.js';
 import { GridRaycaster } from './Raycaster.js';
 import type { ToolMode } from '../ui/BuildTools.js';
+
+function disposePreviewGroup(group: THREE.Group): void {
+  group.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return;
+    if (child instanceof THREE.InstancedMesh) child.dispose();
+    child.geometry.dispose();
+    if (Array.isArray(child.material)) {
+      for (const m of child.material) m.dispose();
+    } else {
+      child.material.dispose();
+    }
+  });
+}
 
 function isLineDragType(type: BuildingType): boolean {
   return isRoad(type) && !replacesRoads(type);
@@ -80,7 +95,9 @@ export class BuildMode {
 
   private selectedType: BuildingType | null = null;
   private selectedDensity: ZoneDensity | null = null;
+  private styleId: CityStyleId = 'classic';
   private previewMesh: THREE.Group | null = null;
+  private previewMeshKey: string | null = null;
   private currentHoverPos: Position | null = null;
 
   // Tool mode
@@ -111,6 +128,8 @@ export class BuildMode {
   onEdgeRoadClick: ((direction: EdgeDirection, position: number) => void) | null = null;
   /** Reports the cost of what is about to be placed (null = nothing), and whether the city can afford it. */
   onDragCostUpdate: ((cost: number | null, affordable?: boolean) => void) | null = null;
+  /** Footprint whose existing zoned buildings should step aside for a valid hover preview. */
+  onPreviewClearance: ((rect: GridRect | null) => void) | null = null;
 
   constructor(scene: THREE.Scene, getCamera: () => THREE.Camera, canvas: HTMLCanvasElement) {
     this.scene = scene;
@@ -146,6 +165,12 @@ export class BuildMode {
     this.unlimitedMoney = enabled;
   }
 
+  setStyle(style: CityStyleId): void {
+    if (this.styleId === style) return;
+    this.styleId = style;
+    this.lastPreviewKey = null;
+  }
+
   setToolMode(mode: ToolMode): void {
     this.toolMode = mode;
     if (mode !== 'build') {
@@ -173,10 +198,11 @@ export class BuildMode {
   /** Everything the preview depends on. Unchanged key → keep the existing preview meshes. */
   private previewKey(state: CityState | null): string {
     const pos = (p: Position | null) => (p ? `${p.x},${p.z}` : '-');
+    const lastId = state?.buildings.length ? state.buildings[state.buildings.length - 1].id : '';
     return [
-      this.toolMode, this.selectedType, this.selectedDensity, this.brushSize,
+      this.toolMode, this.selectedType, this.selectedDensity, this.brushSize, this.styleId,
       pos(this.currentHoverPos), this.isDragging, pos(this.lineDragStart), pos(this.rectDragStart),
-      state?.id, state?.buildings.length, state?.resources.money, this.unlimitedMoney,
+      state?.id, state?.buildings.length, lastId, state?.resources.money, this.unlimitedMoney,
     ].join('|');
   }
 
@@ -233,8 +259,14 @@ export class BuildMode {
       this.selectedDensity ?? undefined,
     );
 
-    this.clearPreview();
-    this.previewMesh = this.factory.createPreview(this.selectedType, result.valid);
+    const meshKey = `${this.selectedType}|${result.valid}|${this.styleId}`;
+    if (!this.previewMesh || this.previewMeshKey !== meshKey) {
+      this.disposePreviewOnly();
+      this.previewMesh = this.factory.createPreview(this.selectedType, result.valid, CITY_STYLES[this.styleId]);
+      this.previewMeshKey = meshKey;
+      this.scene.add(this.previewMesh);
+    }
+
     const def = BUILDING_DEFS[this.selectedType];
     const w = def.size.w * CELL_SIZE;
     const d = def.size.d * CELL_SIZE;
@@ -243,7 +275,17 @@ export class BuildMode {
       0,
       this.currentHoverPos.z * CELL_SIZE + d / 2,
     );
-    this.scene.add(this.previewMesh);
+
+    if (result.valid && !isZone(this.selectedType)) {
+      this.onPreviewClearance?.({
+        x: this.currentHoverPos.x,
+        z: this.currentHoverPos.z,
+        w: def.size.w,
+        d: def.size.d,
+      });
+    } else {
+      this.onPreviewClearance?.(null);
+    }
 
     const unitCost = this.getUnitCost();
     this.onDragCostUpdate?.(unitCost, this.canAfford(state, unitCost));
@@ -440,7 +482,7 @@ export class BuildMode {
     const d = effD * CELL_SIZE;
 
     for (const pos of positions) {
-      const ghost = this.factory.createGhostPreview(this.selectedType, orientation);
+      const ghost = this.factory.createGhostPreview(this.selectedType, orientation, CITY_STYLES[this.styleId]);
       ghost.position.set(
         pos.x * CELL_SIZE + w / 2,
         0,
@@ -460,31 +502,23 @@ export class BuildMode {
   private clearLineDragPreview(): void {
     if (this.lineDragPreviewGroup) {
       this.scene.remove(this.lineDragPreviewGroup);
-      this.lineDragPreviewGroup.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          child.geometry.dispose();
-          if (child.material instanceof THREE.Material) {
-            child.material.dispose();
-          }
-        }
-      });
+      disposePreviewGroup(this.lineDragPreviewGroup);
       this.lineDragPreviewGroup = null;
     }
   }
 
-  private clearPreview(): void {
+  private disposePreviewOnly(): void {
     if (this.previewMesh) {
       this.scene.remove(this.previewMesh);
-      this.previewMesh.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          child.geometry.dispose();
-          if (child.material instanceof THREE.Material) {
-            child.material.dispose();
-          }
-        }
-      });
+      disposePreviewGroup(this.previewMesh);
       this.previewMesh = null;
+      this.previewMeshKey = null;
     }
+  }
+
+  private clearPreview(): void {
+    this.disposePreviewOnly();
+    this.onPreviewClearance?.(null);
   }
 
   private updateBulldozePreview(state: CityState): void {
@@ -512,7 +546,7 @@ export class BuildMode {
         const w = effW * CELL_SIZE;
         const d = effD * CELL_SIZE;
 
-        const preview = this.factory.createBulldozePreview(building.type);
+        const preview = this.factory.createBulldozePreview(building.type, building.orientation);
         preview.position.set(
           building.position.x * CELL_SIZE + w / 2,
           0,
@@ -528,14 +562,7 @@ export class BuildMode {
   private clearBulldozePreview(): void {
     if (this.bulldozePreviewGroup) {
       this.scene.remove(this.bulldozePreviewGroup);
-      this.bulldozePreviewGroup.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          child.geometry.dispose();
-          if (child.material instanceof THREE.Material) {
-            child.material.dispose();
-          }
-        }
-      });
+      disposePreviewGroup(this.bulldozePreviewGroup);
       this.bulldozePreviewGroup = null;
     }
   }
@@ -543,15 +570,7 @@ export class BuildMode {
   private clearRectPreview(): void {
     if (this.rectPreviewGroup) {
       this.scene.remove(this.rectPreviewGroup);
-      this.rectPreviewGroup.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          if (child instanceof THREE.InstancedMesh) child.dispose();
-          child.geometry.dispose();
-          if (child.material instanceof THREE.Material) {
-            child.material.dispose();
-          }
-        }
-      });
+      disposePreviewGroup(this.rectPreviewGroup);
       this.rectPreviewGroup = null;
     }
   }

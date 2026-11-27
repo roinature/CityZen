@@ -693,6 +693,10 @@ buildMode.onDemolish = (pos) => {
   gameClient.demolish(pos, playerId);
 };
 
+buildMode.onPreviewClearance = (rect) => {
+  cityRenderer.setPreviewClearance(rect);
+};
+
 buildMode.onDragCostUpdate = (cost, affordable = true) => {
   if (cost !== null) {
     footerIndicator.show(
@@ -875,6 +879,7 @@ function applyOptions(options: GameOptions): void {
     crossings: options.crossings,
     trees: options.trees,
   });
+  buildMode.setStyle(options.cityStyle);
   cameraController.setView(options.cameraView);
 
   // Camera speed

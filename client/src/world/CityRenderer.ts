@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import {
   DEFAULT_GRID_SIZE, isStarterEntranceRoad, type CityState, type PlacedBuilding,
 } from '@cityzen/shared';
-import { CityBuildings } from './CityBuildings.js';
+import { CityBuildings, type GridRect } from './CityBuildings.js';
 import { CITY_STYLES, type CityStyle, type CityStyleId } from './CityStyle.js';
 import { createRoadSurface, indexRoads } from './RoadSurface.js';
 import { createServiceModel, hasServiceModel } from './ServiceModels.js';
@@ -49,6 +49,10 @@ export class CityRenderer {
 
   highlightZones(highlight: boolean): void {
     this.buildings.highlightZones(highlight);
+  }
+
+  setPreviewClearance(rect: GridRect | null): void {
+    this.buildings.setPreviewClearance(rect);
   }
 
   /** Apply pending changes and advance animations. Call once per frame. */
