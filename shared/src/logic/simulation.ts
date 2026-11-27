@@ -3,6 +3,7 @@ import { calculateNetIncome, calculatePopulationGrowth, calculateHappiness, clam
 import { calculateDemand, processZoneGrowth } from './demand.js';
 import { MAX_DEBT } from '../constants/economy.js';
 import { applyLoanPayments } from './loans.js';
+import { evaluateCityUtilities } from './utilities.js';
 import { GAME_MS_PER_TICK, TICKS_PER_GAME_DAY, DAYS_PER_GAME_YEAR } from '../constants/simulation.js';
 
 export function advanceClock(state: CityState): CityState {
@@ -59,6 +60,8 @@ export function simulateCityTick(state: CityState): CityState {
     moneyAfterBudget + MAX_DEBT,
   );
 
+  const utilitySummary = evaluateCityUtilities(working).summary;
+
   return {
     ...working,
     resources: {
@@ -68,6 +71,7 @@ export function simulateCityTick(state: CityState): CityState {
       loans,
       population: Math.max(0, working.resources.population + popGrowth),
       happiness: clamp(happiness, 0, 100),
+      utilities: utilitySummary,
     },
     tick: state.tick + 1,
     updatedAt: Date.now(),

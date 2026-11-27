@@ -90,6 +90,7 @@ export class CityAdvisor {
       button.className = 'hud-button';
       button.dataset.action = String(index);
       button.textContent = item.action.kind === 'build' ? 'Find in build menu'
+        : item.action.kind === 'layer' ? `Open ${item.action.layer[0].toUpperCase()}${item.action.layer.slice(1)} Layer`
         : item.action.kind === 'finance' ? 'Open Finance' : 'Open City Needs';
       row.append(title, summary, button);
       this.recommendations.appendChild(row);

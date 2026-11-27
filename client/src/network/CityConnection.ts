@@ -1,5 +1,5 @@
 import type {
-  BuildingType, CityListItem, PlaceBuildingsPayload, Position, RoadOrientation, TownSettings, ZoneDensity,
+  BuildingType, CityListItem, PlaceBuildingsPayload, Position, RoadOrientation, TownSettings, UtilityLayer, ZoneDensity,
 } from '@cityzen/shared';
 
 /**
@@ -14,7 +14,7 @@ export interface CityConnection {
   joinCity(cityId: string, playerName: string, playerId?: string): Promise<void>;
   placeBuilding(position: Position, type: BuildingType, playerId?: string, density?: ZoneDensity, orientation?: RoadOrientation): Promise<void>;
   paintBuildings(stroke: PlaceBuildingsPayload, playerId: string): Promise<void>;
-  demolish(position: Position, playerId?: string): Promise<void>;
+  demolish(position: Position, playerId?: string, layer?: UtilityLayer): Promise<void>;
   save(playerId?: string): Promise<void>;
   restart(playerId?: string): Promise<void>;
   generateTown(settings: TownSettings, playerId: string): Promise<boolean>;

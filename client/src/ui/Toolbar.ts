@@ -1,6 +1,6 @@
 import {
-  BuildingType, BUILDING_DEFS, INFRA_CATEGORIES, ROAD_TYPES, ZONE_DENSITY_COSTS, ZONE_TYPES,
-  ZoneDensity, isZone,
+  BuildingType, BUILDING_DEFS, INFRA_CATEGORIES, INFRA_WATERFRONT_TYPES, ROAD_TYPES,
+  ZONE_DENSITY_COSTS, ZONE_TYPES, ZoneDensity, isUtilityConduit, isZone,
 } from '@cityzen/shared';
 import { BuildingFactory } from '../world/BuildingFactory.js';
 import { DensityPicker } from './DensityPicker.js';
@@ -9,6 +9,7 @@ const CATEGORIES: ReadonlyArray<{ label: string; types: readonly BuildingType[] 
   { label: 'Roads', types: ROAD_TYPES },
   { label: 'Zones', types: ZONE_TYPES },
   { label: 'Parks', types: [BuildingType.PARK, BuildingType.PARKING] },
+  { label: 'Waterfront', types: INFRA_WATERFRONT_TYPES },
   { label: 'Services', types: [] },
 ];
 
@@ -96,6 +97,12 @@ export class Toolbar {
   }
 
   showBuilding(type: BuildingType): void {
+    const direct = CATEGORIES.find(category => category.types.includes(type));
+    if (direct) {
+      this.showCategory(direct);
+      this.itemButtons.get(type)?.focus();
+      return;
+    }
     const service = INFRA_CATEGORIES.find(category => category.types.includes(type));
     if (service) this.serviceCategories.value = service.id;
     const category = CATEGORIES.find(category => service ? category.label === 'Services' : category.types.includes(type));
@@ -129,7 +136,15 @@ export class Toolbar {
       const price = isZone(type)
         ? `$${ZONE_DENSITY_COSTS[ZoneDensity.LOW]}–$${ZONE_DENSITY_COSTS[ZoneDensity.HIGH]}`
         : `$${def.cost.toLocaleString()}`;
-      cost.textContent = `${price} · ${def.size.w}×${def.size.d}`;
+      const sizeText = isUtilityConduit(type) ? 'drag' : `${def.size.w}×${def.size.d}`;
+      const spec = def.effects.powerGenerationMW
+        ? ` · ${def.effects.powerGenerationMW} MW`
+        : def.effects.waterSupplyM3
+          ? ` · ${def.effects.waterSupplyM3} m³/h`
+          : def.effects.sewageCapacityM3
+            ? ` · ${def.effects.sewageCapacityM3} m³/h`
+            : '';
+      cost.textContent = `${price} · ${sizeText}${spec}`;
       info.append(label, cost);
       btn.append(preview, info);
 

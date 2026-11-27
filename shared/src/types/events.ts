@@ -1,5 +1,5 @@
 import type { BuildingType, RoadOrientation, ZoneDensity } from './building.js';
-import type { Position } from './grid.js';
+import type { Position, UtilityLayer } from './grid.js';
 import type { CityState } from './city.js';
 import type { ResourceState, PopulationSummary } from './resources.js';
 import type { PlacedBuilding } from './building.js';
@@ -76,6 +76,7 @@ export interface PlaceBuildingsPayload extends Omit<PlaceBuildingPayload, 'posit
 
 export interface DemolishPayload {
   position: Position;
+  layer?: UtilityLayer;
 }
 
 export interface TakeLoanPayload {

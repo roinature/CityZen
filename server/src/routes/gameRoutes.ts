@@ -5,7 +5,9 @@ import {
   DEFAULT_GRID_SIZE,
   ZoneDensity,
   isRoad,
+  isUtilityConduit,
   isZone,
+  findGridBuildingToDemolish,
   calculateEdgeConnections,
   normalizeTownSettings,
   type ClaimPlotPayload,
@@ -253,7 +255,7 @@ export function createGameRoutes(roomManager: RoomManager, worldManager: WorldMa
   router.post('/building/place-batch', cityAction((room, body: PlaceBuildingsPayload & { playerId: string }) => {
     const { positions, type, density, orientation, playerId } = body;
     if (
-      (!isRoad(type) && !isZone(type)) ||
+      (!isRoad(type) && !isZone(type) && !isUtilityConduit(type)) ||
       (density !== undefined && !Object.values(ZoneDensity).includes(density)) ||
       (orientation !== undefined && orientation !== 'NS' && orientation !== 'EW') ||
       !Array.isArray(positions) || positions.length === 0 || positions.length > DEFAULT_GRID_SIZE ** 2 ||
@@ -272,10 +274,9 @@ export function createGameRoutes(roomManager: RoomManager, worldManager: WorldMa
   }));
 
   router.post('/building/demolish', cityAction((room, body: DemolishPayload) => {
-    const { position } = body;
-    const cell = room.state.grid[position.x]?.[position.z];
-    const building = cell?.buildingId ? room.state.buildings.find((b: PlacedBuilding) => b.id === cell.buildingId) : null;
-    const result = room.demolishBuilding(position);
+    const { position, layer } = body;
+    const building = findGridBuildingToDemolish(room.state.grid, room.state.buildings, position, layer);
+    const result = room.demolishBuilding(position, layer);
     return result.success ? { success: true, roadsChanged: !!building && isRoad(building.type) } :
       { ...result, code: 'DEMOLISH_FAILED' };
   }));

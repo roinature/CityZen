@@ -5,10 +5,15 @@ import {
   BuildingType,
   CityRoom,
   INFRA_CATEGORIES,
+  INFRA_WATERFRONT_TYPES,
   ZoneDensity,
+  applySiteTerrain,
+  calculateLaborStats,
   canPlaceBuilding,
   createEmptyGrid,
   getReplacedBuildings,
+  getWaterfrontFacing,
+  isWaterfront,
 } from '@cityzen/shared';
 
 test('service buildings, parks, and roundabouts can be placed on zoned areas and replace underlying zones', () => {
@@ -100,7 +105,8 @@ test('service buildings, parks, and roundabouts can be placed on zoned areas and
   assert.equal(overlapRoad.valid, false);
   assert.equal(overlapRoad.reason, 'Cell occupied');
 
-  // Every service category type is valid over empty + zoned tiles when funded
+  // Every land service category type is valid over empty + zoned tiles when funded;
+  // waterfront buildings require shoreline access.
   room.state.resources.money = 1_000_000;
   for (const category of INFRA_CATEGORIES) {
     for (const type of category.types) {
@@ -114,7 +120,78 @@ test('service buildings, parks, and roundabouts can be placed on zoned areas and
         false,
         room.state.buildings,
       );
-      assert.equal(res.valid, true, `Expected ${type} to be placeable`);
+      if (isWaterfront(type)) {
+        assert.equal(res.valid, false, `Expected ${type} to reject inland placement`);
+        assert.equal(res.reason, 'Must be placed on waterfront');
+      } else {
+        assert.equal(res.valid, true, `Expected ${type} to be placeable`);
+      }
     }
   }
+});
+
+test('waterfront buildings require shoreline, auto-orient to face open water, and add jobs', () => {
+  const room = new CityRoom('c-coast', 'Harbor Bay', 'p1', 'Mayor', undefined, 'san-gregorio');
+  room.state.grid = createEmptyGrid();
+  room.state.buildings = [];
+  room.state.resources.money = 500_000;
+
+  // Create a North-South coastline: x < 20 is open ocean, x >= 20 is flat shore
+  for (let x = 0; x < 20; x++) {
+    for (let z = 0; z < 64; z++) {
+      room.state.grid[x][z].terrain = 'water';
+    }
+  }
+
+  // Deep ocean (disconnected from shore) is rejected
+  const deepSea = canPlaceBuilding(
+    room.state.grid,
+    { x: 5, z: 20 },
+    BuildingType.WATERFRONT_PORT,
+    room.state.resources,
+    false,
+    room.state.buildings,
+  );
+  assert.equal(deepSea.valid, false);
+  assert.equal(deepSea.reason, 'Must connect to shore');
+
+  // Dry inland is rejected
+  const inland = canPlaceBuilding(
+    room.state.grid,
+    { x: 30, z: 20 },
+    BuildingType.WATERFRONT_MARINA,
+    room.state.resources,
+    false,
+    room.state.buildings,
+  );
+  assert.equal(inland.valid, false);
+  assert.equal(inland.reason, 'Must be placed on waterfront');
+
+  // Placing all 4 waterfront buildings along the NS coastline auto-orients them ('NS', facing West 'W')
+  let zCursor = 10;
+  for (const type of INFRA_WATERFRONT_TYPES) {
+    const res = room.placeBuilding('p1', { x: 19, z: zCursor }, type);
+    assert.equal(res.success, true, `Expected ${type} to place on shoreline`);
+    const placed = room.state.buildings[room.state.buildings.length - 1];
+    const facing = getWaterfrontFacing(room.state.grid, placed.position, placed.type, placed.orientation, true);
+    assert.equal(facing, 'W', `Expected ${type} to face West toward open water`);
+    zCursor += 6;
+  }
+
+  // Verify waterfront buildings contribute jobs to city labor stats
+  const labor = calculateLaborStats(room.state);
+  assert.equal(labor.jobs, 8 + 10 + 15 + 35);
+
+  // Also test San Gregorio real terrain shoreline placement
+  const realCoast = createEmptyGrid();
+  applySiteTerrain(realCoast, 'san-gregorio');
+  let validSpots = 0;
+  for (let x = 15; x < 26; x++) {
+    for (let z = 20; z < 45; z++) {
+      if (canPlaceBuilding(realCoast, { x, z }, BuildingType.WATERFRONT_PORT, room.state.resources).valid) {
+        validSpots++;
+      }
+    }
+  }
+  assert.ok(validSpots > 5, `Expected multiple valid port spots on San Gregorio coast, found ${validSpots}`);
 });

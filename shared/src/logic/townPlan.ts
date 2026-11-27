@@ -2,8 +2,9 @@ import { DEFAULT_GRID_SIZE } from '../constants/grid.js';
 import { BuildingType, ZoneDensity, isZone, type PlacedBuilding, type RoadOrientation } from '../types/building.js';
 import type { Grid } from '../types/grid.js';
 import type { EdgeDirection } from '../types/world.js';
-import { getEffectiveSize } from './placement.js';
+import { getEffectiveSize, getWaterfrontFacing, setGridBuilding } from './placement.js';
 import { getStarterEntranceX } from './starterLayout.js';
+import { hasWaterSourceInFootprint } from './utilities.js';
 
 /**
  * Seeded town plans on the city grid. The vocabulary (town characters, downtown
@@ -568,19 +569,54 @@ class TownPlanner {
   private placeServices(): void {
     // A village's taxes only carry the basics.
     const services: Array<[BuildingType, number]> = this.s.character === 'village' ? [
-      [BuildingType.WATER_TOWER, 0.7],
-      [BuildingType.ENERGY_WIND_TURBINE, 0.9],
+      [BuildingType.WATER_TOWER, 0.55],
+      [BuildingType.SEWAGE_PUMP_STATION, 0.8],
+      [BuildingType.ENERGY_SOLAR_FARM, 0.85],
+      [BuildingType.ENERGY_SUBSTATION, 0.3],
     ] : [
       [BuildingType.GOV_CITY_HALL, 0.35],
       [BuildingType.POLICE_STATION, 0.5],
       [BuildingType.FIRE_STATION, 0.55],
       [BuildingType.HEALTH_CLINIC, 0.5],
       [BuildingType.EDU_ELEMENTARY, 0.6],
-      [BuildingType.WATER_TOWER, 0.85],
-      [BuildingType.ENERGY_WIND_TURBINE, 0.95],
-      [BuildingType.ENERGY_WIND_TURBINE, 0.9],
+      [BuildingType.ENERGY_SUBSTATION, 0.25],
+      [BuildingType.ENERGY_SUBSTATION, 0.6],
+      [BuildingType.WATER_TOWER, 0.55],
+      [BuildingType.WATER_SEWAGE_PLANT, 0.9],
+      [BuildingType.ENERGY_COAL_PLANT, 0.95],
+      [BuildingType.ENERGY_SOLAR_FARM, 0.85],
     ];
     if (this.s.character === 'hill') services.shift();
+
+    const utilityAnchors: Array<{ type: BuildingType; x: number; z: number }> = [];
+
+    // Place a Water Pump Station on a valid water source (coastline or aquifer)
+    {
+      const { w, d } = getEffectiveSize(BuildingType.WATER_PUMP_STATION);
+      let bestPump: [number, number] | null = null;
+      let bestPumpScore = Infinity;
+      for (let x = 1; x + w < this.n; x++) {
+        for (let z = 1; z + d < this.n; z++) {
+          let fits = true;
+          for (let dx = 0; dx < w && fits; dx++) {
+            for (let dz = 0; dz < d && fits; dz++) fits = this.free(x + dx, z + dz);
+          }
+          if (!fits || !hasWaterSourceInFootprint(this.grid, { x, z }, w, d)) continue;
+          const score = Math.abs(this.reach(x, z) - 0.65) + (this.fronts(x, z) ? 0 : 0.3);
+          if (score < bestPumpScore) {
+            bestPumpScore = score;
+            bestPump = [x, z];
+          }
+        }
+      }
+      if (bestPump) {
+        const [px, pz] = bestPump;
+        for (let dx = 0; dx < w; dx++) for (let dz = 0; dz < d; dz++) this.used[(px + dx) * this.n + pz + dz] = 1;
+        this.plan.push({ type: BuildingType.WATER_PUMP_STATION, position: { x: px, z: pz } });
+        utilityAnchors.push({ type: BuildingType.WATER_PUMP_STATION, x: px, z: pz });
+      }
+    }
+
     for (const [type, distance] of services) {
       const { w, d } = getEffectiveSize(type);
       let best: [number, number] | null = null;
@@ -607,6 +643,93 @@ class TownPlanner {
       const [x, z] = best;
       for (let dx = 0; dx < w; dx++) for (let dz = 0; dz < d; dz++) this.used[(x + dx) * this.n + z + dz] = 1;
       this.plan.push({ type, position: { x, z } });
+      utilityAnchors.push({ type, x, z });
+    }
+
+    // Lay underground water & sewage mains under all streets, plus L-connectors to facilities & power lines
+    const waterSet = new Set<number>();
+    const sewageSet = new Set<number>();
+    const powerSet = new Set<number>();
+    const addConduit = (set: Set<number>, type: BuildingType, x: number, z: number) => {
+      if (!this.inside(x, z) || this.grid[x][z].terrain === 'water') return;
+      const key = x * this.n + z;
+      if (set.has(key)) return;
+      set.add(key);
+      this.plan.push({ type, position: { x, z } });
+    };
+    const connectManhat = (set: Set<number>, type: BuildingType, x0: number, z0: number, x1: number, z1: number) => {
+      const sx = x1 >= x0 ? 1 : -1;
+      for (let x = x0; x !== x1 + sx; x += sx) addConduit(set, type, x, z0);
+      const sz = z1 >= z0 ? 1 : -1;
+      for (let z = z0; z !== z1 + sz; z += sz) addConduit(set, type, x1, z);
+    };
+
+    let roadAnchor: [number, number] | null = null;
+    for (let x = 0; x < this.n; x++) {
+      for (let z = 0; z < this.n; z++) {
+        if (this.roadAt(x, z)) {
+          if (!roadAnchor || Math.hypot(x - this.cx, z - this.cz) < Math.hypot(roadAnchor[0] - this.cx, roadAnchor[1] - this.cz)) {
+            roadAnchor = [x, z];
+          }
+          addConduit(waterSet, BuildingType.UTILITY_WATER_PIPE, x, z);
+          addConduit(sewageSet, BuildingType.UTILITY_SEWAGE_PIPE, x, z);
+          if (this.roadAt(x, z) === MAIN_STREET || this.roadAt(x, z) === AVENUE || (x + z) % 2 === 0) {
+            addConduit(powerSet, BuildingType.UTILITY_POWER_LINE, x, z);
+          }
+        }
+      }
+    }
+
+    if (roadAnchor) {
+      for (const anchor of utilityAnchors) {
+        if (anchor.type === BuildingType.WATER_PUMP_STATION || anchor.type === BuildingType.WATER_TOWER) {
+          connectManhat(waterSet, BuildingType.UTILITY_WATER_PIPE, anchor.x, anchor.z, roadAnchor[0], roadAnchor[1]);
+          connectManhat(powerSet, BuildingType.UTILITY_POWER_LINE, anchor.x, anchor.z, roadAnchor[0], roadAnchor[1]);
+        } else if (anchor.type === BuildingType.SEWAGE_PUMP_STATION || anchor.type === BuildingType.WATER_SEWAGE_PLANT) {
+          connectManhat(sewageSet, BuildingType.UTILITY_SEWAGE_PIPE, anchor.x, anchor.z, roadAnchor[0], roadAnchor[1]);
+          connectManhat(powerSet, BuildingType.UTILITY_POWER_LINE, anchor.x, anchor.z, roadAnchor[0], roadAnchor[1]);
+        } else if (
+          anchor.type === BuildingType.ENERGY_COAL_PLANT
+          || anchor.type === BuildingType.ENERGY_SOLAR_FARM
+          || anchor.type === BuildingType.ENERGY_WIND_TURBINE
+          || anchor.type === BuildingType.ENERGY_SUBSTATION
+        ) {
+          connectManhat(powerSet, BuildingType.UTILITY_POWER_LINE, anchor.x, anchor.z, roadAnchor[0], roadAnchor[1]);
+        }
+      }
+    }
+
+    // On coastal or river plots, add waterfront docks/marina where streets approach the shore.
+    const waterfrontTypes: BuildingType[] = this.s.character === 'village'
+      ? [BuildingType.WATERFRONT_DOCK]
+      : [BuildingType.WATERFRONT_MARINA, BuildingType.WATERFRONT_DOCK];
+    for (const wfType of waterfrontTypes) {
+      let best: { x: number; z: number; orientation: RoadOrientation; score: number } | null = null;
+      for (const orientation of ['EW', 'NS'] as const) {
+        const { w, d } = getEffectiveSize(wfType, orientation);
+        for (let x = 1; x + w < this.n; x++) {
+          for (let z = 1; z + d < this.n; z++) {
+            let clear = true;
+            let nearRoad = false;
+            for (let dx = 0; dx < w && clear; dx++) {
+              for (let dz = 0; dz < d && clear; dz++) {
+                const cx = x + dx, cz = z + dz;
+                const t = this.grid[cx][cz].terrain;
+                if (t === 'steep' || this.roadAt(cx, cz) || this.used[cx * this.n + cz]) clear = false;
+                if (this.fronts(cx, cz)) nearRoad = true;
+              }
+            }
+            if (!clear) continue;
+            if (!getWaterfrontFacing(this.grid, { x, z }, wfType, orientation)) continue;
+            const score = (nearRoad ? 0 : 1.5) + this.reach(x, z) * 0.5 + this.noise(x, z, 77) * 0.3;
+            if (!best || score < best.score) best = { x, z, orientation, score };
+          }
+        }
+      }
+      if (!best) continue;
+      const { w, d } = getEffectiveSize(wfType, best.orientation);
+      for (let dx = 0; dx < w; dx++) for (let dz = 0; dz < d; dz++) this.used[(best.x + dx) * this.n + best.z + dz] = 1;
+      this.plan.push({ type: wfType, position: { x: best.x, z: best.z }, orientation: best.orientation });
     }
   }
 
@@ -687,10 +810,7 @@ export function planTown(terrain: Grid, settings: TownSettings, idPrefix: string
     };
   });
   for (const building of buildings) {
-    const { w, d } = getEffectiveSize(building.type, building.orientation);
-    for (let dx = 0; dx < w; dx++) {
-      for (let dz = 0; dz < d; dz++) grid[building.position.x + dx][building.position.z + dz].buildingId = building.id;
-    }
+    setGridBuilding(grid, building);
   }
   return { grid, buildings };
 }

@@ -23,6 +23,7 @@ import {
   type WorldState,
   type PopulationSummary,
   type TownSettings,
+  type UtilityLayer,
   type CityListItem,
 } from '@cityzen/shared';
 import type { CityConnection } from './CityConnection.js';
@@ -242,8 +243,8 @@ export class GameClient implements CityConnection {
     }
   }
 
-  async demolish(position: Position, playerId?: string): Promise<void> {
-    const result = await this.post('/api/building/demolish', { position, playerId });
+  async demolish(position: Position, playerId?: string, layer?: UtilityLayer): Promise<void> {
+    const result = await this.post('/api/building/demolish', { position, playerId, layer });
     if (!result.success) {
       this.callbacks.onError({ message: result.error || 'Demolish failed', code: 'DEMOLISH_FAILED' });
     }

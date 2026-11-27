@@ -1,12 +1,15 @@
 import {
   type CityState,
   type BuildingType,
+  type UtilityLayer,
   type ZoneDensity,
   type WorldState,
   type EdgeDirection,
   type PlacedBuilding,
-  getEffectiveSize,
+  clearGridBuilding,
+  getBuildingUtilityLayer,
   levelRoadTerrain,
+  setGridBuilding,
   findAdjacentCity,
   getOppositeDirection,
   isZone,
@@ -39,6 +42,7 @@ import { WorldMap } from './ui/WorldMap.js';
 import { GameMenu } from './ui/GameMenu.js';
 import { OptionsPanel, type GameOptions } from './ui/OptionsPanel.js';
 import { CarManager } from './world/CarManager.js';
+import { BoatManager } from './world/BoatManager.js';
 import { DriveMode } from './world/DriveMode.js';
 import { GridRaycaster } from './input/Raycaster.js';
 import { BuildTools, type ToolMode } from './ui/BuildTools.js';
@@ -55,6 +59,7 @@ import { P2PGameClient } from './network/p2p/P2PGameClient.js';
 import { SoundManager } from './audio/SoundManager.js';
 import { TownPlannerPanel } from './ui/TownPlannerPanel.js';
 import { CityLoading } from './ui/CityLoading.js';
+import { UtilityLayerEditor } from './ui/UtilityLayerEditor.js';
 
 const SERVER_URL = window.location.origin;
 const LAST_WORLD_KEY = 'cityzen_last_p2p_world';
@@ -152,6 +157,7 @@ const edgeRoadIndicator = new EdgeRoadIndicator(sceneManager.scene);
 
 const cityRenderer = new CityRenderer(sceneManager.scene, entranceRoad);
 const carManager = new CarManager(sceneManager.scene);
+const boatManager = new BoatManager(sceneManager.scene);
 const driveMode = new DriveMode(sceneManager.scene, sceneManager, cameraController, carManager, uiRoot);
 const buildMode = new BuildMode(sceneManager.scene, () => sceneManager.camera, canvas);
 const soundManager = new SoundManager();
@@ -180,6 +186,7 @@ function beginCityLoad(label: string): void {
   cityRenderer.clear();
   edgeRoadIndicator.clear();
   carManager.clear();
+  boatManager.clear();
   setInCity(true);
   cityLoading.show(label, () => abortCityLoad('The city took too long to load. Please try again.'));
 }
@@ -239,26 +246,77 @@ const toolbar = new Toolbar(uiRoot, resourceBar.demand, (type: BuildingType, den
     return;
   }
 
+  const targetLayer = getBuildingUtilityLayer(type);
+  if (targetLayer !== 'surface') {
+    setActiveLayer(targetLayer);
+  }
   setToolMode('build');
   buildMode.select(type);
   buildMode.setDensity(density ?? null);
   toolbar.setActive(type);
+  utilityLayerEditor.setActiveTool('build', type);
   cityRenderer.highlightZones(isZone(type));
 });
 const buildTools = new BuildTools(toolbar.controls, setToolMode, (size) => buildMode.setBrushSize(size));
 const mapInput = new MapInput(canvas, cameraController, buildMode, () => toolbar.dismissPicker());
+
+const utilityLayerEditor = new UtilityLayerEditor(cityHud, {
+  onSelectLayer: (layer) => {
+    setActiveLayer(layer);
+    if (layer === 'surface' && buildMode.getSelectedType() && getBuildingUtilityLayer(buildMode.getSelectedType()!) !== 'surface') {
+      setToolMode('pointer');
+    }
+  },
+  onSelectBuilding: (type, layer) => {
+    if (isReadOnlyCity) {
+      footerIndicator.toast('Read-only view — owner is offline', 2500);
+      return;
+    }
+    if (buildMode.getSelectedType() === type && buildMode.getToolMode() === 'build') {
+      setToolMode('pointer');
+      return;
+    }
+    setActiveLayer(layer);
+    setToolMode('build');
+    buildMode.select(type);
+    buildMode.setDensity(null);
+    toolbar.setActive(type);
+    utilityLayerEditor.setActiveTool('build', type);
+  },
+  onSelectBulldoze: (layer) => {
+    if (isReadOnlyCity) {
+      footerIndicator.toast('Read-only view — owner is offline', 2500);
+      return;
+    }
+    setActiveLayer(layer);
+    setToolMode(buildMode.getToolMode() === 'bulldoze' ? 'pointer' : 'bulldoze');
+  },
+});
+
+resourceBar.onSelectUtilityLayer = (layer) => {
+  setActiveLayer(cityRenderer.getActiveLayer() === layer ? 'surface' : layer);
+};
+
+function setActiveLayer(layer: UtilityLayer): void {
+  buildMode.setActiveLayer(layer);
+  const report = cityRenderer.setActiveLayer(layer);
+  utilityLayerEditor.setLayer(layer);
+  utilityLayerEditor.update(cityState, report);
+  setGridEditing(gridHelper, layer !== 'surface' || buildMode.getToolMode() !== 'pointer');
+}
 
 function setToolMode(mode: ToolMode): void {
   if (mode !== 'pointer') setDrivePicking(false);
   mapInput.cancel();
   buildMode.setToolMode(mode);
   buildTools.setActiveMode(mode);
-  setGridEditing(gridHelper, mode !== 'pointer');
+  setGridEditing(gridHelper, mode !== 'pointer' || cityRenderer.getActiveLayer() !== 'surface');
   if (mode !== 'build') {
     toolbar.setActive(null);
     toolbar.close();
     cityRenderer.highlightZones(false);
   }
+  utilityLayerEditor.setActiveTool(mode, buildMode.getSelectedType());
 }
 
 let isNight = false;
@@ -275,6 +333,9 @@ const cityAdvisor = new CityAdvisor(uiRoot, action => {
     toolbar.close();
     financePanel.update(cityState);
     financePanel.show();
+  } else if (action.kind === 'layer') {
+    toolbar.close();
+    setActiveLayer(action.layer);
   } else if (action.kind === 'build') {
     toolbar.showBuilding(action.building);
   } else {
@@ -442,6 +503,7 @@ const nightButton = addHudAction('Night View', () => {
   isNight = !isNight;
   lighting.setNight(isNight);
   sceneManager.setDayNight(isNight);
+  boatManager.setNight(isNight);
   nightButton.setAttribute('aria-pressed', String(isNight));
 }, 'Night');
 nightButton.setAttribute('aria-pressed', 'false');
@@ -472,8 +534,10 @@ connect({
     cityState = city;
     buildMode.setCityState(city);
     cityRenderer.syncState(city);
+    utilityLayerEditor.update(city);
     edgeRoadIndicator.update(city.buildings, worldState, city.id);
     carManager.clear();
+    boatManager.clear();
     resourceBar.update(city.resources, cityState);
     refreshCityAdvisor(cityState);
     lobby.hide();
@@ -498,12 +562,7 @@ connect({
       if (isRoad(building.type) && levelRoadTerrain(cityState.grid, building.position, building.type, building.orientation) > 0) {
         terrainLeveled = true;
       }
-      const { w, d } = getEffectiveSize(building.type, building.orientation);
-      for (let dx = 0; dx < w; dx++) {
-        for (let dz = 0; dz < d; dz++) {
-          cityState.grid[building.position.x + dx][building.position.z + dz].buildingId = building.id;
-        }
-      }
+      setGridBuilding(cityState.grid, building);
     }
     if (terrainLeveled) {
       setSite(cityState.siteId, cityState.grid);
@@ -511,6 +570,7 @@ connect({
 
     cityState.resources = payload.resources;
     cityRenderer.syncState(cityState);
+    utilityLayerEditor.update(cityState);
     edgeRoadIndicator.update(cityState.buildings, worldState, cityState.id);
     resourceBar.update(cityState.resources, cityState);
     refreshCityAdvisor(cityState);
@@ -521,19 +581,12 @@ connect({
     if (!cityState) return;
     const building = cityState.buildings.find((b: PlacedBuilding) => b.id === payload.buildingId);
     if (building) {
-      const { w, d } = getEffectiveSize(building.type, building.orientation);
-      for (let dx = 0; dx < w; dx++) {
-        for (let dz = 0; dz < d; dz++) {
-          // Only clear cells still owned by this building: a roundabout may
-          // already have been placed over a road it replaced.
-          const cell = cityState.grid[building.position.x + dx][building.position.z + dz];
-          if (cell.buildingId === building.id) cell.buildingId = null;
-        }
-      }
+      clearGridBuilding(cityState.grid, building);
     }
     cityState.buildings = cityState.buildings.filter((b: PlacedBuilding) => b.id !== payload.buildingId);
     cityState.resources = payload.resources;
     cityRenderer.syncState(cityState);
+    utilityLayerEditor.update(cityState);
     edgeRoadIndicator.update(cityState.buildings, worldState, cityState.id);
     resourceBar.update(cityState.resources, cityState);
     refreshCityAdvisor(cityState);
@@ -550,6 +603,7 @@ connect({
     cityState.tick = tick;
     cityState.clock = clock;
     resourceBar.update(resources, cityState);
+    utilityLayerEditor.update(cityState, cityRenderer.getUtilityReport());
     refreshCityAdvisor(cityState);
     if (financePanel.isVisible()) {
       financePanel.update(cityState);
@@ -696,24 +750,25 @@ buildMode.onPaint = (stroke) => {
   void gameClient.paintBuildings(stroke, playerId);
 };
 
-buildMode.onDemolish = (pos) => {
+buildMode.onDemolish = (pos, layer) => {
   if (isReadOnlyCity) return;
-  gameClient.demolish(pos, playerId);
+  gameClient.demolish(pos, playerId, layer);
 };
 
 buildMode.onPreviewClearance = (rect) => {
   cityRenderer.setPreviewClearance(rect);
 };
 
-buildMode.onDragCostUpdate = (cost, affordable = true, gradingCost = 0) => {
+buildMode.onDragCostUpdate = (cost, affordable = true, gradingCost = 0, invalidReason) => {
   if (cost !== null) {
     const levelingNote = gradingCost > 0 ? ` (includes $${gradingCost.toLocaleString()} leveling)` : '';
-    footerIndicator.show(
-      affordable
-        ? `Cost: $${cost.toLocaleString()}${levelingNote}`
-        : `Cost: $${cost.toLocaleString()}${levelingNote} — not enough money`,
-      affordable ? 'info' : 'warn',
-    );
+    if (!affordable) {
+      footerIndicator.show(`Cost: $${cost.toLocaleString()}${levelingNote} — not enough money`, 'warn');
+    } else if (invalidReason) {
+      footerIndicator.show(`Cost: $${cost.toLocaleString()}${levelingNote} — ${invalidReason.toLowerCase()}`, 'warn');
+    } else {
+      footerIndicator.show(`Cost: $${cost.toLocaleString()}${levelingNote}`, 'info');
+    }
   } else {
     footerIndicator.hide();
   }
@@ -819,6 +874,7 @@ const gameMenu = new GameMenu(uiRoot, {
     cityRenderer.clear();
     edgeRoadIndicator.clear();
     carManager.clear();
+    boatManager.clear();
     gameClient.restart(playerId);
   },
   onEndGame: async () => {
@@ -829,6 +885,7 @@ const gameMenu = new GameMenu(uiRoot, {
     cityRenderer.clear();
     edgeRoadIndicator.clear();
     carManager.clear();
+    boatManager.clear();
     clearSession();
     showWorldMap();
   },
@@ -879,9 +936,11 @@ function applyOptions(options: GameOptions): void {
   // Grid visibility
   gridHelper.visible = options.showGrid;
 
-  // Cars
+  // Cars & boats
   carManager.setEnabled(options.showCars);
   carManager.setMaxCars(options.maxCars);
+  boatManager.setEnabled(options.showCars);
+  boatManager.setMaxBoats(Math.max(0, Math.round(options.maxCars * 0.7)));
 
   // Looks
   cityRenderer.setLook({
@@ -948,6 +1007,8 @@ window.addEventListener('keydown', (e) => {
   } else if (cityState) {
     if (buildMode.getSelectedType() || buildMode.getToolMode() === 'bulldoze') {
       setToolMode('pointer');
+    } else if (cityRenderer.getActiveLayer() !== 'surface') {
+      setActiveLayer('surface');
     } else if (!toolbar.close()) {
       gameMenu.show();
     }
@@ -987,6 +1048,11 @@ window.addEventListener('keydown', (e) => {
   } else if (e.code === 'KeyB') {
     if (isReadOnlyCity) return;
     setToolMode(buildMode.getToolMode() === 'bulldoze' ? 'pointer' : 'bulldoze');
+  } else if (e.code === 'KeyL') {
+    const next = utilityLayerEditor.cycleLayer();
+    footerIndicator.toast(`${next === 'surface' ? 'Surface' : next[0].toUpperCase() + next.slice(1)} layer`);
+  } else if (e.code === 'KeyR' && buildMode.getToolMode() === 'build') {
+    buildMode.rotateSelection();
   }
 });
 
@@ -1023,7 +1089,10 @@ function gameLoop(): void {
   cityRenderer.update(deltaTime, isNight);
   // Paused (speed 0) freezes all simulated movement; camera/UI stay live
   const paused = cityState?.clock?.speed === 0;
-  if (!paused) carManager.update(deltaTime, cityState);
+  if (!paused) {
+    carManager.update(deltaTime, cityState);
+    boatManager.update(deltaTime, cityState);
+  }
   buildMode.updatePreview(cityState);
   compassIndicator.update(cameraController.getRotationAngle());
   zoomControl.update();

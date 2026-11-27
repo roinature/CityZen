@@ -38,6 +38,29 @@ export interface Loan {
   takenAtTick: number;
 }
 
+export interface UtilitySummary {
+  powerGenerationMW: number;
+  powerDemandMW: number;
+  powerLoadPct: number;
+  poweredBuildings: number;
+  unpoweredBuildings: number;
+  brownoutBuildings: number;
+  powerSubgrids: number;
+
+  waterSupplyM3: number;
+  waterDemandM3: number;
+  waterLoadPct: number;
+  wateredBuildings: number;
+  unwateredBuildings: number;
+  activeWaterSources: number;
+
+  sewageCapacityM3: number;
+  sewageDemandM3: number;
+  sewageLoadPct: number;
+  drainedBuildings: number;
+  backedUpBuildings: number;
+}
+
 export interface ResourceState {
   money: number;
   population: number;
@@ -47,4 +70,5 @@ export interface ResourceState {
   populationSummary?: PopulationSummary;
   zonePopulations?: ZonePopulationEntry[];
   loans?: Loan[];
+  utilities?: UtilitySummary;
 }

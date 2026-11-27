@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {
-  BUILDING_DEFS, BuildingType, CELL_SIZE, ZoneDensity, getEffectiveSize, getZoneLevelDef, isRoad, isZone,
+  BUILDING_DEFS, BuildingType, CELL_SIZE, ZoneDensity, getEffectiveSize, getZoneLevelDef,
+  isRoad, isUtilityConduit, isZone,
   type PlacedBuilding, type RoadOrientation, type ZoneType,
 } from '@cityzen/shared';
 import type { CityStyle } from './CityStyle.js';
@@ -219,6 +220,7 @@ export class CityBuildings {
   private hiddenUnits = new Set<Unit>();
   private clearedRect: GridRect | null = null;
   private highlighted = false;
+  private layerOpacity = 1;
   private transform = new THREE.Matrix4();
 
   constructor() {
@@ -236,6 +238,27 @@ export class CityBuildings {
     this.addZoneTints(buildings);
     this.known = new Set(units.map(unit => unit.key));
     if (this.clearedRect) this.applyPreviewClearance(this.clearedRect);
+    if (this.layerOpacity < 1) this.applyLayerOpacity();
+  }
+
+  /** Fades surface buildings into translucent silhouettes during underground utility editing. */
+  setLayerOpacity(opacity: number): void {
+    if (this.layerOpacity === opacity) return;
+    this.layerOpacity = opacity;
+    this.applyLayerOpacity();
+  }
+
+  private applyLayerOpacity(): void {
+    const translucent = this.layerOpacity < 0.99;
+    for (const child of this.group.children) {
+      if (!(child instanceof THREE.InstancedMesh)) continue;
+      if (child.name === 'empty-lots' || child.name === 'zone-tints') continue;
+      const mat = child.material as THREE.Material;
+      mat.transparent = translucent;
+      mat.opacity = this.layerOpacity;
+      mat.depthWrite = !translucent;
+      mat.needsUpdate = true;
+    }
   }
 
   update(deltaTime: number): void {
@@ -337,7 +360,7 @@ export class CityBuildings {
       units.push(this.unit(lot, w, d, density, roll, roads, style, skyline));
     }
     for (const b of buildings) {
-      if (isRoad(b.type) || isZone(b.type) || hasServiceModel(b.type)
+      if (isRoad(b.type) || isZone(b.type) || isUtilityConduit(b.type) || hasServiceModel(b.type)
         || b.type === BuildingType.PARK || b.type === BuildingType.PARKING) continue;
       units.push(...CityBuildings.layoutServiceUnits(b.type, b.position.x, b.position.z, b.id, b.orientation));
     }

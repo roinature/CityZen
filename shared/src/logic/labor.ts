@@ -29,6 +29,8 @@ export function calculateLaborStats(state: CityState): LaborStats {
 
   for (const b of state.buildings) {
     housingCapacity += BUILDING_DEFS[b.type]?.effects?.populationCapacity ?? 0;
+    const standaloneJobs = BUILDING_DEFS[b.type]?.effects?.jobs ?? 0;
+    if (standaloneJobs > 0) commercialJobs += standaloneJobs;
     if (!isZone(b.type) || !b.developmentLevel || b.developmentLevel <= 0) continue;
 
     const levelDef = getZoneLevelDef(b.type as ZoneType, b.density, b.developmentLevel);

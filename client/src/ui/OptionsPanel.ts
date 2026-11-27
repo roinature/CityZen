@@ -91,7 +91,7 @@ export class OptionsPanel {
             <input type="checkbox" id="opt-grid" />
           </div>
           <div class="option-row">
-            <label for="opt-cars">Show Cars</label>
+            <label for="opt-cars">Show Traffic &amp; Boats</label>
             <input type="checkbox" id="opt-cars" />
           </div>
           <div class="option-row">

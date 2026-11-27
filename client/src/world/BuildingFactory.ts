@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {
-  BUILDING_DEFS, CELL_SIZE, BuildingType, isRoad, isZone, getEffectiveSize, type RoadOrientation,
+  BUILDING_DEFS, CELL_SIZE, BuildingType, isRoad, isUtilityConduit, isZone, getEffectiveSize,
+  type RoadOrientation, type WaterfrontFacing,
 } from '@cityzen/shared';
 import { CityBuildings } from './CityBuildings.js';
 import { CITY_STYLES, type CityStyle } from './CityStyle.js';
@@ -97,6 +98,42 @@ function buildRoundaboutPreview(style: CityStyle): THREE.Group {
   add(new THREE.CylinderGeometry(0.58, 0.58, 0.08, 24), style.lawn, 0, 0.04, 0);
   add(new THREE.CylinderGeometry(0.03, 0.045, 0.32, 6), 0x6b4f35, 0, 0.22, 0);
   add(new THREE.IcosahedronGeometry(0.28, 1), style.leaves[0], 0, 0.54, 0);
+  group.scale.setScalar(CELL_SIZE);
+  return group;
+}
+
+function buildConduitPreview(type: BuildingType, orientation?: RoadOrientation): THREE.Group {
+  const group = new THREE.Group();
+  const add = (geo: THREE.BufferGeometry, color: number, x: number, y: number, z: number) => {
+    const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.25 }));
+    mesh.position.set(x, y, z);
+    group.add(mesh);
+  };
+  if (type === BuildingType.UTILITY_POWER_LINE) {
+    // Steel transmission pole + crossarm + glowing amber insulators
+    add(new THREE.CylinderGeometry(0.08, 0.11, 0.05, 10), 0x78909c, 0, 0.025, 0);
+    add(new THREE.CylinderGeometry(0.024, 0.04, 1.05, 8), 0x90a4ae, 0, 0.55, 0);
+    const ew = orientation === 'EW';
+    add(new THREE.BoxGeometry(ew ? 0.05 : 0.52, 0.035, ew ? 0.52 : 0.05), 0xb0bec5, 0, 1.02, 0);
+    for (const s of [-0.2, 0.2]) {
+      add(new THREE.CylinderGeometry(0.022, 0.022, 0.08, 8), 0xffd54f, ew ? 0 : s, 0.97, ew ? s : 0);
+    }
+  } else {
+    const pipeColor = type === BuildingType.UTILITY_WATER_PIPE ? 0x29b6f6 : 0x26a69a;
+    const collarColor = type === BuildingType.UTILITY_WATER_PIPE ? 0x0288d1 : 0x00796b;
+    const ns = orientation === 'NS';
+    const pipeGeo = ns
+      ? new THREE.CylinderGeometry(0.11, 0.11, 0.94, 14).rotateX(Math.PI / 2)
+      : new THREE.CylinderGeometry(0.11, 0.11, 0.94, 14).rotateZ(Math.PI / 2);
+    add(pipeGeo, pipeColor, 0, 0.14, 0);
+    add(new THREE.CylinderGeometry(0.15, 0.15, 0.12, 14), collarColor, 0, 0.14, 0);
+    for (const end of [-0.38, 0.38]) {
+      const flange = ns
+        ? new THREE.CylinderGeometry(0.135, 0.135, 0.05, 12).rotateX(Math.PI / 2)
+        : new THREE.CylinderGeometry(0.135, 0.135, 0.05, 12).rotateZ(Math.PI / 2);
+      add(flange, collarColor, ns ? 0 : end, 0.14, ns ? end : 0);
+    }
+  }
   group.scale.setScalar(CELL_SIZE);
   return group;
 }
@@ -207,6 +244,10 @@ export class BuildingFactory {
     [BuildingType.ART_THEATER]: 'theater_facade.png',
     [BuildingType.ART_CONCERT_HALL]: 'concert_hall_facade.png',
     [BuildingType.ART_SCULPTURE_PARK]: 'sculpture_park_facade.png',
+    [BuildingType.WATERFRONT_DOCK]: 'dock_facade.png',
+    [BuildingType.WATERFRONT_MARINA]: 'marina_facade.png',
+    [BuildingType.WATERFRONT_FERRY]: 'ferry_terminal_facade.png',
+    [BuildingType.WATERFRONT_PORT]: 'cargo_port_facade.png',
   };
 
   /**
@@ -231,6 +272,7 @@ export class BuildingFactory {
     valid: boolean,
     style: CityStyle = CITY_STYLES.classic,
     orientation?: RoadOrientation,
+    facing?: WaterfrontFacing,
   ): THREE.Group {
     const def = BUILDING_DEFS[type];
     const { w: effW, d: effD } = getEffectiveSize(type, orientation);
@@ -273,6 +315,10 @@ export class BuildingFactory {
       return group;
     }
 
+    if (isUtilityConduit(type)) {
+      return styleAsGhostPreview(buildConduitPreview(type, orientation), valid, w, d);
+    }
+
     if (type === BuildingType.PARK) {
       return styleAsGhostPreview(buildParkPreview(style), valid, w, d);
     }
@@ -282,7 +328,7 @@ export class BuildingFactory {
     }
 
     const model = hasServiceModel(type)
-      ? buildServiceModelMesh(type, style, orientation)
+      ? buildServiceModelMesh(type, style, orientation, facing)
       : CityBuildings.createServiceModelMesh(type, style, orientation);
 
     return styleAsGhostPreview(model, valid, w, d);
@@ -295,19 +341,20 @@ export class BuildingFactory {
     const { w: effW, d: effD } = getEffectiveSize(type, orientation);
     const w = effW * CELL_SIZE;
     const d = effD * CELL_SIZE;
-    const flat = isZone(type) || isRoad(type) || type === BuildingType.PARK || type === BuildingType.PARKING;
-    const h = flat ? 0.14 : 0.55 + (def.height || 1) * 0.24;
+    const flat = isZone(type) || isRoad(type) || isUtilityConduit(type)
+      || type === BuildingType.PARK || type === BuildingType.PARKING;
+    const h = flat ? 0.18 : 0.55 + (def.height || 1) * 0.24;
 
     const geometry = new THREE.BoxGeometry(w * 0.92, h, d * 0.92);
     const material = new THREE.MeshLambertMaterial({
       color: 0xff3b30,
       transparent: true,
-      opacity: 0.38,
+      opacity: 0.42,
       depthWrite: false,
     });
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.y = h / 2 + 0.02;
-    mesh.renderOrder = 12;
+    mesh.renderOrder = 22;
     group.add(mesh);
     addFootprintFrame(group, w, d, false);
 
@@ -320,6 +367,16 @@ export class BuildingFactory {
     style: CityStyle = CITY_STYLES.classic,
     valid = true,
   ): THREE.Group {
+    if (isUtilityConduit(type)) {
+      const { w: effW, d: effD } = getEffectiveSize(type, orientation);
+      return styleAsGhostPreview(
+        buildConduitPreview(type, orientation),
+        valid,
+        effW * CELL_SIZE,
+        effD * CELL_SIZE,
+      );
+    }
+
     const group = new THREE.Group();
 
     const { w: effW, d: effD } = getEffectiveSize(type, orientation);

@@ -1,19 +1,30 @@
 import { newId } from './id.js';
 import type { CityState } from '../types/city.js';
 import type { Player } from '../types/player.js';
-import type { Position } from '../types/grid.js';
+import type { Position, UtilityLayer } from '../types/grid.js';
 import type { GameClock } from '../types/time.js';
 import type { PopulationSummary, ZonePopulationEntry } from '../types/resources.js';
-import { type PlacedBuilding, type RoadOrientation, BuildingType, ZoneDensity, isRoad, isZone } from '../types/building.js';
+import { type PlacedBuilding, type RoadOrientation, BuildingType, ZoneDensity, isRoad, isWaterfront, isZone } from '../types/building.js';
 import { type PlaceBuildingsPayload, S2C } from '../types/events.js';
 import { INITIAL_RESOURCES, MIN_TAX_RATE, MAX_TAX_RATE, DEFAULT_GAME_SPEED } from '../constants/simulation.js';
 import { BUILDING_DEFS, ZONE_DENSITY_COSTS } from '../constants/buildings.js';
-import { canPlaceBuilding, createEmptyGrid, getEffectiveSize, getPlacementCost, getReplacedBuildings, levelRoadTerrain } from '../logic/placement.js';
+import {
+  canPlaceBuilding,
+  clearGridBuilding,
+  createEmptyGrid,
+  findGridBuildingToDemolish,
+  getPlacementCost,
+  getReplacedBuildings,
+  levelRoadTerrain,
+  resolveWaterfrontOrientation,
+  setGridBuilding,
+} from '../logic/placement.js';
 import { createStarterLayout } from '../logic/starterLayout.js';
 import { planTown, type TownSettings } from '../logic/townPlan.js';
 import { applySiteTerrain } from '../terrain/sites.js';
 import { simulateCityTick } from '../logic/simulation.js';
 import { validateLoanRequest, createLoan } from '../logic/loans.js';
+import { evaluateCityUtilities } from '../logic/utilities.js';
 
 function createInitialClock(): GameClock {
   return {
@@ -179,6 +190,7 @@ export class CityRoom {
     const result = this.addBuilding(playerId, position, type, density, orientation);
     if (!result.success) return result;
 
+    this.state.resources.utilities = evaluateCityUtilities(this.state).summary;
     this.broadcast(S2C.BUILDING_PLACED, { building: result.building, resources: this.state.resources });
     this.onMutated();
     return { success: true };
@@ -202,6 +214,7 @@ export class CityRoom {
     }
 
     if (buildings.length) {
+      this.state.resources.utilities = evaluateCityUtilities(this.state).summary;
       // Keep realtime messages small even for a stroke covering the whole city.
       for (let start = 0; start < buildings.length; start += 128) {
         this.broadcast(S2C.BUILDINGS_PLACED, {
@@ -217,9 +230,12 @@ export class CityRoom {
   protected addBuilding(
     playerId: string, position: Position, type: BuildingType, density?: ZoneDensity, orientation?: RoadOrientation,
   ): { success: true; building: PlacedBuilding } | { success: false; error?: string } {
+    const effOrientation = !orientation && isWaterfront(type)
+      ? resolveWaterfrontOrientation(this.state.grid, position, type, this.state.buildings)
+      : orientation;
     const result = canPlaceBuilding(
       this.state.grid, position, type, this.state.resources,
-      this.unlimitedMoney, this.state.buildings, density, orientation,
+      this.unlimitedMoney, this.state.buildings, density, effOrientation,
     );
     if (!result.valid) {
       return { success: false, error: result.reason };
@@ -227,12 +243,12 @@ export class CityRoom {
 
     // Quote total cost (including road grading) before leveling clears steep terrain.
     const { totalCost: cost } = getPlacementCost(
-      this.state.grid, position, type, density, orientation,
+      this.state.grid, position, type, density, effOrientation,
     );
 
-    // A roundabout replaces the roads under it; non-zone buildings replace zoned tiles.
-    for (const replaced of getReplacedBuildings(this.state.grid, position, type, this.state.buildings, orientation)) {
-      this.demolishBuilding(replaced.position);
+    // A roundabout replaces the roads under it; non-zone surface buildings replace zoned tiles.
+    for (const replaced of getReplacedBuildings(this.state.grid, position, type, this.state.buildings, effOrientation)) {
+      this.demolishBuilding(replaced.position, 'surface');
     }
 
     const building: PlacedBuilding = {
@@ -242,22 +258,17 @@ export class CityRoom {
       placedBy: playerId,
       placedAt: this.state.tick,
       ...(isZone(type) ? { developmentLevel: 0, density: density ?? ZoneDensity.MEDIUM } : {}),
-      ...(orientation ? { orientation } : {}),
+      ...(effOrientation ? { orientation: effOrientation } : {}),
     };
 
     // Grade steep terrain under and 1 tile alongside roads so the road never breaks
     // and adjacent lots become buildable.
     if (isRoad(type)) {
-      levelRoadTerrain(this.state.grid, position, type, orientation);
+      levelRoadTerrain(this.state.grid, position, type, effOrientation);
     }
 
-    // Update grid
-    const { w, d } = getEffectiveSize(type, orientation);
-    for (let dx = 0; dx < w; dx++) {
-      for (let dz = 0; dz < d; dz++) {
-        this.state.grid[position.x + dx][position.z + dz].buildingId = building.id;
-      }
-    }
+    // Update grid layer slot(s)
+    setGridBuilding(this.state.grid, building);
 
     // Update state
     this.state.buildings.push(building);
@@ -269,27 +280,17 @@ export class CityRoom {
     return { success: true, building };
   }
 
-  demolishBuilding(position: Position): { success: boolean; error?: string } {
-    const cell = this.state.grid[position.x]?.[position.z];
-    if (!cell || !cell.buildingId) {
+  demolishBuilding(position: Position, layer: UtilityLayer = 'surface'): { success: boolean; error?: string } {
+    const building = findGridBuildingToDemolish(this.state.grid, this.state.buildings, position, layer);
+    if (!building) {
       return { success: false, error: 'No building here' };
     }
 
-    const buildingId = cell.buildingId;
-    const building = this.state.buildings.find((b: PlacedBuilding) => b.id === buildingId);
-    if (!building) {
-      return { success: false, error: 'Building not found' };
-    }
-
+    const buildingId = building.id;
     const def = BUILDING_DEFS[building.type];
-    const { w, d } = getEffectiveSize(building.type, building.orientation);
 
-    // Clear grid cells
-    for (let dx = 0; dx < w; dx++) {
-      for (let dz = 0; dz < d; dz++) {
-        this.state.grid[building.position.x + dx][building.position.z + dz].buildingId = null;
-      }
-    }
+    // Clear grid layer slot(s)
+    clearGridBuilding(this.state.grid, building);
 
     // Remove building, refund half of what was actually paid (zones are priced by density)
     this.state.buildings = this.state.buildings.filter((b: PlacedBuilding) => b.id !== buildingId);
@@ -297,6 +298,7 @@ export class CityRoom {
       const paid = isZone(building.type) && building.density ? ZONE_DENSITY_COSTS[building.density] : def.cost;
       this.state.resources.money += Math.floor(paid / 2);
     }
+    this.state.resources.utilities = evaluateCityUtilities(this.state).summary;
     this.state.updatedAt = Date.now();
 
     this.broadcast(S2C.BUILDING_DEMOLISHED, {
@@ -414,6 +416,7 @@ export class CityRoom {
       tick: 0,
       updatedAt: Date.now(),
     };
+    this.state.resources.utilities = evaluateCityUtilities(this.state).summary;
 
     this.broadcast(S2C.CITY_STATE, {
       city: this.state,

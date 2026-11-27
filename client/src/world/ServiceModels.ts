@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {
-  BUILDING_DEFS, BuildingType, CELL_SIZE, getEffectiveSize, type PlacedBuilding, type RoadOrientation,
+  BUILDING_DEFS, BuildingType, CELL_SIZE, getEffectiveSize, getWaterfrontFacing, isWaterfront,
+  type Grid, type PlacedBuilding, type RoadOrientation, type WaterfrontFacing,
 } from '@cityzen/shared';
 import type { CityStyle } from './CityStyle.js';
 
@@ -76,6 +77,24 @@ const gardens: Build = (kit, w, d) => {
 
 /** Services with a shape of their own. The rest are ordinary buildings with a coloured roof. */
 const MODELS: Partial<Record<BuildingType, Build>> = {
+  [BuildingType.ENERGY_SUBSTATION]: (kit, w, d) => {
+    // Fenced gravel yard, twin step-down transformers, ceramic HV bushings & gantry frame
+    kit.box(w * 0.88, 0.03, d * 0.88, 0x7b8085, 0, 0.03, 0);
+    for (const sx of [-0.2, 0.18]) {
+      kit.box(0.24, 0.34, 0.28, 0x455a64, sx * w, 0.05, -0.08 * d);
+      kit.box(0.28, 0.24, 0.04, 0x607d8b, sx * w, 0.09, -0.24 * d);
+      for (const bz of [-0.16, -0.02]) {
+        kit.cylinder(0.022, 0.028, 0.22, 0xcfd8dc, sx * w, 0.39, bz * d);
+        kit.cylinder(0.03, 0.03, 0.025, 0xffb300, sx * w, 0.59, bz * d);
+      }
+    }
+    // Overhead busbar portal gantry
+    for (const gx of [-0.34, 0.34]) kit.cylinder(0.02, 0.026, 0.92, METAL, gx * w, 0.04, -0.08 * d);
+    kit.box(w * 0.76, 0.035, 0.04, METAL, 0, 0.94, -0.08 * d);
+    // Control switchgear kiosk
+    kit.box(w * 0.54, 0.28, d * 0.24, WHITE, 0, 0.05, 0.26 * d);
+    kit.box(w * 0.58, 0.04, d * 0.27, kit.accent, 0, 0.33, 0.26 * d);
+  },
   [BuildingType.ENERGY_WIND_TURBINE]: (kit) => {
     kit.cylinder(0.2, 0.24, 0.05, kit.style.concrete, 0, 0.02);
     kit.cylinder(0.025, 0.06, 2.6, WHITE, 0, 0.04);
@@ -132,6 +151,15 @@ const MODELS: Partial<Record<BuildingType, Build>> = {
     }
   },
   [BuildingType.WATER_TREATMENT]: makeBasins(0x4f8fa8),
+  [BuildingType.SEWAGE_PUMP_STATION]: (kit, w, d) => {
+    // Compact circular clarifier tank + lift pump house + green-brown pipe manifold
+    kit.cylinder(w * 0.24, w * 0.25, 0.22, kit.style.concrete, -w * 0.2, 0.03, -d * 0.14);
+    kit.cylinder(w * 0.21, w * 0.21, 0.02, 0x5d6b4d, -w * 0.2, 0.24, -d * 0.14);
+    kit.box(w * 0.42, 0.03, 0.045, METAL, -w * 0.2, 0.26, -d * 0.14);
+    kit.box(w * 0.38, 0.46, d * 0.52, kit.style.industry[0], w * 0.22, 0.03, 0.08 * d);
+    kit.box(w * 0.4, 0.05, d * 0.54, kit.accent, w * 0.22, 0.49, 0.08 * d);
+    kit.add(new THREE.CapsuleGeometry(0.11, w * 0.22, 6, 12).rotateZ(Math.PI / 2), 0x26a69a, -w * 0.16, 0.16, d * 0.26);
+  },
   [BuildingType.WATER_SEWAGE_PLANT]: makeBasins(0x6b6a45),
   [BuildingType.FIRE_HELICOPTER]: (kit, w, d) => {
     // Raised helipad deck with yellow circle/corner markings and white 'H'
@@ -272,6 +300,108 @@ const MODELS: Partial<Record<BuildingType, Build>> = {
     kit.box(w * 0.32, 0.48, d * 0.5, kit.style.industry[0], w * 0.3, 0.04, d * 0.18);
     kit.box(w * 0.34, 0.05, d * 0.52, kit.accent, w * 0.3, 0.52, d * 0.18);
   },
+  [BuildingType.WATERFRONT_DOCK]: (kit, w, d) => {
+    const timber = 0x7c583b;
+    const deck = 0x99704d;
+    const piling = 0x543b27;
+    // Shorefront timber apron (+z) and two finger piers reaching into water (-z)
+    kit.box(w * 0.94, 0.06, d * 0.46, deck, 0, 0.01, d * 0.26);
+    for (const px of [-0.28, 0.24]) {
+      kit.box(w * 0.24, 0.05, d * 0.56, deck, px * w, 0.02, -d * 0.2);
+      for (const pz of [-0.44, -0.22, 0]) {
+        for (const side of [-0.09, 0.09]) {
+          kit.cylinder(0.025, 0.028, 0.14, piling, (px + side) * w, -0.04, pz * d);
+        }
+      }
+    }
+    // Mooring bollards & dock lantern
+    for (const bx of [-0.36, -0.2, 0.16, 0.32]) {
+      kit.cylinder(0.022, 0.028, 0.07, 0x2c3034, bx * w, 0.07, -d * 0.44);
+    }
+    kit.cylinder(0.018, 0.022, 0.28, METAL, -w * 0.28, 0.07, -d * 0.42);
+    kit.add(new THREE.SphereGeometry(0.04, 10, 8), 0xffe082, -w * 0.28, 0.36, -d * 0.42);
+    // Cozy clapboard dockhouse with pitched gable roof on shore side
+    kit.box(w * 0.44, 0.38, d * 0.34, timber, -w * 0.2, 0.07, d * 0.25);
+    kit.add(new THREE.ConeGeometry(0.38, 0.22, 4).rotateY(Math.PI / 4), 0x5d4037, -w * 0.2, 0.56, d * 0.25);
+    // Stacked fish crates & supply barrels
+    kit.box(0.16, 0.1, 0.14, 0xc59b6d, w * 0.22, 0.07, d * 0.2);
+    kit.box(0.14, 0.09, 0.13, 0xb88b5a, w * 0.23, 0.17, d * 0.2);
+    kit.cylinder(0.05, 0.05, 0.12, 0x1976d2, w * 0.36, 0.07, d * 0.28);
+    kit.cylinder(0.05, 0.05, 0.12, 0xc62828, w * 0.34, 0.07, d * 0.14);
+  },
+  [BuildingType.WATERFRONT_MARINA]: (kit, w, d) => {
+    const pontoon = 0xdadfe3;
+    // Shorefront promenade (+z) with trees and yacht club pavilion
+    kit.box(w * 0.96, 0.05, d * 0.42, kit.style.walk, 0, 0.01, d * 0.28);
+    kit.box(w * 0.42, 0.38, d * 0.28, WHITE, 0, 0.06, d * 0.28);
+    kit.box(w * 0.46, 0.05, d * 0.32, kit.accent, 0, 0.44, d * 0.28);
+    kit.cylinder(0.018, 0.022, 0.38, METAL, w * 0.16, 0.49, d * 0.28);
+    kit.tree(-w * 0.38, d * 0.3, 0.85);
+    kit.tree(w * 0.38, d * 0.3, 0.85);
+    // Floating main spine & three finger slips reaching toward open water (-z)
+    kit.box(w * 0.88, 0.035, d * 0.1, pontoon, 0, 0.025, d * 0.03);
+    for (const fx of [-0.4, 0, 0.4]) {
+      kit.box(w * 0.07, 0.035, d * 0.52, pontoon, fx * w, 0.025, -d * 0.23);
+      kit.cylinder(0.02, 0.02, 0.14, METAL, fx * w, -0.03, -d * 0.45);
+    }
+    // One resident sloop moored in the west slip (leaving east/outer berths open for visiting boats)
+    kit.box(0.2, 0.08, 0.52, WHITE, -w * 0.2, 0.03, -d * 0.24);
+    kit.box(0.205, 0.025, 0.48, kit.accent, -w * 0.2, 0.07, -d * 0.24);
+    kit.cylinder(0.012, 0.014, 0.68, METAL, -w * 0.2, 0.09, -d * 0.22);
+    kit.box(0.012, 0.48, 0.22, 0xfafcff, -w * 0.2, 0.18, -d * 0.12);
+  },
+  [BuildingType.WATERFRONT_FERRY]: (kit, w, d) => {
+    // Shorefront terminal plaza & modern glazed concourse (+z)
+    kit.box(w * 0.96, 0.055, d * 0.48, kit.style.concrete, 0, 0.01, d * 0.25);
+    kit.box(w * 0.72, 0.44, d * 0.32, 0xe3eaee, -w * 0.06, 0.065, d * 0.26);
+    kit.box(w * 0.78, 0.055, d * 0.38, kit.accent, -w * 0.06, 0.505, d * 0.26);
+    // Harbor clock tower
+    kit.box(0.26, 0.78, 0.26, 0xdce4e8, w * 0.34, 0.065, d * 0.26);
+    kit.add(new THREE.ConeGeometry(0.2, 0.18, 4).rotateY(Math.PI / 4), kit.accent, w * 0.34, 0.935, d * 0.26);
+    // Covered passenger boarding gangway & twin ferry slip fender dolphins (-z)
+    kit.box(w * 0.18, 0.04, d * 0.34, kit.style.walk, 0, 0.05, -d * 0.14);
+    kit.box(w * 0.2, 0.035, d * 0.32, kit.accent, 0, 0.28, -d * 0.12);
+    for (const sx of [-0.26, 0.26]) {
+      kit.box(w * 0.09, 0.07, d * 0.48, 0x546e7a, sx * w, 0.02, -d * 0.24);
+      for (const pz of [-0.44, -0.24, -0.06]) {
+        kit.cylinder(0.032, 0.036, 0.18, 0x37474f, sx * w, -0.02, pz * d);
+        kit.cylinder(0.036, 0.036, 0.04, 0xfbc02d, sx * w, 0.16, pz * d);
+      }
+    }
+  },
+  [BuildingType.WATERFRONT_PORT]: (kit, w, d) => {
+    // Deep-water reinforced concrete quay deck (leaves -z outer strip open for docking ships)
+    kit.box(w * 0.98, 0.08, d * 0.74, kit.style.concrete, 0, -0.01, d * 0.12);
+    // Yellow quay safety kerb & cast-iron bollards along the water wall
+    kit.box(w * 0.98, 0.02, 0.06, 0xfbc02d, 0, 0.075, -d * 0.23);
+    for (let i = -3; i <= 3; i++) {
+      kit.cylinder(0.025, 0.032, 0.07, 0x263238, i * w * 0.13, 0.07, -d * 0.21);
+    }
+    // Twin ship-to-shore gantry cranes with booms extending out over the water berth (-z)
+    const craneColor = 0xd84315;
+    for (const cx of [-0.24, 0.12]) {
+      for (const lx of [-0.06, 0.06]) {
+        for (const lz of [-0.18, -0.02]) {
+          kit.box(0.045, 0.96, 0.045, craneColor, (cx + lx) * w, 0.07, lz * d);
+        }
+      }
+      kit.box(0.16 * w, 0.055, d * 0.62, craneColor, cx * w, 1.02, -d * 0.19);
+      kit.box(0.12 * w, 0.08, 0.14, WHITE, cx * w, 0.94, -d * 0.1);
+    }
+    // Intermodal container stacks
+    const palette = [0xc62828, 0x1565c0, 0x2e7d32, 0xef6c00, 0x00838f];
+    for (let i = 0; i < 8; i++) {
+      const x = (-0.36 + (i % 4) * 0.16) * w;
+      const z = (0.14 + Math.floor(i / 4) * 0.18) * d;
+      kit.box(0.44, 0.14, 0.2, palette[i % palette.length], x, 0.07, z);
+      if (i % 3 !== 2) kit.box(0.44, 0.14, 0.2, palette[(i + 2) % palette.length], x, 0.21, z);
+    }
+    // Port authority control tower & logistics warehouse on shore side
+    kit.box(w * 0.26, 0.46, d * 0.42, kit.style.industry[0], w * 0.33, 0.07, d * 0.22);
+    kit.box(w * 0.28, 0.05, d * 0.44, kit.accent, w * 0.33, 0.53, d * 0.22);
+    kit.box(0.22, 0.42, 0.22, 0xcfd8dc, w * 0.36, 0.58, d * 0.08);
+    kit.box(0.26, 0.1, 0.26, 0x37474f, w * 0.36, 1.0, d * 0.08);
+  },
 };
 
 export function hasServiceModel(type: BuildingType): boolean {
@@ -284,19 +414,46 @@ const GREEN = new Set<BuildingType>([
   BuildingType.ENERGY_WIND_TURBINE, BuildingType.TRANS_AIRPORT,
 ]);
 
+export function facingToYaw(facing: WaterfrontFacing): number {
+  switch (facing) {
+    case 'N': return 0;
+    case 'S': return Math.PI;
+    case 'W': return Math.PI / 2;
+    case 'E': return -Math.PI / 2;
+  }
+}
+
 /** Builds a service model centered at (0, 0, 0) in world units. */
-export function buildServiceModelMesh(type: BuildingType, style: CityStyle, orientation?: RoadOrientation): THREE.Group {
-  const { w, d } = getEffectiveSize(type, orientation);
-  const kit = new Kit(style, new THREE.Color(BUILDING_DEFS[type].color).getHex());
-  kit.box(w, 0.03, d, GREEN.has(type) ? style.lawn : style.concrete);
+export function buildServiceModelMesh(
+  type: BuildingType,
+  style: CityStyle,
+  orientation?: RoadOrientation,
+  facing?: WaterfrontFacing,
+): THREE.Group {
+  const waterfront = isWaterfront(type);
+  const resolvedFacing: WaterfrontFacing | undefined = facing
+    ?? (waterfront ? (orientation === 'NS' ? 'W' : 'N') : undefined);
+
+  const def = BUILDING_DEFS[type];
+  const { w, d } = resolvedFacing ? def.size : getEffectiveSize(type, orientation);
+  const kit = new Kit(style, new THREE.Color(def.color).getHex());
+  if (!waterfront) {
+    kit.box(w, 0.03, d, GREEN.has(type) ? style.lawn : style.concrete);
+  }
   MODELS[type]?.(kit, w, d);
+  if (resolvedFacing) {
+    kit.group.rotation.y = facingToYaw(resolvedFacing);
+  }
   kit.group.scale.setScalar(CELL_SIZE);
   return kit.group;
 }
 
-export function createServiceModel(building: PlacedBuilding, style: CityStyle): THREE.Group {
+export function createServiceModel(building: PlacedBuilding, style: CityStyle, grid?: Grid): THREE.Group {
   const { w, d } = getEffectiveSize(building.type, building.orientation);
-  const group = buildServiceModelMesh(building.type, style, building.orientation);
+  const facing = grid && (isWaterfront(building.type) || building.type === BuildingType.TRANS_HARBOR)
+    ? getWaterfrontFacing(grid, building.position, building.type, building.orientation, true) ?? undefined
+    : undefined;
+  const group = buildServiceModelMesh(building.type, style, building.orientation, facing);
   group.position.set((building.position.x + w / 2) * CELL_SIZE, 0, (building.position.z + d / 2) * CELL_SIZE);
   return group;
 }

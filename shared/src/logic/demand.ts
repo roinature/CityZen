@@ -10,6 +10,7 @@ import {
 } from '../constants/simulation.js';
 import { clamp } from './resources.js';
 import { calculateLaborStats } from './labor.js';
+import { evaluateCityUtilities, getCellUtilityCoverage } from './utilities.js';
 
 function housingTarget(population: number): number {
   return population * HOUSING_BUFFER_RATIO + HOUSING_BUFFER_MIN;
@@ -121,6 +122,7 @@ export function processZoneGrowth(state: CityState): ZoneGrowthResult {
   const currentTick = state.tick;
   const budget = calculateGrowthBudget(state);
   const count = state.buildings.length;
+  const utilities = evaluateCityUtilities(state);
 
   // Start at a different building each tick so the budget isn't always spent on the oldest zones
   for (let i = 0; i < count; i++) {
@@ -143,6 +145,20 @@ export function processZoneGrowth(state: CityState): ZoneGrowthResult {
     // Bigger buildings only go up in a city people actually like living in
     if (state.resources.happiness < getZoneLevelHappinessRequirement(level + 1)) continue;
 
+    // Utility dependencies:
+    // - Upgrading to Level 2 requires active Electricity + Water
+    // - Upgrading to Level 3 requires active Electricity + Water + Sewage
+    // - Initial Level 1 pioneer buildings can still rise off-grid, but slower than serviced lots
+    let utilityChanceFactor = 1;
+    if (level >= 1) {
+      const bStatus = utilities.buildings.get(building.id);
+      if (!bStatus || !bStatus.powered || !bStatus.watered) continue;
+      if (level >= 2 && !bStatus.drained) continue;
+    } else {
+      const cov = getCellUtilityCoverage(utilities, building.position.x, building.position.z);
+      utilityChanceFactor = cov.power && cov.water ? 1.0 : (cov.power || cov.water ? 0.8 : 0.6);
+    }
+
     // Check time requirement (now using game ticks instead of Date.now())
     const nextLevelDef = getZoneLevelDef(building.type as ZoneType, building.density, level + 1);
     const ticksRequired = nextLevelDef.ticksRequired;
@@ -151,8 +167,8 @@ export function processZoneGrowth(state: CityState): ZoneGrowthResult {
 
     if (ticksSinceLast < ticksRequired) continue;
 
-    // Random chance scaled monotonically by demand
-    if (Math.random() < getZoneGrowthChance(zoneDemand)) {
+    // Random chance scaled monotonically by demand and utility readiness
+    if (Math.random() < getZoneGrowthChance(zoneDemand) * utilityChanceFactor) {
       building.developmentLevel = level + 1;
       building.developedAt = currentTick;
       result.upgradedBuildings.push(building.id);

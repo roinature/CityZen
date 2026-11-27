@@ -15,8 +15,10 @@ import {
   WorldTickEngine,
   ZoneDensity,
   calculateEdgeConnections,
+  findGridBuildingToDemolish,
   getSite,
   isRoad,
+  isUtilityConduit,
   isZone,
   newId,
   normalizeTownSettings,
@@ -426,11 +428,10 @@ export class LocalCityHost {
         return { success, error, placement: success ? { buildings, resources: room.state.resources } : undefined };
       }
       case 'demolish': {
-        const cell = room.state.grid[args.position?.x]?.[args.position?.z];
-        const building = cell?.buildingId
-          ? room.state.buildings.find((b: PlacedBuilding) => b.id === cell.buildingId)
+        const building = args.position
+          ? findGridBuildingToDemolish(room.state.grid, room.state.buildings, args.position, args.layer)
           : undefined;
-        const result = room.demolishBuilding(args.position);
+        const result = room.demolishBuilding(args.position, args.layer);
         if (result.success) {
           this.markDirty();
           if (building && isRoad(building.type)) this.publishEdges();
@@ -536,7 +537,7 @@ export class LocalCityHost {
 }
 
 function isValidStroke({ positions, type, density, orientation }: PlaceBuildingsPayload): boolean {
-  return (isRoad(type) || isZone(type))
+  return (isRoad(type) || isZone(type) || isUtilityConduit(type))
     && (density === undefined || Object.values(ZoneDensity).includes(density))
     && (orientation === undefined || orientation === 'NS' || orientation === 'EW')
     && Array.isArray(positions) && positions.length > 0 && positions.length <= DEFAULT_GRID_SIZE ** 2

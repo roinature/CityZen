@@ -1,12 +1,14 @@
 import * as THREE from 'three';
 import {
-  DEFAULT_GRID_SIZE, isStarterEntranceRoad, type CityState, type PlacedBuilding,
+  DEFAULT_GRID_SIZE, isStarterEntranceRoad,
+  type CityState, type Grid, type PlacedBuilding, type UtilityGridReport, type UtilityLayer,
 } from '@cityzen/shared';
 import { CityBuildings, type GridRect } from './CityBuildings.js';
 import { CITY_STYLES, type CityStyle, type CityStyleId } from './CityStyle.js';
 import { createRoadSurface, indexRoads } from './RoadSurface.js';
 import { createServiceModel, hasServiceModel } from './ServiceModels.js';
 import { StreetFurniture } from './StreetFurniture.js';
+import { UtilityOverlay } from './UtilityOverlay.js';
 
 const NIGHT_FADE_SECONDS = 1.2;
 
@@ -21,6 +23,7 @@ export interface CityLook {
 export class CityRenderer {
   private buildings = new CityBuildings();
   private furniture = new StreetFurniture();
+  private utilities = new UtilityOverlay();
   private surface: THREE.Mesh | null = null;
   private rotors: THREE.Object3D[] = [];
   private models = new Map<string, THREE.Group>();
@@ -28,10 +31,48 @@ export class CityRenderer {
   private needsSync = false;
   private surfaceKey = '';
   private night = 0;
+  private activeLayer: UtilityLayer = 'surface';
   private look: CityLook = { style: 'classic', skyline: 1, crossings: true, trees: true };
 
   constructor(private scene: THREE.Scene, private entranceRoad: THREE.Group) {
-    scene.add(this.buildings.group, this.furniture.group);
+    scene.add(
+      this.buildings.group,
+      this.furniture.group,
+      this.utilities.powerLinesGroup,
+      this.utilities.layerGroup,
+    );
+  }
+
+  setActiveLayer(layer: UtilityLayer): UtilityGridReport | null {
+    this.activeLayer = layer;
+    const opacity = layer === 'water' || layer === 'sewage' ? 0.24 : layer === 'power' ? 0.65 : 1.0;
+    this.buildings.setLayerOpacity(opacity);
+    this.applyModelsOpacity(opacity);
+    return this.utilities.setActiveLayer(layer, this.state);
+  }
+
+  getActiveLayer(): UtilityLayer {
+    return this.activeLayer;
+  }
+
+  getUtilityReport(): UtilityGridReport | null {
+    return this.utilities.getLastReport();
+  }
+
+  private applyModelsOpacity(opacity: number): void {
+    const translucent = opacity < 0.99;
+    for (const model of this.models.values()) {
+      model.traverse(child => {
+        if (!(child instanceof THREE.Mesh)) return;
+        const mats = Array.isArray(child.material) ? child.material : [child.material];
+        for (const mat of mats) {
+          mat.transparent = translucent;
+          mat.opacity = opacity;
+          mat.depthWrite = !translucent;
+          mat.needsUpdate = true;
+        }
+      });
+    }
   }
 
   setLook(look: CityLook): void {
@@ -91,16 +132,21 @@ export class CityRenderer {
       this.furniture.rebuild(state.buildings, roads, state.grid.length, style, look.trees);
     }
     this.buildings.rebuild(state.buildings, roads, { style, skyline: look.skyline });
-    this.syncModels(state.buildings, style);
+    this.syncModels(state.buildings, style, state.grid);
+    if (this.activeLayer !== 'surface') {
+      const opacity = this.activeLayer === 'water' || this.activeLayer === 'sewage' ? 0.24 : 0.65;
+      this.applyModelsOpacity(opacity);
+    }
+    this.utilities.rebuild(state);
   }
 
-  private syncModels(buildings: readonly PlacedBuilding[], style: CityStyle): void {
+  private syncModels(buildings: readonly PlacedBuilding[], style: CityStyle, grid?: Grid): void {
     const current = new Set<string>();
     for (const building of buildings) {
       if (!hasServiceModel(building.type)) continue;
       current.add(building.id);
       if (this.models.has(building.id)) continue;
-      const model = createServiceModel(building, style);
+      const model = createServiceModel(building, style, grid);
       this.models.set(building.id, model);
       this.scene.add(model);
     }
@@ -129,6 +175,7 @@ export class CityRenderer {
     this.clearSurface();
     this.buildings.clear();
     this.furniture.clear();
+    this.utilities.clear();
     this.syncModels([], CITY_STYLES[this.look.style]);
   }
 }

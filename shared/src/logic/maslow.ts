@@ -2,11 +2,18 @@ import type { CityState } from '../types/city.js';
 import type { MaslowContribution } from '../types/building.js';
 import { MaslowNeed, MASLOW_NEEDS_ORDERED, LifeStage } from '../types/person.js';
 import { BUILDING_DEFS } from '../constants/buildings.js';
-import { isZone } from '../types/building.js';
+import { isUtilityConduit, isZone } from '../types/building.js';
 import {
   SERVICE_BASE_SATISFACTION, SERVICE_QUALITY_FACTOR,
   SMALL_TOWN_SATISFACTION, SMALL_TOWN_POPULATION, SMALL_TOWN_FADE_POPULATION,
 } from '../constants/simulation.js';
+import {
+  evaluateCityUtilities,
+  isGeneratorBuilding,
+  isSewageFacilityBuilding,
+  isWaterFacilityBuilding,
+  type UtilityGridReport,
+} from './utilities.js';
 
 // ── City Maslow Capacity ────────────────────────────────────
 
@@ -20,25 +27,71 @@ export interface CityMaslowCapacity {
 
 export type CityMaslowProfile = Record<MaslowNeed, CityMaslowCapacity>;
 
-/** Sum maslowContributions across all buildings in the city. */
-export function calculateCityMaslowCapacity(state: CityState): CityMaslowProfile {
+/** Sum maslowContributions across all buildings in the city, accounting for utility connectivity & power. */
+export function calculateCityMaslowCapacity(state: CityState, utilityReport?: UtilityGridReport): CityMaslowProfile {
   const profile = {} as CityMaslowProfile;
   for (const need of MASLOW_NEEDS_ORDERED) {
     profile[need] = { totalValue: 0, totalCapacity: 0, providers: [] };
   }
 
+  const utilities = utilityReport ?? evaluateCityUtilities(state);
+  const { summary } = utilities;
+  const totalConsumers = summary.poweredBuildings + summary.unpoweredBuildings;
+
   for (const building of state.buildings) {
-    // Skip undeveloped zones — only infra buildings contribute
-    if (isZone(building.type)) continue;
+    // Skip zones and utility conduits — only active buildings contribute
+    if (isZone(building.type) || isUtilityConduit(building.type)) continue;
 
     const def = BUILDING_DEFS[building.type];
     const contributions = def?.effects?.maslowContributions;
     if (!contributions) continue;
 
+    let operationalFactor = 1;
+
+    if (isGeneratorBuilding(building.type)) {
+      // Generators must be wired to consumers once the city has developed buildings
+      if (totalConsumers > 0 && summary.poweredBuildings === 0) {
+        operationalFactor = 0;
+      } else if (totalConsumers > 0) {
+        const connectedShare = summary.poweredBuildings / totalConsumers;
+        const overloadPenalty = summary.powerDemandMW > summary.powerGenerationMW && summary.powerGenerationMW > 0
+          ? summary.powerGenerationMW / summary.powerDemandMW
+          : 1;
+        operationalFactor = connectedShare * Math.min(1, overloadPenalty);
+      }
+    } else if (isWaterFacilityBuilding(building.type)) {
+      const pipeState = utilities.waterPipeState.get(building.id);
+      if (pipeState === 'dry') {
+        operationalFactor = 0;
+      } else if (totalConsumers > 0) {
+        const connectedShare = (summary.wateredBuildings + summary.unwateredBuildings) > 0
+          ? summary.wateredBuildings / (summary.wateredBuildings + summary.unwateredBuildings)
+          : 1;
+        operationalFactor = connectedShare * (pipeState === 'low_pressure' ? 0.7 : 1);
+      }
+    } else if (isSewageFacilityBuilding(building.type)) {
+      const sewerState = utilities.sewagePipeState.get(building.id);
+      if (sewerState === 'disconnected') {
+        operationalFactor = 0;
+      } else if (totalConsumers > 0) {
+        const connectedShare = (summary.drainedBuildings + summary.backedUpBuildings) > 0
+          ? summary.drainedBuildings / (summary.drainedBuildings + summary.backedUpBuildings)
+          : 1;
+        operationalFactor = connectedShare * (sewerState === 'backed_up' ? 0.65 : 1);
+      }
+    } else {
+      const st = utilities.buildings.get(building.id);
+      if (st) operationalFactor = st.efficiency;
+    }
+
+    if (operationalFactor <= 0) continue;
+
     for (const mc of contributions) {
-      profile[mc.need].totalValue += mc.value;
-      profile[mc.need].totalCapacity += mc.capacityServed;
-      profile[mc.need].providers.push({ value: mc.value, capacity: mc.capacityServed });
+      const effectiveCap = Math.round(mc.capacityServed * operationalFactor);
+      if (effectiveCap <= 0) continue;
+      profile[mc.need].totalValue += mc.value * operationalFactor;
+      profile[mc.need].totalCapacity += effectiveCap;
+      profile[mc.need].providers.push({ value: mc.value, capacity: effectiveCap });
     }
   }
 

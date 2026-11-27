@@ -2,7 +2,7 @@ import prisma from './prismaClient.js';
 import type { Prisma } from '../generated/prisma/index.js';
 import { writeWorldCityEdges } from './worldStore.js';
 import type { WorldCityEntry, CityState, PlacedBuilding, RoadOrientation, Loan } from '@cityzen/shared';
-import { applySiteTerrain, createEmptyGrid, BUILDING_DEFS, MaslowNeed, getEffectiveSize, BuildingType, calculateEdgeConnections } from '@cityzen/shared';
+import { applySiteTerrain, createEmptyGrid, MaslowNeed, calculateEdgeConnections, setGridBuilding } from '@cityzen/shared';
 
 // Loans are stored in City.loans (JSONB), added by the 20261114000000_city_loans
 // migration. Until that migration has been applied the column doesn't exist, so
@@ -199,16 +199,11 @@ async function readCityState(cityId: string, db: Prisma.TransactionClient, persi
     ...(b.orientation ? { orientation: b.orientation as RoadOrientation } : {}),
   }));
 
-  // Reconstruct grid from buildings (no empty cells stored)
+  // Reconstruct grid from buildings (including utility layer slots)
   const grid = createEmptyGrid();
   applySiteTerrain(grid, city.siteId);
   for (const b of buildings) {
-    const { w, d } = getEffectiveSize(b.type as BuildingType, b.orientation);
-    for (let dx = 0; dx < w; dx++) {
-      for (let dz = 0; dz < d; dz++) {
-        grid[b.position.x + dx][b.position.z + dz].buildingId = b.id;
-      }
-    }
+    setGridBuilding(grid, b);
   }
 
   return {

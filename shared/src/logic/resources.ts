@@ -1,6 +1,6 @@
 import type { CityState } from '../types/city.js';
 import { BUILDING_DEFS, getZoneLevelDef } from '../constants/buildings.js';
-import { isZone, type ZoneType } from '../types/building.js';
+import { BuildingType, isZone, type ZoneType } from '../types/building.js';
 import {
   TAX_PER_PERSON, TAX_PER_PERSON_FALLBACK, DEFICIT_MASLOW_PENALTY_RATE, MIN_BUDGET_MULTIPLIER,
   TAX_COMFORT_RATE, TAX_MASLOW_PENALTY_PER_POINT,
@@ -8,6 +8,7 @@ import {
 } from '../constants/economy.js';
 import { LifeStage } from '../types/person.js';
 import { calculateLaborStats } from './labor.js';
+import { evaluateCityUtilities } from './utilities.js';
 
 export interface TaxBreakdown {
   /** Income tax paid by residents. */
@@ -36,8 +37,20 @@ export function calculateTaxBreakdown(state: CityState): TaxBreakdown {
       summary.elders * TAX_PER_PERSON[LifeStage.ELDER]
     : state.resources.population * TAX_PER_PERSON_FALLBACK * incomeFactor;
 
+  const utilities = evaluateCityUtilities(state);
+  let bizCount = 0;
+  let bizEfficiencySum = 0;
+  for (const b of state.buildings) {
+    if ((b.type === BuildingType.ZONE_COMMERCIAL || b.type === BuildingType.ZONE_INDUSTRIAL)
+      && (b.developmentLevel ?? 0) > 0) {
+      bizCount++;
+      bizEfficiencySum += utilities.buildings.get(b.id)?.efficiency ?? 1;
+    }
+  }
+  const bizUtilityFactor = bizCount > 0 ? bizEfficiencySum / bizCount : 1;
+
   const residents = residentIncome * rate;
-  const businesses = employed * BUSINESS_INCOME_PER_JOB * rate;
+  const businesses = employed * BUSINESS_INCOME_PER_JOB * rate * bizUtilityFactor;
   return { residents, businesses, total: Math.floor(residents + businesses) };
 }
 

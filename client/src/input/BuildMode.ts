@@ -1,14 +1,18 @@
 import * as THREE from 'three';
 import {
-  type BuildingType,
+  BuildingType,
   type Position,
   type CityState,
   type EdgeDirection,
   type PlacedBuilding,
   type PlaceBuildingsPayload,
   type RoadOrientation,
+  type UtilityLayer,
   type ZoneDensity,
+  findGridBuildingToDemolish,
   isRoad,
+  isUtilityConduit,
+  isWaterfront,
   isZone,
   BUILDING_DEFS,
   ZONE_DENSITY_COSTS,
@@ -17,7 +21,9 @@ import {
   canPlaceBuilding,
   getEffectiveSize,
   getPlacementCost,
+  getWaterfrontFacing,
   replacesRoads,
+  resolveWaterfrontOrientation,
 } from '@cityzen/shared';
 import { BuildingFactory } from '../world/BuildingFactory.js';
 import type { GridRect } from '../world/CityBuildings.js';
@@ -39,7 +45,7 @@ function disposePreviewGroup(group: THREE.Group): void {
 }
 
 function isLineDragType(type: BuildingType): boolean {
-  return isRoad(type) && !replacesRoads(type);
+  return (isRoad(type) && !replacesRoads(type)) || isUtilityConduit(type);
 }
 
 function isRectDragType(type: BuildingType): boolean {
@@ -96,13 +102,15 @@ export class BuildMode {
 
   private selectedType: BuildingType | null = null;
   private selectedDensity: ZoneDensity | null = null;
+  private preferredOrientation: RoadOrientation = 'EW';
   private styleId: CityStyleId = 'classic';
   private previewMesh: THREE.Group | null = null;
   private previewMeshKey: string | null = null;
   private currentHoverPos: Position | null = null;
 
-  // Tool mode
+  // Tool mode & active utility layer
   private toolMode: ToolMode = 'pointer';
+  private activeLayer: UtilityLayer = 'surface';
   private brushSize = 1;
 
   // Drag state (shared by line and rect drag)
@@ -125,10 +133,10 @@ export class BuildMode {
 
   onPaint: ((stroke: PlaceBuildingsPayload) => void) | null = null;
   onPlace: ((pos: Position, type: BuildingType, density?: ZoneDensity, orientation?: RoadOrientation) => void) | null = null;
-  onDemolish: ((pos: Position) => void) | null = null;
+  onDemolish: ((pos: Position, layer: UtilityLayer) => void) | null = null;
   onEdgeRoadClick: ((direction: EdgeDirection, position: number) => void) | null = null;
-  /** Reports the cost of what is about to be placed (null = nothing), whether affordable, and any terrain-leveling fee included. */
-  onDragCostUpdate: ((cost: number | null, affordable?: boolean, gradingCost?: number) => void) | null = null;
+  /** Reports the cost of what is about to be placed (null = nothing), whether affordable, any terrain-leveling fee included, and optional invalid placement hint. */
+  onDragCostUpdate: ((cost: number | null, affordable?: boolean, gradingCost?: number, invalidReason?: string) => void) | null = null;
   /** Footprint whose existing zoned buildings should step aside for a valid hover preview. */
   onPreviewClearance: ((rect: GridRect | null) => void) | null = null;
 
@@ -148,6 +156,11 @@ export class BuildMode {
 
   setDensity(density: ZoneDensity | null): void {
     this.selectedDensity = density;
+    this.lastPreviewKey = null;
+  }
+
+  rotateSelection(): void {
+    this.preferredOrientation = this.preferredOrientation === 'EW' ? 'NS' : 'EW';
     this.lastPreviewKey = null;
   }
 
@@ -183,6 +196,16 @@ export class BuildMode {
     return this.toolMode;
   }
 
+  setActiveLayer(layer: UtilityLayer): void {
+    if (this.activeLayer === layer) return;
+    this.activeLayer = layer;
+    this.lastPreviewKey = null;
+  }
+
+  getActiveLayer(): UtilityLayer {
+    return this.activeLayer;
+  }
+
   setBrushSize(size: number): void {
     this.brushSize = Math.max(1, Math.min(3, size));
   }
@@ -201,10 +224,27 @@ export class BuildMode {
     const pos = (p: Position | null) => (p ? `${p.x},${p.z}` : '-');
     const lastId = state?.buildings.length ? state.buildings[state.buildings.length - 1].id : '';
     return [
-      this.toolMode, this.selectedType, this.selectedDensity, this.brushSize, this.styleId,
+      this.toolMode, this.activeLayer, this.selectedType, this.selectedDensity, this.preferredOrientation, this.brushSize, this.styleId,
       pos(this.currentHoverPos), this.isDragging, pos(this.lineDragStart), pos(this.rectDragStart),
       state?.id, state?.buildings.length, lastId, state?.resources.money, this.unlimitedMoney,
     ].join('|');
+  }
+
+  private resolveHoverOrientation(state: CityState, pos: Position, type: BuildingType): RoadOrientation | undefined {
+    if (isWaterfront(type)) {
+      return resolveWaterfrontOrientation(state.grid, pos, type, state.buildings, this.preferredOrientation);
+    }
+    if (type === BuildingType.TRANS_HARBOR) {
+      const facingPref = getWaterfrontFacing(state.grid, pos, type, this.preferredOrientation);
+      if (facingPref) return this.preferredOrientation;
+      const alt: RoadOrientation = this.preferredOrientation === 'EW' ? 'NS' : 'EW';
+      if (getWaterfrontFacing(state.grid, pos, type, alt)) return alt;
+    }
+    const def = BUILDING_DEFS[type];
+    if (!isZone(type) && !isRoad(type) && def.size.w !== def.size.d) {
+      return this.preferredOrientation;
+    }
+    return undefined;
   }
 
   private canAfford(state: CityState, cost: number): boolean {
@@ -254,35 +294,42 @@ export class BuildMode {
     this.clearRectPreview();
     this.clearLineDragPreview();
 
+    const orientation = this.resolveHoverOrientation(state, this.currentHoverPos, this.selectedType);
+    const facing = (isWaterfront(this.selectedType) || this.selectedType === BuildingType.TRANS_HARBOR)
+      ? getWaterfrontFacing(state.grid, this.currentHoverPos, this.selectedType, orientation) ?? undefined
+      : undefined;
+
     const result = canPlaceBuilding(
       state.grid, this.currentHoverPos, this.selectedType,
       state.resources, this.unlimitedMoney, state.buildings,
-      this.selectedDensity ?? undefined,
+      this.selectedDensity ?? undefined, orientation,
     );
 
-    const meshKey = `${this.selectedType}|${result.valid}|${this.styleId}`;
+    const meshKey = `${this.selectedType}|${result.valid}|${this.styleId}|${orientation ?? ''}|${facing ?? ''}`;
     if (!this.previewMesh || this.previewMeshKey !== meshKey) {
       this.disposePreviewOnly();
-      this.previewMesh = this.factory.createPreview(this.selectedType, result.valid, CITY_STYLES[this.styleId]);
+      this.previewMesh = this.factory.createPreview(
+        this.selectedType, result.valid, CITY_STYLES[this.styleId], orientation, facing,
+      );
       this.previewMeshKey = meshKey;
       this.scene.add(this.previewMesh);
     }
 
-    const def = BUILDING_DEFS[this.selectedType];
-    const w = def.size.w * CELL_SIZE;
-    const d = def.size.d * CELL_SIZE;
+    const { w: effW, d: effD } = getEffectiveSize(this.selectedType, orientation);
+    const w = effW * CELL_SIZE;
+    const d = effD * CELL_SIZE;
     this.previewMesh.position.set(
       this.currentHoverPos.x * CELL_SIZE + w / 2,
       0,
       this.currentHoverPos.z * CELL_SIZE + d / 2,
     );
 
-    if (result.valid && !isZone(this.selectedType)) {
+    if (result.valid && !isZone(this.selectedType) && !isUtilityConduit(this.selectedType)) {
       this.onPreviewClearance?.({
         x: this.currentHoverPos.x,
         z: this.currentHoverPos.z,
-        w: def.size.w,
-        d: def.size.d,
+        w: effW,
+        d: effD,
       });
     } else {
       this.onPreviewClearance?.(null);
@@ -293,8 +340,12 @@ export class BuildMode {
       this.currentHoverPos,
       this.selectedType,
       this.selectedDensity ?? undefined,
+      orientation,
     );
-    this.onDragCostUpdate?.(totalCost, this.canAfford(state, totalCost), gradingCost);
+    const invalidHint = !result.valid && result.reason && result.reason !== 'Cell occupied' && result.reason !== 'Not enough money'
+      ? result.reason
+      : undefined;
+    this.onDragCostUpdate?.(totalCost, this.canAfford(state, totalCost), gradingCost, invalidHint);
   }
 
   private getRectanglePositions(start: Position, end: Position): Position[] {
@@ -413,7 +464,10 @@ export class BuildMode {
     } else if (this.toolMode === 'pointer') {
       this.checkEdgeRoadClick(pos);
     } else if (this.selectedType && !this.canDraw()) {
-      this.onPlace?.(pos, this.selectedType, this.selectedDensity ?? undefined);
+      const orientation = this.currentCityState
+        ? this.resolveHoverOrientation(this.currentCityState, pos, this.selectedType)
+        : undefined;
+      this.onPlace?.(pos, this.selectedType, this.selectedDensity ?? undefined, orientation);
     }
   }
 
@@ -422,14 +476,14 @@ export class BuildMode {
     const half = Math.floor(this.brushSize / 2);
     for (let dx = -half; dx < this.brushSize - half; dx++) {
       for (let dz = -half; dz < this.brushSize - half; dz++) {
-        this.onDemolish({ x: center.x + dx, z: center.z + dz });
+        this.onDemolish({ x: center.x + dx, z: center.z + dz }, this.activeLayer);
       }
     }
   }
 
   demolishAt(x: number, y: number): void {
     const pos = this.raycaster.getGridPosition(x, y, this.getCamera());
-    if (pos) this.onDemolish?.(pos);
+    if (pos) this.onDemolish?.(pos, this.activeLayer);
   }
 
   /**
@@ -559,12 +613,9 @@ export class BuildMode {
         const z = this.currentHoverPos.z + dz;
         if (x < 0 || z < 0 || x >= DEFAULT_GRID_SIZE || z >= DEFAULT_GRID_SIZE) continue;
 
-        const cell = state.grid[x]?.[z];
-        if (!cell?.buildingId || seen.has(cell.buildingId)) continue;
-        seen.add(cell.buildingId);
-
-        const building = state.buildings.find((b: PlacedBuilding) => b.id === cell.buildingId);
-        if (!building) continue;
+        const building = findGridBuildingToDemolish(state.grid, state.buildings, { x, z }, this.activeLayer);
+        if (!building || seen.has(building.id)) continue;
+        seen.add(building.id);
 
         const { w: effW, d: effD } = getEffectiveSize(building.type, building.orientation);
         const w = effW * CELL_SIZE;

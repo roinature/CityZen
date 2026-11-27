@@ -1,4 +1,4 @@
-import type { Position } from './grid.js';
+import type { Position, UtilityLayer } from './grid.js';
 import type { MaslowNeed } from './person.js';
 
 export enum BuildingType {
@@ -18,8 +18,14 @@ export enum BuildingType {
   PARK = 'park',
   PARKING = 'parking',
 
+  // --- Utility Network Conduits & Substations ---
+  UTILITY_POWER_LINE = 'utility_power_line',
+  UTILITY_WATER_PIPE = 'utility_water_pipe',
+  UTILITY_SEWAGE_PIPE = 'utility_sewage_pipe',
+
   // --- Infrastructure ---
   // Energy
+  ENERGY_SUBSTATION = 'energy_substation',
   ENERGY_WIND_TURBINE = 'energy_wind_turbine',
   ENERGY_SOLAR_FARM = 'energy_solar_farm',
   ENERGY_COAL_PLANT = 'energy_coal_plant',
@@ -29,6 +35,7 @@ export enum BuildingType {
   WATER_TOWER = 'water_tower',
   WATER_PUMP_STATION = 'water_pump_station',
   WATER_TREATMENT = 'water_treatment',
+  SEWAGE_PUMP_STATION = 'sewage_pump_station',
   WATER_SEWAGE_PLANT = 'water_sewage_plant',
 
   // Police
@@ -78,6 +85,12 @@ export enum BuildingType {
   ART_THEATER = 'art_theater',
   ART_CONCERT_HALL = 'art_concert_hall',
   ART_SCULPTURE_PARK = 'art_sculpture_park',
+
+  // Waterfront
+  WATERFRONT_DOCK = 'waterfront_dock',
+  WATERFRONT_MARINA = 'waterfront_marina',
+  WATERFRONT_FERRY = 'waterfront_ferry',
+  WATERFRONT_PORT = 'waterfront_port',
 }
 
 export const ZONE_TYPES = [
@@ -94,15 +107,28 @@ export const ROAD_TYPES = [
   BuildingType.ROAD_ROUNDABOUT,
 ] as const;
 
+export const UTILITY_CONDUIT_TYPES = [
+  BuildingType.UTILITY_POWER_LINE,
+  BuildingType.UTILITY_WATER_PIPE,
+  BuildingType.UTILITY_SEWAGE_PIPE,
+] as const;
+
 // Infrastructure category arrays
 export const INFRA_ENERGY_TYPES = [
+  BuildingType.UTILITY_POWER_LINE, BuildingType.ENERGY_SUBSTATION,
   BuildingType.ENERGY_WIND_TURBINE, BuildingType.ENERGY_SOLAR_FARM,
   BuildingType.ENERGY_COAL_PLANT, BuildingType.ENERGY_NUCLEAR_PLANT,
 ] as const;
 
 export const INFRA_WATER_TYPES = [
+  BuildingType.UTILITY_WATER_PIPE,
   BuildingType.WATER_TOWER, BuildingType.WATER_PUMP_STATION,
-  BuildingType.WATER_TREATMENT, BuildingType.WATER_SEWAGE_PLANT,
+  BuildingType.WATER_TREATMENT,
+] as const;
+
+export const INFRA_SEWAGE_TYPES = [
+  BuildingType.UTILITY_SEWAGE_PIPE,
+  BuildingType.SEWAGE_PUMP_STATION, BuildingType.WATER_SEWAGE_PLANT,
 ] as const;
 
 export const INFRA_POLICE_TYPES = [
@@ -145,6 +171,11 @@ export const INFRA_ART_TYPES = [
   BuildingType.ART_CONCERT_HALL, BuildingType.ART_SCULPTURE_PARK,
 ] as const;
 
+export const INFRA_WATERFRONT_TYPES = [
+  BuildingType.WATERFRONT_DOCK, BuildingType.WATERFRONT_MARINA,
+  BuildingType.WATERFRONT_FERRY, BuildingType.WATERFRONT_PORT,
+] as const;
+
 export interface InfraCategory {
   id: string;
   label: string;
@@ -154,7 +185,8 @@ export interface InfraCategory {
 
 export const INFRA_CATEGORIES: InfraCategory[] = [
   { id: 'energy', label: 'Energy', icon: '\u26A1', types: INFRA_ENERGY_TYPES },
-  { id: 'water', label: 'Water & Sewage', icon: '\uD83D\uDCA7', types: INFRA_WATER_TYPES },
+  { id: 'water', label: 'Water', icon: '\uD83D\uDCA7', types: INFRA_WATER_TYPES },
+  { id: 'sewage', label: 'Sewage', icon: '\uD83D\uDEB0', types: INFRA_SEWAGE_TYPES },
   { id: 'police', label: 'Police', icon: '\uD83D\uDEA8', types: INFRA_POLICE_TYPES },
   { id: 'fire', label: 'Fire Dept', icon: '\uD83D\uDE92', types: INFRA_FIRE_TYPES },
   { id: 'health', label: 'Health', icon: '\uD83C\uDFE5', types: INFRA_HEALTH_TYPES },
@@ -162,10 +194,13 @@ export const INFRA_CATEGORIES: InfraCategory[] = [
   { id: 'government', label: 'Government', icon: '\uD83C\uDFDB', types: INFRA_GOV_TYPES },
   { id: 'tourism', label: 'Tourism', icon: '\uD83C\uDFA1', types: INFRA_TOUR_TYPES },
   { id: 'transport', label: 'Transport', icon: '\uD83D\uDE8C', types: INFRA_TRANS_TYPES },
+  { id: 'waterfront', label: 'Waterfront', icon: '\u2693', types: INFRA_WATERFRONT_TYPES },
   { id: 'art_culture', label: 'Art & Culture', icon: '\uD83C\uDFA8', types: INFRA_ART_TYPES },
 ];
 
 export type ZoneType = (typeof ZONE_TYPES)[number];
+export type WaterfrontType = (typeof INFRA_WATERFRONT_TYPES)[number];
+export type UtilityConduitType = (typeof UTILITY_CONDUIT_TYPES)[number];
 
 export enum ZoneDensity {
   LOW = 'low',
@@ -184,6 +219,25 @@ export function isRoad(type: BuildingType): type is RoadType {
   return (ROAD_TYPES as readonly BuildingType[]).includes(type);
 }
 
+export function isUtilityConduit(type: BuildingType): type is UtilityConduitType {
+  return (UTILITY_CONDUIT_TYPES as readonly BuildingType[]).includes(type);
+}
+
+export function getBuildingUtilityLayer(type: BuildingType): UtilityLayer {
+  if ((INFRA_ENERGY_TYPES as readonly BuildingType[]).includes(type)) return 'power';
+  if ((INFRA_WATER_TYPES as readonly BuildingType[]).includes(type)) return 'water';
+  if ((INFRA_SEWAGE_TYPES as readonly BuildingType[]).includes(type)) return 'sewage';
+  return 'surface';
+}
+
+export function isWaterfront(type: BuildingType): type is WaterfrontType {
+  return (INFRA_WATERFRONT_TYPES as readonly BuildingType[]).includes(type);
+}
+
+export function canDockBoats(type: BuildingType): boolean {
+  return isWaterfront(type) || type === BuildingType.TRANS_HARBOR;
+}
+
 export interface MaslowContribution {
   need: MaslowNeed;
   value: number;          // Quality of service (higher = better)
@@ -195,6 +249,13 @@ export interface BuildingEffects {
   jobs?: number;
   maintenance?: number;
   happiness?: number;
+  powerGenerationMW?: number;
+  powerDemandMW?: number;
+  waterSupplyM3?: number;
+  waterDemandM3?: number;
+  sewageCapacityM3?: number;
+  sewageOutputM3?: number;
+  requiresWaterSource?: boolean;
   maslowContributions?: MaslowContribution[];
 }
 

@@ -110,7 +110,48 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     height: 0.1,
   },
 
+  // === UTILITY CONDUITS ===
+  [BuildingType.UTILITY_POWER_LINE]: {
+    type: BuildingType.UTILITY_POWER_LINE,
+    label: 'Power Line',
+    cost: 5,
+    size: { w: 1, d: 1 },
+    effects: { maintenance: 0.05 },
+    color: '#FFD54F',
+    height: 2.2,
+  },
+  [BuildingType.UTILITY_WATER_PIPE]: {
+    type: BuildingType.UTILITY_WATER_PIPE,
+    label: 'Water Pipe',
+    cost: 4,
+    size: { w: 1, d: 1 },
+    effects: { maintenance: 0.04 },
+    color: '#29B6F6',
+    height: 0.1,
+  },
+  [BuildingType.UTILITY_SEWAGE_PIPE]: {
+    type: BuildingType.UTILITY_SEWAGE_PIPE,
+    label: 'Sewage Pipe',
+    cost: 4,
+    size: { w: 1, d: 1 },
+    effects: { maintenance: 0.04 },
+    color: '#26A69A',
+    height: 0.1,
+  },
+
   // === ENERGY → Maslow: PHYSIOLOGICAL ===
+  [BuildingType.ENERGY_SUBSTATION]: {
+    type: BuildingType.ENERGY_SUBSTATION,
+    label: 'Substation',
+    cost: 200,
+    size: { w: 1, d: 1 },
+    effects: {
+      maintenance: 2,
+      happiness: -1,
+    },
+    color: '#FFB300',
+    height: 2,
+  },
   [BuildingType.ENERGY_WIND_TURBINE]: {
     type: BuildingType.ENERGY_WIND_TURBINE,
     label: 'Wind Turbine',
@@ -118,6 +159,7 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     size: { w: 1, d: 1 },
     effects: {
       maintenance: 5, happiness: 2,
+      powerGenerationMW: 8,
       maslowContributions: [
         { need: MaslowNeed.PHYSIOLOGICAL, value: 10, capacityServed: 100 },
       ],
@@ -132,6 +174,7 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     size: { w: 2, d: 2 },
     effects: {
       maintenance: 8, happiness: 1,
+      powerGenerationMW: 22,
       maslowContributions: [
         { need: MaslowNeed.PHYSIOLOGICAL, value: 12, capacityServed: 250 },
       ],
@@ -146,6 +189,7 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     size: { w: 3, d: 3 },
     effects: {
       maintenance: 25, happiness: -10,
+      powerGenerationMW: 80,
       maslowContributions: [
         { need: MaslowNeed.PHYSIOLOGICAL, value: 18, capacityServed: 800 },
       ],
@@ -160,6 +204,7 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     size: { w: 4, d: 4 },
     effects: {
       maintenance: 50, happiness: -5,
+      powerGenerationMW: 280,
       maslowContributions: [
         { need: MaslowNeed.PHYSIOLOGICAL, value: 25, capacityServed: 2000 },
       ],
@@ -176,6 +221,8 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     size: { w: 1, d: 1 },
     effects: {
       maintenance: 3,
+      powerDemandMW: 0.5,
+      waterSupplyM3: 150,
       maslowContributions: [
         { need: MaslowNeed.PHYSIOLOGICAL, value: 10, capacityServed: 150 },
       ],
@@ -190,6 +237,9 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     size: { w: 2, d: 2 },
     effects: {
       maintenance: 8,
+      powerDemandMW: 2.0,
+      waterSupplyM3: 450,
+      requiresWaterSource: true,
       maslowContributions: [
         { need: MaslowNeed.PHYSIOLOGICAL, value: 14, capacityServed: 400 },
       ],
@@ -204,12 +254,30 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     size: { w: 3, d: 3 },
     effects: {
       maintenance: 20,
+      powerDemandMW: 5.0,
+      waterSupplyM3: 1000,
       maslowContributions: [
         { need: MaslowNeed.PHYSIOLOGICAL, value: 20, capacityServed: 1000 },
       ],
     },
     color: '#00ACC1',
     height: 3,
+  },
+  [BuildingType.SEWAGE_PUMP_STATION]: {
+    type: BuildingType.SEWAGE_PUMP_STATION,
+    label: 'Sewage Station',
+    cost: 450,
+    size: { w: 2, d: 2 },
+    effects: {
+      maintenance: 6, happiness: -4,
+      powerDemandMW: 1.5,
+      sewageCapacityM3: 300,
+      maslowContributions: [
+        { need: MaslowNeed.PHYSIOLOGICAL, value: 11, capacityServed: 300 },
+      ],
+    },
+    color: '#6D4C41',
+    height: 2,
   },
   [BuildingType.WATER_SEWAGE_PLANT]: {
     type: BuildingType.WATER_SEWAGE_PLANT,
@@ -218,8 +286,10 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     size: { w: 3, d: 3 },
     effects: {
       maintenance: 25, happiness: -8,
+      powerDemandMW: 6.0,
+      sewageCapacityM3: 1400,
       maslowContributions: [
-        { need: MaslowNeed.PHYSIOLOGICAL, value: 15, capacityServed: 1200 },
+        { need: MaslowNeed.PHYSIOLOGICAL, value: 18, capacityServed: 1400 },
       ],
     },
     color: '#5D4037',
@@ -688,6 +758,74 @@ export const BUILDING_DEFS: Record<BuildingType, BuildingDef> = {
     },
     color: '#BA68C8',
     height: 1,
+  },
+
+  // === WATERFRONT ===
+  [BuildingType.WATERFRONT_DOCK]: {
+    type: BuildingType.WATERFRONT_DOCK,
+    label: 'Fishing Dock',
+    cost: 600,
+    size: { w: 2, d: 2 },
+    effects: {
+      jobs: 8,
+      maintenance: 6,
+      happiness: 5,
+      maslowContributions: [
+        { need: MaslowNeed.PHYSIOLOGICAL, value: 12, capacityServed: 250 },
+      ],
+    },
+    color: '#8D6E63',
+    height: 2,
+  },
+  [BuildingType.WATERFRONT_MARINA]: {
+    type: BuildingType.WATERFRONT_MARINA,
+    label: 'Marina',
+    cost: 1800,
+    size: { w: 3, d: 2 },
+    effects: {
+      jobs: 10,
+      maintenance: 14,
+      happiness: 16,
+      maslowContributions: [
+        { need: MaslowNeed.AESTHETIC, value: 16, capacityServed: 350 },
+        { need: MaslowNeed.ESTEEM, value: 12, capacityServed: 300 },
+      ],
+    },
+    color: '#0288D1',
+    height: 2,
+  },
+  [BuildingType.WATERFRONT_FERRY]: {
+    type: BuildingType.WATERFRONT_FERRY,
+    label: 'Ferry Terminal',
+    cost: 2800,
+    size: { w: 3, d: 2 },
+    effects: {
+      jobs: 15,
+      maintenance: 18,
+      happiness: 14,
+      maslowContributions: [
+        { need: MaslowNeed.LOVE_BELONGING, value: 18, capacityServed: 750 },
+      ],
+    },
+    color: '#00897B',
+    height: 3,
+  },
+  [BuildingType.WATERFRONT_PORT]: {
+    type: BuildingType.WATERFRONT_PORT,
+    label: 'Cargo Port',
+    cost: 5500,
+    size: { w: 4, d: 3 },
+    effects: {
+      jobs: 35,
+      maintenance: 30,
+      happiness: 6,
+      maslowContributions: [
+        { need: MaslowNeed.ESTEEM, value: 18, capacityServed: 1100 },
+        { need: MaslowNeed.PHYSIOLOGICAL, value: 14, capacityServed: 900 },
+      ],
+    },
+    color: '#006064',
+    height: 4,
   },
 };
 

@@ -1,8 +1,9 @@
 import {
   BUILDING_DEFS, BuildingType, INFRA_CATEGORIES, MASLOW_NEEDS_ORDERED, MaslowNeed, TAX_COMFORT_RATE,
   calculateBaseMaslowTargets, calculateBudgetPenalty, calculateCityMaslowCapacity, calculateLoanPayments,
-  calculateNetIncome, calculateTaxPenalty, canPlaceBuilding, getZoneLevelHappinessRequirement, isZone,
-  type CityState,
+  calculateNetIncome, calculateTaxPenalty, canPlaceBuilding, evaluateCityUtilities,
+  getZoneLevelHappinessRequirement, isUtilityConduit, isZone,
+  type CityState, type UtilityLayer,
 } from '@cityzen/shared';
 
 export const LOW_HAPPINESS = 40;
@@ -10,6 +11,7 @@ export const LOW_HAPPINESS = 40;
 export type AdvisorAction =
   | { kind: 'finance' }
   | { kind: 'needs' }
+  | { kind: 'layer'; layer: Exclude<UtilityLayer, 'surface'> }
   | { kind: 'build'; building: BuildingType };
 
 export interface HappinessAdvice {
@@ -28,7 +30,10 @@ const NEED_NAMES: Record<MaslowNeed, string> = {
   [MaslowNeed.SELF_ACTUALIZATION]: 'Civic participation',
 };
 
-const SERVICE_TYPES = [BuildingType.PARK, ...INFRA_CATEGORIES.flatMap(category => category.types)];
+const SERVICE_TYPES = [
+  BuildingType.PARK,
+  ...INFRA_CATEGORIES.flatMap(category => category.types).filter(type => !isUtilityConduit(type)),
+];
 
 export function needsHappinessAdvice(city: CityState): boolean {
   return city.resources.population > 0 && city.resources.happiness < LOW_HAPPINESS;
@@ -68,7 +73,40 @@ export function getHappinessAdvice(city: CityState): HappinessAdvice[] {
     });
   }
 
-  const profile = calculateCityMaslowCapacity(city);
+  const utilities = evaluateCityUtilities(city);
+  const physioCurrent = populationSummary?.averageMaslow[MaslowNeed.PHYSIOLOGICAL];
+  if (physioCurrent === undefined || physioCurrent < 60) {
+    const u = utilities.summary;
+    if (u.unpoweredBuildings > 0 || u.brownoutBuildings > 0) {
+      advice.push({
+        title: u.powerDemandMW > u.powerGenerationMW
+          ? `Expand power generation (${u.powerDemandMW.toFixed(1)} / ${u.powerGenerationMW.toFixed(1)} MW)`
+          : 'Connect buildings to the Power Grid',
+        detail: u.powerDemandMW > u.powerGenerationMW
+          ? 'Electricity demand exceeds generator capacity, causing brownouts and blackouts. Add a generator and link it with Power Lines.'
+          : `${u.unpoweredBuildings} building${u.unpoweredBuildings === 1 ? ' has' : 's have'} no electricity. Open the Power Layer to run Power Lines or place a Substation.`,
+        action: { kind: 'layer', layer: 'power' },
+      });
+    }
+    if (advice.length < 3 && u.unwateredBuildings > 0) {
+      advice.push({
+        title: u.activeWaterSources === 0 ? 'Build a Water Source & Pipes' : 'Extend Water Pipes to dry buildings',
+        detail: u.activeWaterSources === 0
+          ? 'Place a powered Pump Station or Water Tower on a blue shoreline or aquifer tile, then connect buildings with Water Pipes.'
+          : `${u.unwateredBuildings} building${u.unwateredBuildings === 1 ? ' lacks' : 's lack'} piped water. Zones cannot upgrade past Level 1 without Water.`,
+        action: { kind: 'layer', layer: 'water' },
+      });
+    }
+    if (advice.length < 3 && u.backedUpBuildings > 0) {
+      advice.push({
+        title: u.sewageCapacityM3 === 0 ? 'Add Sewage Treatment & Pipes' : 'Connect Sewer Pipes to buildings',
+        detail: `${u.backedUpBuildings} building${u.backedUpBuildings === 1 ? ' has' : 's have'} untreated wastewater. Open the Sewage Layer to place a Sewage Station and run Sewage Pipes.`,
+        action: { kind: 'layer', layer: 'sewage' },
+      });
+    }
+  }
+
+  const profile = calculateCityMaslowCapacity(city, utilities);
   const baseline = calculateBaseMaslowTargets(profile, population);
   const penalty = calculateBudgetPenalty(money) * calculateTaxPenalty(taxRate);
   const recommended = new Set<BuildingType>();

@@ -1,17 +1,20 @@
 // Types
-export type { Position, GridCell, Grid } from './types/grid.js';
+export type { Position, GridCell, Grid, UtilityLayer } from './types/grid.js';
 export {
-  BuildingType, ZoneDensity, isZone, isRoad,
-  ZONE_TYPES, ROAD_TYPES,
-  INFRA_CATEGORIES, INFRA_ART_TYPES,
-  INFRA_ENERGY_TYPES, INFRA_WATER_TYPES,
+  BuildingType, ZoneDensity, isZone, isRoad, isUtilityConduit, getBuildingUtilityLayer, isWaterfront, canDockBoats,
+  ZONE_TYPES, ROAD_TYPES, UTILITY_CONDUIT_TYPES,
+  INFRA_CATEGORIES, INFRA_ART_TYPES, INFRA_WATERFRONT_TYPES,
+  INFRA_ENERGY_TYPES, INFRA_WATER_TYPES, INFRA_SEWAGE_TYPES,
   INFRA_POLICE_TYPES, INFRA_FIRE_TYPES,
   INFRA_HEALTH_TYPES, INFRA_EDU_TYPES,
   INFRA_GOV_TYPES, INFRA_TOUR_TYPES,
   INFRA_TRANS_TYPES,
 } from './types/building.js';
-export type { BuildingDef, BuildingEffects, MaslowContribution, PlacedBuilding, ZoneType, RoadType, RoadOrientation, InfraCategory } from './types/building.js';
-export type { ResourceState, DemandState, PopulationSummary, ZonePopulationEntry, Loan } from './types/resources.js';
+export type {
+  BuildingDef, BuildingEffects, MaslowContribution, PlacedBuilding,
+  ZoneType, RoadType, UtilityConduitType, WaterfrontType, RoadOrientation, InfraCategory,
+} from './types/building.js';
+export type { ResourceState, DemandState, PopulationSummary, ZonePopulationEntry, Loan, UtilitySummary } from './types/resources.js';
 export type { CityState } from './types/city.js';
 export type { Player, PlayerProfile } from './types/player.js';
 export type { GameClock } from './types/time.js';
@@ -102,11 +105,26 @@ export type { ZoneLevelDef } from './constants/buildings.js';
 
 // Logic
 export {
-  canPlaceBuilding, canReplace, createEmptyGrid, getEffectiveSize,
+  canPlaceBuilding, canReplace, clearGridBuilding, createEmptyGrid, findGridBuildingToDemolish, getEffectiveSize,
   getPlacementCost, getReplacedBuildings, getReplacedRoads, getRoadGradingCells,
-  levelRoadTerrain, replacesRoads,
+  getWaterfrontFacing, levelRoadTerrain, replacesRoads, resolveWaterfrontOrientation, setGridBuilding,
 } from './logic/placement.js';
-export type { PlacementCostQuote, PlacementResult } from './logic/placement.js';
+export type { PlacementCostQuote, PlacementResult, WaterfrontFacing } from './logic/placement.js';
+export {
+  WATER_SOURCE_THRESHOLD,
+  POWER_LINE_RADIUS, POWER_GENERATOR_RADIUS, POWER_SUBSTATION_RADIUS, POWER_URBAN_HOP_LIMIT,
+  WATER_PIPE_RADIUS, WATER_FACILITY_RADIUS, WATER_TOWER_RADIUS,
+  SEWAGE_PIPE_RADIUS, SEWAGE_FACILITY_RADIUS,
+  CELL_FLAG_POWER, CELL_FLAG_WATER, CELL_FLAG_SEWAGE, CELL_FLAG_WATER_SOURCE,
+  getWaterSourceInfo, hasWaterSourceInFootprint,
+  isGeneratorBuilding, isPowerConductorBuilding, isWaterFacilityBuilding, isSewageFacilityBuilding,
+  getBuildingUtilityProfile, evaluateCityUtilities, getCellUtilityCoverage,
+} from './logic/utilities.js';
+export type {
+  WaterSourceKind, WaterSourceInfo,
+  PowerSupplyState, WaterSupplyState, SewageSupplyState,
+  BuildingUtilityStatus, PowerSubgridInfo, UtilityGridReport, UtilityResourceProfile,
+} from './logic/utilities.js';
 export { createStarterLayout, getStarterEntranceX, isStarterEntranceRoad } from './logic/starterLayout.js';
 export {
   planTown, normalizeTownSettings, TOWN_CHARACTERS, TOWN_CHARACTER_KNOBS, DEFAULT_TOWN,

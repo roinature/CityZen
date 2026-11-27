@@ -1,9 +1,10 @@
 import { joinRoom, type Room, type RequestAction, type MessageAction } from 'trystero';
 import {
   S2C,
-  getEffectiveSize,
+  clearGridBuilding,
   isRoad,
   levelRoadTerrain,
+  setGridBuilding,
   type BuildingDemolishedPayload,
   type BuildingPlacedPayload,
   type BuildingsPlacedPayload,
@@ -21,6 +22,7 @@ import {
   type RoadOrientation,
   type SerializedPerson,
   type TownSettings,
+  type UtilityLayer,
   type WorldCityEntry,
   type WorldStatePayload,
   type WorldTickPayload,
@@ -476,13 +478,7 @@ export class P2PGameClient implements CityConnection {
         const { buildingId, resources } = data as BuildingDemolishedPayload;
         const target = this.activeRemoteCity.buildings.find((b: PlacedBuilding) => b.id === buildingId);
         if (target) {
-          const { w, d } = getEffectiveSize(target.type, target.orientation);
-          for (let dx = 0; dx < w; dx++) {
-            for (let dz = 0; dz < d; dz++) {
-              const cell = this.activeRemoteCity.grid[target.position.x + dx]?.[target.position.z + dz];
-              if (cell && cell.buildingId === target.id) cell.buildingId = null;
-            }
-          }
+          clearGridBuilding(this.activeRemoteCity.grid, target);
         }
         this.activeRemoteCity.buildings = this.activeRemoteCity.buildings.filter(b => b.id !== buildingId);
         this.activeRemoteCity.resources = clone(resources);
@@ -521,13 +517,7 @@ export class P2PGameClient implements CityConnection {
       if (isRoad(building.type)) {
         levelRoadTerrain(this.activeRemoteCity.grid, building.position, building.type, building.orientation);
       }
-      const { w, d } = getEffectiveSize(building.type, building.orientation);
-      for (let dx = 0; dx < w; dx++) {
-        for (let dz = 0; dz < d; dz++) {
-          const cell = this.activeRemoteCity.grid[building.position.x + dx]?.[building.position.z + dz];
-          if (cell) cell.buildingId = building.id;
-        }
-      }
+      setGridBuilding(this.activeRemoteCity.grid, building);
     }
     this.activeRemoteCity.resources = clone(resources);
     this.persistActiveRemoteCache(false);
@@ -803,8 +793,8 @@ export class P2PGameClient implements CityConnection {
     }
   }
 
-  async demolish(position: Position, playerId = this.playerId): Promise<void> {
-    const result = await this.sendCityCommand('demolish', { position }, playerId);
+  async demolish(position: Position, playerId = this.playerId, layer?: UtilityLayer): Promise<void> {
+    const result = await this.sendCityCommand('demolish', { position, layer }, playerId);
     if (!result.success) {
       this.callbacks.onError({ message: result.error || 'Demolish failed', code: 'DEMOLISH_FAILED' });
     }
