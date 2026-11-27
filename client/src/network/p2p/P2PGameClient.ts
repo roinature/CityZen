@@ -34,6 +34,7 @@ import { buildIceConfig } from './rtcConfig.js';
 const APP_ID = 'cityzen-p2p-v2';
 const COMMAND_TIMEOUT_MS = 15_000;
 const MIGRATION_TIMEOUT_MS = 10_000;
+const PEER_CITY_DISCOVERY_TIMEOUT_MS = 10_000;
 const ANNOUNCE_THROTTLE_MS = 10_000;
 const REMOTE_CACHE_SAVE_MS = 15_000;
 
@@ -110,6 +111,7 @@ export class P2PGameClient implements CityConnection {
   private lastRemoteCacheAt = 0;
   private warnedSiteConflicts = new Set<string>();
   private cleanupListeners: Array<() => void> = [];
+  private pendingCityWaiters = new Map<string, Array<(found: boolean) => void>>();
 
   static async create(worldId: string, playerId: string, callbacks: GameCallbacks): Promise<P2PGameClient> {
     const client = new P2PGameClient(worldId, playerId, callbacks);
@@ -324,6 +326,11 @@ export class P2PGameClient implements CityConnection {
       };
       this.peerCities.set(raw.cityId, { entry, ownerPeerId: peerId });
       void this.store.savePeerCity(this.worldId, entry);
+      const waiters = this.pendingCityWaiters.get(raw.cityId);
+      if (waiters) {
+        this.pendingCityWaiters.delete(raw.cityId);
+        for (const resolve of waiters) resolve(true);
+      }
     }
 
     // If this peer previously announced another city that they no longer own, mark it offline
@@ -694,7 +701,23 @@ export class P2PGameClient implements CityConnection {
     }
 
     // 2. Online friend owns this city → connect directly to ownerPeerId
-    const remote = this.peerCities.get(cityId);
+    let remote = this.peerCities.get(cityId);
+    if (!remote?.ownerPeerId) {
+      const cached = await this.store.getPeerCity(this.worldId, cityId);
+      if (cached?.snapshot) {
+        this.activeRemoteCity = clone(cached.snapshot);
+        this.activeVisit = { cityId, playerName, playerId, mode: 'remote-readonly', ownerPeerId: null };
+        this.callbacks.onReadOnlyChange?.(true, 'Owner is offline — viewing cached city (read-only)');
+        this.callbacks.onCityState(clone(cached.snapshot), []);
+        return;
+      }
+
+      // Deep-linking into a peer's city before WebRTC peers have announced: wait briefly for discovery.
+      if (!remote && await this.waitForPeerCity(cityId, PEER_CITY_DISCOVERY_TIMEOUT_MS)) {
+        remote = this.peerCities.get(cityId);
+      }
+    }
+
     if (remote?.ownerPeerId) {
       this.activeRemoteCity = null;
       this.activeVisit = {
@@ -708,16 +731,14 @@ export class P2PGameClient implements CityConnection {
       const result = await this.sendCityCommand('join', { playerName }, playerId);
       if (result.success) return;
       // Fall through to cached read-only copy if the owner just went offline
-    }
-
-    // 3. Owner is offline → open read-only cached snapshot from IndexedDB if available
-    const cached = await this.store.getPeerCity(this.worldId, cityId);
-    if (cached?.snapshot) {
-      this.activeRemoteCity = clone(cached.snapshot);
-      this.activeVisit = { cityId, playerName, playerId, mode: 'remote-readonly', ownerPeerId: null };
-      this.callbacks.onReadOnlyChange?.(true, 'Owner is offline — viewing cached city (read-only)');
-      this.callbacks.onCityState(clone(cached.snapshot), []);
-      return;
+      const cached = await this.store.getPeerCity(this.worldId, cityId);
+      if (cached?.snapshot) {
+        this.activeRemoteCity = clone(cached.snapshot);
+        this.activeVisit = { cityId, playerName, playerId, mode: 'remote-readonly', ownerPeerId: null };
+        this.callbacks.onReadOnlyChange?.(true, 'Owner is offline — viewing cached city (read-only)');
+        this.callbacks.onCityState(clone(cached.snapshot), []);
+        return;
+      }
     }
 
     this.activeVisit = null;
@@ -727,6 +748,28 @@ export class P2PGameClient implements CityConnection {
         ? `${remote.entry.name}'s owner is offline and you haven't visited it yet.`
         : 'City not found in this world.',
       code: 'JOIN_FAILED',
+    });
+  }
+
+  private waitForPeerCity(cityId: string, timeoutMs: number): Promise<boolean> {
+    if (this.peerCities.get(cityId)?.ownerPeerId) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const list = this.pendingCityWaiters.get(cityId) ?? [];
+      const timer = setTimeout(() => {
+        const current = this.pendingCityWaiters.get(cityId);
+        if (current) {
+          const next = current.filter((fn) => fn !== finish);
+          if (next.length > 0) this.pendingCityWaiters.set(cityId, next);
+          else this.pendingCityWaiters.delete(cityId);
+        }
+        resolve(false);
+      }, timeoutMs);
+      const finish = (found: boolean) => {
+        clearTimeout(timer);
+        resolve(found);
+      };
+      list.push(finish);
+      this.pendingCityWaiters.set(cityId, list);
     });
   }
 
@@ -864,6 +907,10 @@ export class P2PGameClient implements CityConnection {
   disconnect(): void {
     for (const cleanup of this.cleanupListeners) cleanup();
     this.cleanupListeners = [];
+    for (const waiters of this.pendingCityWaiters.values()) {
+      for (const resolve of waiters) resolve(false);
+    }
+    this.pendingCityWaiters.clear();
     this.persistActiveRemoteCache(true);
     this.host?.stop();
     void this.room?.leave();

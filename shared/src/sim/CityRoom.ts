@@ -8,7 +8,7 @@ import { type PlacedBuilding, type RoadOrientation, BuildingType, ZoneDensity, i
 import { type PlaceBuildingsPayload, S2C } from '../types/events.js';
 import { INITIAL_RESOURCES, MIN_TAX_RATE, MAX_TAX_RATE, DEFAULT_GAME_SPEED } from '../constants/simulation.js';
 import { BUILDING_DEFS, ZONE_DENSITY_COSTS } from '../constants/buildings.js';
-import { canPlaceBuilding, createEmptyGrid, getEffectiveSize, getReplacedRoads } from '../logic/placement.js';
+import { canPlaceBuilding, createEmptyGrid, getEffectiveSize, getReplacedBuildings } from '../logic/placement.js';
 import { createStarterLayout } from '../logic/starterLayout.js';
 import { planTown, type TownSettings } from '../logic/townPlan.js';
 import { applySiteTerrain } from '../terrain/sites.js';
@@ -225,9 +225,9 @@ export class CityRoom {
       return { success: false, error: result.reason };
     }
 
-    // A roundabout replaces the roads under it; a road replaces zoned tiles.
-    for (const road of getReplacedRoads(this.state.grid, position, type, this.state.buildings, orientation)) {
-      this.demolishBuilding(road.position);
+    // A roundabout replaces the roads under it; non-zone buildings replace zoned tiles.
+    for (const replaced of getReplacedBuildings(this.state.grid, position, type, this.state.buildings, orientation)) {
+      this.demolishBuilding(replaced.position);
     }
 
     const def = BUILDING_DEFS[type];

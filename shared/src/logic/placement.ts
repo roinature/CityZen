@@ -23,23 +23,25 @@ export function replacesRoads(type: BuildingType): boolean {
 
 /**
  * Whether placing `type` may clear an existing `occupant` out of the way:
- * a roundabout replaces plain roads, and any road may be laid over zoned
- * tiles (the zone, and whatever grew on it, is removed).
+ * a roundabout replaces plain roads, and any non-zone building (roads, parks,
+ * parking, services) may be built over zoned tiles (the zone, and whatever
+ * grew on it, is removed).
  */
-function canReplace(type: BuildingType, occupant: BuildingType): boolean {
+export function canReplace(type: BuildingType, occupant: BuildingType): boolean {
+  if (isZone(occupant) && !isZone(type)) return true;
   if (replacesRoads(type)) return isRoad(occupant) && !replacesRoads(occupant);
-  return isRoad(type) && isZone(occupant);
+  return false;
 }
 
-/** Existing buildings (roads under a roundabout, zones under a road) a placement would replace. */
-export function getReplacedRoads(
+/** Existing buildings (roads under a roundabout, zones under a road or service building) a placement would replace. */
+export function getReplacedBuildings(
   grid: Grid,
   pos: Position,
   type: BuildingType,
   buildings: PlacedBuilding[],
   orientation?: RoadOrientation,
 ): PlacedBuilding[] {
-  if (!isRoad(type)) return [];
+  if (isZone(type)) return [];
   const { w, d } = getEffectiveSize(type, orientation);
   const ids = new Set<string>();
   for (let dx = 0; dx < w; dx++) {
@@ -50,6 +52,8 @@ export function getReplacedRoads(
   }
   return buildings.filter(b => ids.has(b.id) && canReplace(type, b.type));
 }
+
+export const getReplacedRoads = getReplacedBuildings;
 
 export interface PlacementResult {
   valid: boolean;
@@ -74,9 +78,6 @@ export function canPlaceBuilding(
   }
 
   const { w, d } = getEffectiveSize(type, orientation);
-  const replaceable = isRoad(type) && buildings
-    ? new Set(buildings.filter(b => canReplace(type, b.type)).map(b => b.id))
-    : null;
   for (let dx = 0; dx < w; dx++) {
     for (let dz = 0; dz < d; dz++) {
       const cx = pos.x + dx;
@@ -89,9 +90,12 @@ export function canPlaceBuilding(
       const terrain = grid[cx][cz].terrain;
       if (terrain) return { valid: false, reason: terrain === 'water' ? 'Open water' : 'Slope too steep' };
 
-      const occupant = grid[cx][cz].buildingId;
-      if (occupant !== null && !replaceable?.has(occupant)) {
-        return { valid: false, reason: 'Cell occupied' };
+      const occupantId = grid[cx][cz].buildingId;
+      if (occupantId !== null) {
+        const occupant = !isZone(type) ? buildings?.find(b => b.id === occupantId) : undefined;
+        if (!occupant || !canReplace(type, occupant.type)) {
+          return { valid: false, reason: 'Cell occupied' };
+        }
       }
     }
   }

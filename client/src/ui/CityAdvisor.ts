@@ -1,5 +1,7 @@
-import { EMIGRATION_HAPPINESS_THRESHOLD, type CityState } from '@cityzen/shared';
-import { LOW_HAPPINESS, getHappinessAdvice, needsHappinessAdvice, type AdvisorAction } from './happinessAdvice.js';
+import { EMIGRATION_HAPPINESS_THRESHOLD, getZoneLevelHappinessRequirement, type CityState } from '@cityzen/shared';
+import {
+  LOW_HAPPINESS, getBlockedZoneLevel, getHappinessAdvice, needsHappinessAdvice, type AdvisorAction,
+} from './happinessAdvice.js';
 
 export class CityAdvisor {
   private dialog: HTMLDialogElement;
@@ -52,6 +54,8 @@ export class CityAdvisor {
 
   update(city: CityState): void {
     const low = needsHappinessAdvice(city);
+    const advice = getHappinessAdvice(city);
+    const blockedLevel = getBlockedZoneLevel(city);
     const happiness = Math.floor(city.resources.happiness);
     const migration = happiness < EMIGRATION_HAPPINESS_THRESHOLD
       ? ` Residents can start leaving below ${EMIGRATION_HAPPINESS_THRESHOLD}%.`
@@ -60,11 +64,13 @@ export class CityAdvisor {
       ? 'Advice will appear when residents move in.'
       : low
         ? `Happiness is at ${happiness}%, below the ${LOW_HAPPINESS}% alert threshold.${migration}`
-        : `Happiness is at ${happiness}%. The advisor flags concerns below ${LOW_HAPPINESS}%.`;
+        : blockedLevel !== undefined
+          ? `Happiness is at ${happiness}%. Zones need ${getZoneLevelHappinessRequirement(blockedLevel)}% happiness to develop to level ${blockedLevel}.`
+          : advice.length > 0
+            ? `Happiness is at ${happiness}%. Ways to improve citizen satisfaction:`
+            : `Happiness is at ${happiness}%. Citizens are satisfied and no urgent improvements are needed.`;
     if (this.status.textContent !== status) this.status.textContent = status;
-    this.pauseNote.hidden = !low || city.clock?.speed !== 0;
-
-    const advice = getHappinessAdvice(city);
+    this.pauseNote.hidden = advice.length === 0 || city.clock?.speed !== 0;
     const key = JSON.stringify(advice);
     if (key === this.adviceKey) return;
     this.adviceKey = key;

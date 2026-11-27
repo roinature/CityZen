@@ -1,7 +1,8 @@
 import {
   BUILDING_DEFS, BuildingType, INFRA_CATEGORIES, MASLOW_NEEDS_ORDERED, MaslowNeed, TAX_COMFORT_RATE,
   calculateBaseMaslowTargets, calculateBudgetPenalty, calculateCityMaslowCapacity, calculateLoanPayments,
-  calculateNetIncome, calculateTaxPenalty, canPlaceBuilding, type CityState,
+  calculateNetIncome, calculateTaxPenalty, canPlaceBuilding, getZoneLevelHappinessRequirement, isZone,
+  type CityState,
 } from '@cityzen/shared';
 
 export const LOW_HAPPINESS = 40;
@@ -33,8 +34,15 @@ export function needsHappinessAdvice(city: CityState): boolean {
   return city.resources.population > 0 && city.resources.happiness < LOW_HAPPINESS;
 }
 
+/** Next zone level (2 or 3) currently blocked by city happiness, if any zone is ready for it. */
+export function getBlockedZoneLevel(city: CityState): number | undefined {
+  return [2, 3].find(level =>
+    city.resources.happiness < getZoneLevelHappinessRequirement(level) &&
+    city.buildings.some(b => isZone(b.type) && (b.developmentLevel ?? 0) === level - 1));
+}
+
 export function getHappinessAdvice(city: CityState): HappinessAdvice[] {
-  if (!needsHappinessAdvice(city)) return [];
+  if (city.resources.population <= 0) return [];
 
   const { money, population, populationSummary, taxRate } = city.resources;
   const advice: HappinessAdvice[] = [];
@@ -116,7 +124,7 @@ export function getHappinessAdvice(city: CityState): HappinessAdvice[] {
       action: { kind: 'build', building: def.type },
     });
   }
-  if (advice.length === 0) {
+  if (advice.length === 0 && (needsHappinessAdvice(city) || getBlockedZoneLevel(city) !== undefined)) {
     advice.push(noRoomForService ? {
       title: 'Find room for city services',
       detail: 'The current layout has no open footprint for services that would improve these needs. Review the needs breakdown before deciding which land to redevelop.',

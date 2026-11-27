@@ -31,7 +31,7 @@ import { BuildMode } from './input/BuildMode.js';
 import { MapInput } from './input/MapInput.js';
 import { ResourceBar } from './ui/ResourceBar.js';
 import { CityAdvisor } from './ui/CityAdvisor.js';
-import { getHappinessAdvice, needsHappinessAdvice } from './ui/happinessAdvice.js';
+import { getBlockedZoneLevel, getHappinessAdvice, needsHappinessAdvice } from './ui/happinessAdvice.js';
 import { Toolbar } from './ui/Toolbar.js';
 import { Lobby } from './ui/Lobby.js';
 import { WorldMap } from './ui/WorldMap.js';
@@ -427,7 +427,9 @@ const shareModal = new ShareModal(uiRoot, {
 
 function shareWorldInvite(): void {
   if (!P2P_WORLD) return;
-  const link = `${window.location.origin}${window.location.pathname}?world=${P2P_WORLD}`;
+  const params = new URLSearchParams({ world: P2P_WORLD });
+  if (cityState) params.set('cityId', cityState.id);
+  const link = `${window.location.origin}${window.location.pathname}?${params}`;
   shareModal.show(link);
 }
 
@@ -1082,9 +1084,7 @@ function generateAdvisorHints(city: CityState): void {
   }
 
   // Zones that are ready to grow taller but held back by the mood of the city
-  const blockedLevel = [2, 3].find(level =>
-    res.happiness < getZoneLevelHappinessRequirement(level) &&
-    zones.some(b => (b.developmentLevel ?? 0) === level - 1));
+  const blockedLevel = getBlockedZoneLevel(city);
   if (blockedLevel && res.population > 0 && !needsHappinessAdvice(city)) {
     advise('growth_capped', 'Buildings have stopped growing',
       `Zones only develop to level ${blockedLevel} once happiness reaches ${getZoneLevelHappinessRequirement(blockedLevel)}% (now ${happiness}%).`,
