@@ -6,34 +6,36 @@ Players found cities on one shared Earth. The first three sites are in Californi
 
 ## Play Now
 
-**[city-zen3.vercel.app](https://city-zen3.vercel.app)** — or scan to play on your phone:
+**[roinature.github.io/CityZen](https://roinature.github.io/CityZen/)** — or scan to play on your phone:
 
-<a href="https://city-zen3.vercel.app"><img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&margin=10&data=https%3A%2F%2Fcity-zen3.vercel.app" alt="QR code linking to CityZen" width="200" height="200"></a>
+<a href="https://roinature.github.io/CityZen/"><img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&margin=10&data=https%3A%2F%2Froinature.github.io%2FCityZen%2F" alt="QR code linking to CityZen" width="200" height="200"></a>
 
 ## Tech Stack
 
-- **Client**: Three.js (3D rendering), Vite (bundler), Socket.IO Client
-- **Server**: Node.js, Express, Socket.IO
-- **Shared**: Pure TypeScript types, constants, and game logic
-- **Monorepo**: npm workspaces (`shared/`, `server/`, `client/`)
+- **Client**: Three.js (3D rendering), Vite + PWA (`vite-plugin-pwa`), WebRTC (`trystero`), IndexedDB
+- **Shared**: Pure TypeScript types, constants, terrain, and simulation runtime (`CityRoom`, `PopulationManager`, `WorldTickEngine`)
+- **Hosting**: 100% static (GitHub Pages) in default peer-to-peer mode; optional legacy Node.js / Express / Prisma / Supabase backend (`?server`)
+- **Monorepo**: npm workspaces (`shared/`, `client/`, `server/`)
 
 ## Getting Started
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 22+
 - npm 9+
 
 ### Install & Run
 
 ```bash
 npm install
-npm run dev
+npm run dev -w client
 ```
 
-This starts both the server (port 3030) and the Vite dev server (port 5173). Open `http://localhost:5173` in your browser.
+Open `http://localhost:5173` in your browser. Distributed peer-to-peer mode starts automatically with zero database or backend setup — share the `?world=<id>` link (or use **Invite Friends**) to play across devices or tabs.
 
-Existing installations need the 20261121000000_earth_sites database migration before running this version. It brings cities from older worlds into Earth as original cities and preserves their building layouts.
+> For 4G/5G mobile cellular networks behind strict CGNAT, configure optional TURN relay credentials (see [client/.env.example](client/.env.example)).
+
+To run the legacy central server mode (`?server`), start both workspaces with `npm run dev` (requires database configuration in `server/`).
 
 ### Build for Production
 
@@ -41,32 +43,41 @@ Existing installations need the 20261121000000_earth_sites database migration be
 npm run build
 ```
 
+To build just the static client for GitHub Pages:
+
+```bash
+npm run clean && npm run build -w shared && VITE_BASE=/CityZen/ npm run build -w client
+```
+
 ## Project Structure
 
 ```
 CityZen/
-├── shared/                         # Types, constants, pure game logic
+├── shared/                         # Types, constants, terrain, and simulation runtime
 │   └── src/
-│       ├── types/                  # Grid, Building, Resources, City, Events
-│       ├── constants/              # Building definitions, simulation, grid
-│       └── logic/                  # Placement validation, simulation, resources
-├── server/                         # Authoritative game server
-│   └── src/
-│       ├── index.ts                # Express + Socket.IO bootstrap
-│       ├── socket/handlers.ts      # Socket event handlers
-│       ├── game/
-│       │   ├── GameRoom.ts         # City state, tick loop, validation
-│       │   └── RoomManager.ts      # Room lifecycle management
-│       └── persistence/
-│           └── jsonStore.ts        # JSON file save/load
-├── client/                         # Three.js browser client
-│   └── src/
-│       ├── main.ts                 # Entry point, wires everything together
-│       ├── scene/                  # SceneManager, CameraController, Lighting, Grid
-│       ├── world/                  # Terrain, BuildingFactory, CityRenderer, CarManager
-│       ├── input/                  # BuildMode (placement, demolish, drag-draw)
-│       ├── ui/                     # Toolbar, ResourceBar, Lobby, GameMenu, OptionsPanel
-│       └── network/                # SocketClient wrapper
+│       ├── types/                  # Grid, Building, Resources, City, World, Events
+│       ├── constants/              # Building definitions, economy, simulation, grid
+│       ├── logic/                  # Placement validation, simulation, migration, town planner
+│       ├── terrain/                # Bundled Earth elevation sites
+│       └── sim/                    # CityRoom, PopulationManager, WorldTickEngine
+├── client/                         # Three.js browser + PWA client
+│   ├── src/
+│   │   ├── main.ts                 # Entry point, wires everything together
+│   │   ├── scene/                  # SceneManager, CameraController, Lighting, Grid
+│   │   ├── world/                  # Terrain, BuildingFactory, CityRenderer, CarManager, DriveMode
+│   │   ├── input/                  # BuildMode (placement, demolish, drag-draw)
+│   │   ├── ui/                     # Toolbar, ResourceBar, Lobby, WorldMap, GameMenu, OptionsPanel
+│   │   └── network/
+│   │       ├── CityConnection.ts   # Shared transport interface
+│   │       ├── GameClient.ts       # Legacy server/Supabase client (?server)
+│   │       └── p2p/                # Distributed WebRTC mesh (default)
+│   │           ├── P2PGameClient.ts
+│   │           ├── LocalCityHost.ts
+│   │           ├── LocalStore.ts   # IndexedDB saves + JSON backup/restore
+│   │           ├── rtcConfig.ts    # STUN + optional TURN configuration
+│   │           └── siteConflict.ts # Deterministic offline site-claim tie-breaker
+│   └── tests/                      # P2P unit tests (node --test)
+└── server/                         # Optional legacy authoritative server (?server)
 ```
 
 ## Gameplay
@@ -110,65 +121,62 @@ Menu → **Town Planner** replaces the city with a planned town, with a live pre
 
 ### Resources
 
-Resources update every 2-second server tick:
+Resources update every 2-second simulation tick:
 - **Money**: Earned from commercial/industrial buildings, spent on construction
-- **Population**: Grows based on available housing capacity
-- **Happiness**: Affected by parks (+) and factories (-)
+- **Population**: Grows based on available housing capacity and citizen needs
+- **Happiness**: Affected by parks (+), services, taxes, and factories (-)
 
-## Multiplayer
+## Multiplayer (Distributed Peer-to-Peer)
 
-Multiple players can join the same city and build collaboratively in real-time. The server is authoritative -- all placements are validated server-side and broadcast to all connected clients.
+CityZen runs **without a central database**. Each player's browser or phone owns and simulates their own city locally and connects to friends over WebRTC (`trystero`):
 
 ### Flow
 
-1. Open the game and enter your name
-2. Create a new city or join an existing one from the lobby
-3. Build together -- all changes sync instantly via Socket.IO
+1. Open the game — you are placed in a shareable Earth world (`?world=<id>`)
+2. Claim an Earth site to found your city (saved locally in IndexedDB)
+3. Tap **Invite Friends** to share your `?world=<id>` link
+4. Friends appear live on the Earth map with status badges (**Yours · Local**, **Online**, or **Offline · Cached**)
+5. Visit a friend's city to **co-build together in real time**, or connect edge roads to exchange citizens between cities
+6. If a city's owner closes the app or locks their phone, visitors seamlessly switch to a **Read-Only cached view** and resume live editing when the owner reconnects
 
 ## Game Menu
 
 Press **ESC** or click the **Menu** button to access:
 
-- **Save Game**: Persist the current city state to the server
-- **Load Game**: Browse and select from saved cities
-- **Restart City**: Reset the current city to a blank state
-- **End Game**: Save and return to the lobby
+- **Save Game**: Flush your city state to local IndexedDB immediately
+- **Load Game**: Switch between your cities and friends' cities in this world
+- **Town Planner**: Generate a procedural town layout with live preview
+- **Export / Import Backup**: Save or restore your world as a `.json` file across devices
+- **Restart City**: Reset your city to a blank state
+- **End Game**: Save and return to the Earth map
 - **Options**: Configure game settings
 
 ### Options
 
 - Show/hide grid overlay
-- Enable/disable car traffic
-- Adjust max car count
-- Camera pan speed
-- Toggle shadows
+- Enable/disable car traffic and adjust max car count
+- City styles, skyline height, crosswalks, and trees
+- Camera pan speed and view presets
+- Toggle shadows and post-processing
 
-Options are persisted in localStorage.
+Options are persisted in `localStorage`.
 
 ## Persistence
 
-- City state auto-saves to the server after each mutation (debounced)
-- Manual save available through the game menu
-- Cities are stored as JSON files in `server/data/`
-- Client sessions are stored in localStorage for auto-rejoin on page refresh
+- Owned cities, local population, and cached snapshots of friends' cities are stored in **IndexedDB** (`LocalStore`), auto-saving on changes and immediately on mobile background/screen-lock (`visibilitychange` / `pagehide`)
+- Manual **Export / Import Backup (.json)** is available in the Game Menu
+- Installing the PWA (**Add to Home Screen** on mobile) helps protect local saves from browser storage eviction
 
 ## Architecture
 
-### Server-Authoritative
+### Owner-Authoritative P2P Mesh
 
-All game logic runs on the server. The client sends placement/demolish requests; the server validates them against the shared logic (`canPlaceBuilding`), updates the authoritative `CityState`, and broadcasts deltas to all connected clients.
+Each player's device runs `LocalCityHost` (wrapping `CityRoom`, `PopulationManager`, and `WorldTickEngine` from `@cityzen/shared`) exclusively for the city(ies) they own. Peers exchange lightweight world announcements (~200 B), targeted incremental city events (`BUILDING_PLACED`, `RESOURCES_UPDATE`, `ZONE_GROWTH`), co-build commands, and cross-city citizen migration over WebRTC DataChannels. Passing `?server` opts into the legacy Express / Supabase backend.
 
 ### Shared Logic
 
-Pure functions in the `shared/` package handle placement validation, resource calculation, and simulation ticking. This keeps the server and client in sync and makes the logic testable in isolation.
-
-### Real-Time Communication
-
-Socket.IO events are defined as constants in `shared/src/types/events.ts`:
-
-- **Client-to-Server**: `city:join`, `city:create`, `building:place`, `building:demolish`, `city:save`, `city:restart`, `city:leave`
-- **Server-to-Client**: `city:state`, `building:placed`, `building:demolished`, `city:resources`, `player:joined`, `player:left`, `city:saved`, `error`
+Pure TypeScript modules in `shared/` handle placement validation, economy, Maslow satisfaction, migration, town planning, and the tick runtime — shared identically between the browser P2P host and the optional server.
 
 ### Car System
 
-The client-side `CarManager` spawns animated cars on road tiles. Cars navigate by preferring to continue straight, turning at intersections, and reversing at dead ends. Car count scales with the number of road tiles placed.
+The client-side `CarManager` spawns animated cars on road tiles. Cars navigate by preferring to continue straight, turning at intersections, and reversing at dead ends. Car count scales with the number of road tiles placed. Press **C** or tap **Drive** to take a car for a drive yourself.
