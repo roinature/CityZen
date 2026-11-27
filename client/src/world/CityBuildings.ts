@@ -7,6 +7,7 @@ import {
 import type { CityStyle } from './CityStyle.js';
 import { SIDES, SIDEWALK, WALK_Y, isPaved, type RoadMap } from './RoadSurface.js';
 import { hasServiceModel } from './ServiceModels.js';
+import type { Obstacle } from './explore/ObstacleMap.js';
 
 /** Values of the `kind` attribute the facade shader switches on. */
 const HOUSE = 0, SHOP = 1, TOWER = 2, WORKS = 3;
@@ -222,9 +223,15 @@ export class CityBuildings {
   private highlighted = false;
   private layerOpacity = 1;
   private transform = new THREE.Matrix4();
+  private footprints: Obstacle[] = [];
 
   constructor() {
     this.group.name = 'city-buildings';
+  }
+
+  /** Ground footprint and height of every building, in cells. */
+  getFootprints(): readonly Obstacle[] {
+    return this.footprints;
   }
 
   setNight(amount: number): void {
@@ -234,6 +241,16 @@ export class CityBuildings {
   rebuild(buildings: readonly PlacedBuilding[], roads: RoadMap, options: CityBuildingsOptions): void {
     this.disposeMeshes();
     const units = this.layOut(buildings, roads, options);
+    this.footprints = units.map(u => {
+      // Hipped roofs overhang the walls; flat roofs carry plant.
+      const roof = u.kind === HOUSE ? Math.min(u.w, u.d) * 0.46 : 0.12;
+      const grow = u.kind === HOUSE ? 1.14 : 1;
+      return {
+        x0: u.x - u.w * grow / 2, x1: u.x + u.w * grow / 2,
+        z0: u.z - u.d * grow / 2, z1: u.z + u.d * grow / 2,
+        top: 0.03 + u.h + roof,
+      };
+    });
     this.addUnits(units, options.style, this.group, true);
     this.addZoneTints(buildings);
     this.known = new Set(units.map(unit => unit.key));
@@ -306,6 +323,7 @@ export class CityBuildings {
 
   clear(): void {
     this.disposeMeshes();
+    this.footprints = [];
     this.known = null;
   }
 

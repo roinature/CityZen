@@ -8,6 +8,16 @@ interface Tree {
   z: number;
   scale: number;
   roll: number;
+  /** Planted in a pit in the sidewalk. */
+  pit?: boolean;
+}
+
+/** A small item on the sidewalk, turned to face the road along (fx, fz). */
+interface Item {
+  x: number;
+  z: number;
+  fx: number;
+  fz: number;
 }
 
 const LAMP_HEIGHT = 0.82;
@@ -49,7 +59,10 @@ export class StreetFurniture {
     this.glow.visible = amount > 0.01;
   }
 
-  rebuild(buildings: readonly PlacedBuilding[], roads: RoadMap, gridSize: number, style: CityStyle, showTrees: boolean): void {
+  rebuild(
+    buildings: readonly PlacedBuilding[], roads: RoadMap, gridSize: number, style: CityStyle, showTrees: boolean,
+    isWater: (x: number, z: number) => boolean = () => false,
+  ): void {
     this.clear();
     const lots = new Map<string, PlacedBuilding>();
     for (const b of buildings) if (!isRoad(b.type)) lots.set(`${b.position.x},${b.position.z}`, b);
@@ -57,6 +70,10 @@ export class StreetFurniture {
     const trees: Tree[] = [];
     const lamps: Array<{ x: number; z: number; dx: number; dz: number }> = [];
     const cars: Array<{ x: number; z: number; roll: number }> = [];
+    const hydrants: Item[] = [];
+    const bins: Item[] = [];
+    const benches: Item[] = [];
+    const signs: Item[] = [];
     const road = (x: number, z: number) => roads.get(`${x},${z}`);
 
     for (const { x, z, type, building } of roads.values()) {
@@ -65,11 +82,22 @@ export class StreetFurniture {
         if (building.position.x + 1 === x && building.position.z + 1 === z) trees.push({ x: x + 0.5, z: z + 0.5, scale: 1.1, roll: roll(x, z, 1) });
         continue;
       }
+      if (SIDES.filter(([dx, dz]) => road(x + dx, z + dz)).length > 2) {
+        // A street-name sign on one corner of the junction.
+        for (let d = 0; d < 4; d++) {
+          const [dx, dz] = SIDES[d];
+          const [ax, az] = SIDES[(d + 1) & 3];
+          if (!road(x + dx, z + dz) || !road(x + ax, z + az) || road(x + dx + ax, z + dz + az) || isWater(x + dx + ax, z + dz + az)) continue;
+          const inset = 0.5 + SIDEWALK * 0.55;
+          signs.push({ x: x + 0.5 + (dx + ax) * inset, z: z + 0.5 + (dz + az) * inset, fx: dx, fz: dz });
+          break;
+        }
+      }
       for (let d = 0; d < 4; d++) {
         const [dx, dz] = SIDES[d];
         const [ax, az] = SIDES[(d + 1) & 3];
         const lx = x + dx, lz = z + dz;
-        if (lx < 0 || lz < 0 || lx >= gridSize || lz >= gridSize || road(lx, lz)) continue;
+        if (lx < 0 || lz < 0 || lx >= gridSize || lz >= gridSize || road(lx, lz) || isWater(lx, lz)) continue;
         // Only along straight runs, clear of corners and crossings.
         const straight = [1, -1].every(k => road(x + ax * k, z + az * k) && !road(lx + ax * k, lz + az * k));
         if (!straight) continue;
@@ -79,8 +107,18 @@ export class StreetFurniture {
           z: z + 0.5 + dz * (0.5 + inset) + az * shift,
         });
         const phase = (along + (d > 1 ? 1 : 0)) % 3;
-        if (phase === 0) trees.push({ ...at(SIDEWALK * 0.7, 0), scale: 0.62 + roll(x, z, d) * 0.2, roll: roll(x, z, d + 7) });
-        if (phase === 2) lamps.push({ ...at(0.05, 0), dx: -dx, dz: -dz });
+        const lot = lots.get(`${lx},${lz}`)?.type;
+        const facing = { fx: -dx, fz: -dz };
+        if (phase === 0) trees.push({ ...at(SIDEWALK * 0.7, 0), scale: 0.62 + roll(x, z, d) * 0.2, roll: roll(x, z, d + 7), pit: true });
+        if (phase === 2) {
+          lamps.push({ ...at(0.05, 0), dx: -dx, dz: -dz });
+          if (roll(x, z, d + 30) < 0.3) hydrants.push({ ...at(0.05, 0.3), ...facing });
+        }
+        if (phase === 1) {
+          const shops = lot === BuildingType.ZONE_COMMERCIAL;
+          if ((shops || lot === BuildingType.PARK) && roll(x, z, d + 40) < 0.55) benches.push({ ...at(SIDEWALK * 0.62, 0.05), ...facing });
+          if ((shops || lot === BuildingType.ZONE_RESIDENTIAL) && roll(x, z, d + 50) < (shops ? 0.6 : 0.2)) bins.push({ ...at(0.06, -0.26), ...facing });
+        }
       }
     }
 
@@ -112,6 +150,7 @@ export class StreetFurniture {
     if (showTrees) this.addTrees(trees, style);
     this.addLamps(lamps);
     this.addCars(cars);
+    this.addStreetItems(showTrees ? trees.filter(tree => tree.pit) : [], hydrants, bins, benches, signs);
     this.setNight(this.nightAmount);
   }
 
@@ -187,17 +226,64 @@ export class StreetFurniture {
     if (!cars.length) return;
     const t = new THREE.Object3D();
     const color = new THREE.Color();
-    const bodies = this.batch(new THREE.BoxGeometry(0.1, 0.05, 0.22), new THREE.MeshStandardMaterial({ roughness: 0.5 }), cars.length);
-    const cabins = this.batch(new THREE.BoxGeometry(0.085, 0.045, 0.11), new THREE.MeshStandardMaterial({ color: 0x20262c, roughness: 0.4 }), cars.length);
+    const bodies = this.batch(new THREE.BoxGeometry(0.1, 0.045, 0.22), new THREE.MeshStandardMaterial({ roughness: 0.35, metalness: 0.4 }), cars.length);
+    const cabins = this.batch(new THREE.BoxGeometry(0.086, 0.04, 0.11), new THREE.MeshStandardMaterial({ color: 0x20262c, roughness: 0.15, metalness: 0.6 }), cars.length);
+    const wheels = this.batch(new THREE.CylinderGeometry(0.022, 0.022, 0.104, 10).rotateZ(Math.PI / 2),
+      new THREE.MeshStandardMaterial({ color: 0x1b1b1c, roughness: 0.9 }), cars.length * 2);
     cars.forEach(({ x, z, roll: r }, i) => {
-      t.position.set(x * CELL_SIZE, 0.07, z * CELL_SIZE);
+      t.position.set(x * CELL_SIZE, 0.0725, z * CELL_SIZE);
       t.updateMatrix();
       bodies.setMatrixAt(i, t.matrix);
       bodies.setColorAt(i, color.setHex(PARKED_CARS[Math.floor(r * PARKED_CARS.length)]));
       t.position.y = 0.115;
       t.updateMatrix();
       cabins.setMatrixAt(i, t.matrix);
+      // One axle at each end; each cylinder spans both wheels.
+      for (const [k, dz] of [[0, -0.068], [1, 0.068]] as const) {
+        t.position.set(x * CELL_SIZE, 0.052, (z + dz) * CELL_SIZE);
+        t.updateMatrix();
+        wheels.setMatrixAt(i * 2 + k, t.matrix);
+      }
     });
+  }
+
+  /** Tree pits, fire hydrants, litter bins, benches and street-name signs. */
+  private addStreetItems(pits: Tree[], hydrants: Item[], bins: Item[], benches: Item[], signs: Item[]): void {
+    const t = new THREE.Object3D();
+    const mat = (color: number, roughness = 0.75) => new THREE.MeshStandardMaterial({ color, roughness });
+    const put = (mesh: THREE.InstancedMesh, i: number, item: { x: number; z: number; fx?: number; fz?: number }, y: number, along = 0, out = 0) => {
+      const fx = item.fx ?? 0, fz = item.fz ?? 1;
+      // Local +z faces the road, local +x runs along the street.
+      t.rotation.y = Math.atan2(fx, fz);
+      t.position.set((item.x - fz * along + fx * out) * CELL_SIZE, y, (item.z + fx * along + fz * out) * CELL_SIZE);
+      t.updateMatrix();
+      mesh.setMatrixAt(i, t.matrix);
+    };
+    const each = <T>(list: T[], geometry: THREE.BufferGeometry, material: THREE.Material, place: (mesh: THREE.InstancedMesh, item: T, i: number) => void, shadows = true) => {
+      if (!list.length) return;
+      const mesh = this.batch(geometry, material, list.length, shadows);
+      list.forEach((item, i) => place(mesh, item, i));
+    };
+
+    each(pits, new THREE.PlaneGeometry(0.11, 0.11).rotateX(-Math.PI / 2), mat(0x4a3b2c, 1), (m, p, i) => put(m, i, p, WALK_Y + 0.004), false);
+
+    const red = mat(0xb8322a, 0.5);
+    each(hydrants, new THREE.CylinderGeometry(0.011, 0.013, 0.045, 8), red, (m, h, i) => put(m, i, h, WALK_Y + 0.0225));
+    each(hydrants, new THREE.SphereGeometry(0.012, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2), red, (m, h, i) => put(m, i, h, WALK_Y + 0.045));
+    each(hydrants, new THREE.CylinderGeometry(0.005, 0.005, 0.034, 6).rotateZ(Math.PI / 2), mat(0x9a9ea3, 0.4), (m, h, i) => put(m, i, h, WALK_Y + 0.03));
+
+    each(bins, new THREE.CylinderGeometry(0.016, 0.014, 0.05, 10), mat(0x2f4a3a, 0.6), (m, b, i) => put(m, i, b, WALK_Y + 0.025));
+    each(bins, new THREE.CylinderGeometry(0.018, 0.018, 0.006, 10), mat(0x22362b, 0.6), (m, b, i) => put(m, i, b, WALK_Y + 0.053));
+
+    const wood = mat(0x8a5a35, 0.8), iron = mat(0x2c2f33, 0.5);
+    each(benches, new THREE.BoxGeometry(0.12, 0.007, 0.034), wood, (m, b, i) => put(m, i, b, WALK_Y + 0.03));
+    each(benches, new THREE.BoxGeometry(0.12, 0.028, 0.006), wood, (m, b, i) => put(m, i, b, WALK_Y + 0.05, 0, -0.017));
+    each([...benches, ...benches], new THREE.BoxGeometry(0.008, 0.03, 0.03), iron, (m, b, i) => put(m, i, b, WALK_Y + 0.015, i < benches.length ? -0.05 : 0.05));
+
+    const green = mat(0x2e7a4c, 0.45);
+    each(signs, new THREE.CylinderGeometry(0.007, 0.008, 0.3, 6), mat(0x50555b, 0.5), (m, s, i) => put(m, i, s, WALK_Y + 0.15));
+    each(signs, new THREE.BoxGeometry(0.11, 0.022, 0.004), green, (m, s, i) => put(m, i, s, WALK_Y + 0.29));
+    each(signs, new THREE.BoxGeometry(0.004, 0.022, 0.11), green, (m, s, i) => put(m, i, s, WALK_Y + 0.264));
   }
 
   clear(): void {

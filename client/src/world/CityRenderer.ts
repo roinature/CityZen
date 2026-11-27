@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {
-  DEFAULT_GRID_SIZE, isStarterEntranceRoad,
+  CELL_SIZE, DEFAULT_GRID_SIZE, isStarterEntranceRoad,
   type CityState, type Grid, type PlacedBuilding, type UtilityGridReport, type UtilityLayer,
 } from '@cityzen/shared';
 import { CityBuildings, type GridRect } from './CityBuildings.js';
@@ -9,6 +9,7 @@ import { createRoadSurface, indexRoads } from './RoadSurface.js';
 import { createServiceModel, hasServiceModel } from './ServiceModels.js';
 import { StreetFurniture } from './StreetFurniture.js';
 import { UtilityOverlay } from './UtilityOverlay.js';
+import { ObstacleMap, STEP_HEIGHT, type Obstacle } from './explore/ObstacleMap.js';
 
 const NIGHT_FADE_SECONDS = 1.2;
 
@@ -33,6 +34,7 @@ export class CityRenderer {
   private night = 0;
   private activeLayer: UtilityLayer = 'surface';
   private look: CityLook = { style: 'classic', skyline: 1, crossings: true, trees: true };
+  private obstacles: ObstacleMap | null = null;
 
   constructor(private scene: THREE.Scene, private entranceRoad: THREE.Group) {
     scene.add(
@@ -112,7 +114,32 @@ export class CityRenderer {
     }
   }
 
+  /** What stands where, for walking, sailing and flying through the city. */
+  getObstacles(): ObstacleMap {
+    if (this.needsSync && this.state) this.rebuild(this.state);
+    this.needsSync = false;
+    if (this.obstacles) return this.obstacles;
+    const boxes: Obstacle[] = [...this.buildings.getFootprints()];
+    const box = new THREE.Box3();
+    for (const model of this.models.values()) {
+      model.updateMatrixWorld(true);
+      model.traverse(child => {
+        if (!(child instanceof THREE.Mesh) || child.name === 'wake') return;
+        box.setFromObject(child);
+        if (box.isEmpty() || box.max.y / CELL_SIZE < STEP_HEIGHT) return;
+        boxes.push({
+          x0: box.min.x / CELL_SIZE, z0: box.min.z / CELL_SIZE,
+          x1: box.max.x / CELL_SIZE, z1: box.max.z / CELL_SIZE,
+          top: box.max.y / CELL_SIZE,
+        });
+      });
+    }
+    this.obstacles = new ObstacleMap(this.state?.grid.length ?? DEFAULT_GRID_SIZE, boxes);
+    return this.obstacles;
+  }
+
   private rebuild(state: CityState): void {
+    this.obstacles = null;
     this.entranceRoad.visible = state.buildings.length === 0
       || state.buildings.some(building => isStarterEntranceRoad(building, DEFAULT_GRID_SIZE));
     const { look } = this;
@@ -127,9 +154,10 @@ export class CityRenderer {
     if (key !== this.surfaceKey) {
       this.surfaceKey = key;
       this.clearSurface();
-      this.surface = createRoadSurface(state.buildings, roads, state.grid.length, { style, crossings: look.crossings });
+      const isWater = (x: number, z: number) => state.grid[x]?.[z]?.terrain === 'water';
+      this.surface = createRoadSurface(state.buildings, roads, state.grid.length, { style, crossings: look.crossings, isWater });
       this.scene.add(this.surface);
-      this.furniture.rebuild(state.buildings, roads, state.grid.length, style, look.trees);
+      this.furniture.rebuild(state.buildings, roads, state.grid.length, style, look.trees, isWater);
     }
     this.buildings.rebuild(state.buildings, roads, { style, skyline: look.skyline });
     this.syncModels(state.buildings, style, state.grid);
@@ -169,6 +197,7 @@ export class CityRenderer {
 
   clear(): void {
     this.state = null;
+    this.obstacles = null;
     this.needsSync = false;
     this.surfaceKey = '';
     this.entranceRoad.visible = false;

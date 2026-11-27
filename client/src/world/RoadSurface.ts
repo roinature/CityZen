@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {
-  BuildingType, CELL_SIZE, DEFAULT_GRID_SIZE, ZoneDensity, getEffectiveSize, isRoad, isStarterEntranceRoad, isZone,
+  BuildingType, CELL_SIZE, DEFAULT_GRID_SIZE, ZoneDensity, getEffectiveSize, isRoad, isStarterEntranceRoad, isUtilityConduit, isZone,
   type PlacedBuilding,
 } from '@cityzen/shared';
 import type { CityStyle } from './CityStyle.js';
@@ -12,6 +12,29 @@ const ROAD_Y = 0.02;
 const PAINT_Y = 0.026;
 export const WALK_Y = 0.06;
 const BULB = 0.64;
+/** Details on the asphalt stack up between it and the paint: wear, gutter, patches, ironwork. */
+const WEAR_Y = 0.0215;
+const GUTTER_Y = 0.0225;
+const PATCH_Y = 0.023;
+const IRON_Y = 0.024;
+const IRON_TOP_Y = 0.025;
+/** Joints and the kerb cap sit just proud of the sidewalk. */
+const WALK_DETAIL_Y = WALK_Y + 0.003;
+const GUTTER = 0.04;
+
+/** Deterministic 0..1 noise per tile. */
+function hash(x: number, z: number, salt: number): number {
+  const v = Math.sin(x * 127.1 + z * 311.7 + salt * 74.7) * 43758.5453;
+  return v - Math.floor(v);
+}
+
+/** A colour lightened (f > 1) or darkened (f < 1). */
+function shade(color: number, f: number): number {
+  const r = Math.min(255, Math.round(((color >> 16) & 255) * f));
+  const g = Math.min(255, Math.round(((color >> 8) & 255) * f));
+  const b = Math.min(255, Math.round((color & 255) * f));
+  return (r << 16) | (g << 8) | b;
+}
 
 /** East, south, west, north, as [dx, dz]; right of `d` (as seen travelling) is `d + 1`. */
 export const SIDES = [[1, 0], [0, 1], [-1, 0], [0, -1]] as const;
@@ -56,6 +79,8 @@ interface Axis {
 export interface RoadSurfaceOptions {
   style: CityStyle;
   crossings: boolean;
+  /** Cells of open water, which get no sidewalk. */
+  isWater?: (x: number, z: number) => boolean;
 }
 
 /**
@@ -132,12 +157,15 @@ class RoadSurfaceBuilder {
       return;
     }
 
-    this.mesh.rect(x, z, x + 1, z + 1, ROAD_Y, surface);
+    // Resurfaced at different times: each stretch is a slightly different grey.
+    this.mesh.rect(x, z, x + 1, z + 1, ROAD_Y, dirt ? surface : shade(surface, 0.97 + hash(x, z, 1) * 0.06));
     if (dirt || count > 2) return;
 
     // Straight: a dashed centre line, held back from junctions.
     const d = links[0] ? 0 : 1;
     const axis = this.axis(cx, cz, d);
+    this.wear(axis, -0.5, 0.5, [-0.25, 0.25]);
+    this.roadDetails(axis, x, z, 0.5);
     const starts = [-0.375, -0.125, 0.125, 0.375];
     const ahead = this.isJunction(tile, d), behind = this.isJunction(tile, d + 2);
     starts.forEach((s, i) => {
@@ -163,6 +191,7 @@ class RoadSurfaceBuilder {
     }
     // A round kerb and sidewalk outside, running into the straight ones.
     const outer = 1 + SIDEWALK;
+    this.mesh.ring(px, pz, 1 - GUTTER, 1, from, to, GUTTER_Y, shade(style.kerb, 1.04));
     this.mesh.polygon([[x, z], [x + 1, z], [x + 1, z + 1], [x, z + 1]], 0.004, style.lawn);
     this.mesh.ring(px, pz, 1, outer, from, to, WALK_Y, style.walk);
     this.mesh.walls(arc(px, pz, 1, from, to), 0, WALK_Y, style.kerb);
@@ -189,6 +218,10 @@ class RoadSurfaceBuilder {
     const ew = (building.orientation ?? 'EW') === 'EW';
     const half = (ew ? d : w) / 2;
     const axis = this.axis(x + w / 2, z + d / 2, ew ? 0 : 1);
+    const lanes: number[] = [];
+    for (let lane = 0.25; lane < half - 0.1; lane += 0.5) lanes.push(lane, -lane);
+    this.wear(axis, -0.5, 0.5, lanes);
+    if (!highway) this.roadDetails(axis, x, z, half);
     for (const side of [-1, 1]) {
       this.paint(axis, -0.5, 0.5, side * 0.035 - 0.012, side * 0.035 + 0.012, style.centreLine);
       const edge = side * (half - 0.07);
@@ -266,6 +299,51 @@ class RoadSurfaceBuilder {
     }
   }
 
+  // ── Surface detail ────────────────────────────────────────
+
+  /** Darker wheel paths worn into each lane by traffic. */
+  private wear(axis: Axis, a0: number, a1: number, lanes: readonly number[]): void {
+    const track = shade(this.o.style.asphalt, 0.9);
+    for (const lane of lanes) {
+      for (const wheel of [-0.075, 0.075]) {
+        const c = lane + wheel;
+        this.mesh.polygon([axis.point(a0, c - 0.022), axis.point(a1, c - 0.022), axis.point(a1, c + 0.022), axis.point(a0, c + 0.022)], WEAR_Y, track);
+      }
+    }
+  }
+
+  /** Gutters along the kerbs, and now and then a manhole, a drain or a patched repair. */
+  private roadDetails(axis: Axis, x: number, z: number, half: number): void {
+    const { style } = this.o;
+    for (const side of [-1, 1]) {
+      const c0 = side * (half - GUTTER), c1 = side * half;
+      this.mesh.polygon([axis.point(-0.5, c0), axis.point(0.5, c0), axis.point(0.5, c1), axis.point(-0.5, c1)], GUTTER_Y, shade(style.kerb, 1.04));
+    }
+    if (hash(x, z, 2) < 0.45) {
+      // A storm drain grate in the gutter.
+      const side = hash(x, z, 3) < 0.5 ? -1 : 1;
+      const a = (hash(x, z, 4) - 0.5) * 0.6;
+      const c0 = side * (half - GUTTER * 0.95), c1 = side * (half - 0.004);
+      this.mesh.polygon([axis.point(a - 0.05, c0), axis.point(a + 0.05, c0), axis.point(a + 0.05, c1), axis.point(a - 0.05, c1)], IRON_Y, 0x2b2d30);
+      for (let i = -2; i <= 2; i++) {
+        const s = a + i * 0.018;
+        this.mesh.polygon([axis.point(s - 0.003, c0), axis.point(s + 0.003, c0), axis.point(s + 0.003, c1), axis.point(s - 0.003, c1)], IRON_TOP_Y, 0x55585c);
+      }
+    }
+    if (hash(x, z, 5) < 0.3) {
+      // A manhole cover in the middle of a lane.
+      const [mx, mz] = axis.point((hash(x, z, 6) - 0.5) * 0.6, (hash(x, z, 7) < 0.5 ? -1 : 1) * (half > 0.6 ? 0.75 : 0.25));
+      this.mesh.sector(mx, mz, 0.042, 0, Math.PI * 2, IRON_Y, 0x3c3e42);
+      this.mesh.ring(mx, mz, 0.03, 0.036, 0, Math.PI * 2, IRON_TOP_Y, 0x5c5f63);
+    }
+    if (hash(x, z, 8) < 0.22) {
+      // A patched repair: a darker rectangle of fresher asphalt.
+      const a = (hash(x, z, 9) - 0.5) * 0.5, c = (hash(x, z, 10) - 0.5) * half;
+      const la = 0.08 + hash(x, z, 11) * 0.12, lc = 0.06 + hash(x, z, 12) * 0.1;
+      this.mesh.polygon([axis.point(a - la, c - lc), axis.point(a + la, c - lc), axis.point(a + la, c + lc), axis.point(a - la, c + lc)], PATCH_Y, shade(style.asphalt, 0.84));
+    }
+  }
+
   // ── Markings ──────────────────────────────────────────────
 
   private axis(x: number, z: number, d: number): Axis {
@@ -324,7 +402,7 @@ class RoadSurfaceBuilder {
 
     for (const key of cells) {
       const [x, z] = key.split(',').map(Number);
-      if (x < 0 || z < 0 || x >= this.gridSize || z >= this.gridSize || this.roads.has(key)) continue;
+      if (x < 0 || z < 0 || x >= this.gridSize || z >= this.gridSize || this.roads.has(key) || this.o.isWater?.(x, z)) continue;
       // Bends bring their own sidewalk; a lot only ever touches the outside of one.
       const side = SIDES.map(([dx, dz]) => paved(x + dx, z + dz) && !bends.has(`${x + dx},${z + dz}`));
       const cx = x + 0.5, cz = z + 0.5;
@@ -337,6 +415,11 @@ class RoadSurfaceBuilder {
         this.mesh.polygon([axis.point(0.5 - W, -0.5 + W), axis.point(0.5, -0.5 + W), axis.point(0.5, 0.5 - W), axis.point(0.5 - W, 0.5 - W)], top, style.walk);
         this.mesh.wall(axis.point(0.5, -0.5 + W), axis.point(0.5, 0.5 - W), 0, top, style.kerb);
         this.mesh.wall(axis.point(0.5 - W, -0.5 + W), axis.point(0.5 - W, 0.5 - W), 0, top, style.walk);
+        // A lighter kerb stone along the edge, and the joints between paving slabs.
+        this.mesh.polygon([axis.point(0.5 - 0.03, -0.5 + W), axis.point(0.5, -0.5 + W), axis.point(0.5, 0.5 - W), axis.point(0.5 - 0.03, 0.5 - W)], WALK_DETAIL_Y, shade(style.kerb, 1.12));
+        for (let j = -0.5 + W + 0.12; j < 0.5 - W - 0.02; j += 0.12) {
+          this.mesh.polygon([axis.point(0.5 - W, j - 0.004), axis.point(0.5 - 0.03, j - 0.004), axis.point(0.5 - 0.03, j + 0.004), axis.point(0.5 - W, j + 0.004)], WALK_DETAIL_Y, shade(style.walk, 0.86));
+        }
       }
 
       for (let d = 0; d < 4; d++) {
@@ -368,6 +451,8 @@ class RoadSurfaceBuilder {
 function addLots(mesh: MeshBuilder, buildings: readonly PlacedBuilding[], roads: RoadMap, style: CityStyle): void {
   const frontage = (x: number, z: number, d: number) => isPaved(roads.get(`${x + SIDES[d][0]},${z + SIDES[d][1]}`)?.type);
   for (const b of buildings) {
+    // Pipes and cables run underground (often beneath a street): no slab for them.
+    if (isUtilityConduit(b.type)) continue;
     const { x, z } = b.position;
     const built = (b.developmentLevel ?? 0) > 0;
     const urban = b.type === BuildingType.ZONE_COMMERCIAL

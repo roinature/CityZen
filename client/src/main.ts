@@ -43,7 +43,7 @@ import { GameMenu } from './ui/GameMenu.js';
 import { OptionsPanel, type GameOptions } from './ui/OptionsPanel.js';
 import { CarManager } from './world/CarManager.js';
 import { BoatManager } from './world/BoatManager.js';
-import { DriveMode } from './world/DriveMode.js';
+import { EXPLORE_MODES, ExploreMode, type ExploreKind } from './world/explore/ExploreMode.js';
 import { GridRaycaster } from './input/Raycaster.js';
 import { BuildTools, type ToolMode } from './ui/BuildTools.js';
 import { FinancePanel } from './ui/FinancePanel.js';
@@ -158,7 +158,10 @@ const edgeRoadIndicator = new EdgeRoadIndicator(sceneManager.scene);
 const cityRenderer = new CityRenderer(sceneManager.scene, entranceRoad);
 const carManager = new CarManager(sceneManager.scene);
 const boatManager = new BoatManager(sceneManager.scene);
-const driveMode = new DriveMode(sceneManager.scene, sceneManager, cameraController, carManager, uiRoot);
+const exploreMode = new ExploreMode(
+  sceneManager.scene, sceneManager, cameraController, carManager, boatManager,
+  () => cityRenderer.getObstacles(), uiRoot, canvas,
+);
 const buildMode = new BuildMode(sceneManager.scene, () => sceneManager.camera, canvas);
 const soundManager = new SoundManager();
 
@@ -175,8 +178,7 @@ function setInCity(inCity: boolean): void {
 const cityLoading = new CityLoading(uiRoot);
 
 function beginCityLoad(label: string): void {
-  setDrivePicking(false);
-  driveMode.stop();
+  stopExploring();
   lobby.hide();
   worldMap.hide();
   cityState = null;
@@ -302,7 +304,7 @@ function setActiveLayer(layer: UtilityLayer): void {
 }
 
 function setToolMode(mode: ToolMode): void {
-  if (mode !== 'pointer') setDrivePicking(false);
+  if (mode !== 'pointer') setExplorePicking(null);
   mapInput.cancel();
   buildMode.setToolMode(mode);
   buildTools.setActiveMode(mode);
@@ -423,52 +425,105 @@ addHudAction('Needs', () => {
   if (cityState.resources.populationSummary) maslowPanel.update(cityState.resources.populationSummary);
   maslowPanel.toggle();
 }, { title: 'Citizen Needs (Maslow Pyramid)' });
-// --- Drive mode: take a car through the city ---
-// Drive → click a spot on the map → the car starts on the nearest road there.
-const driveRaycaster = new GridRaycaster(canvas);
-let drivePicking = false;
+// --- Explore mode: drive, walk, fly or sail through the city ---
+// Explore → pick a mode → click a spot on the map → set off from the nearest suitable place.
+const exploreRaycaster = new GridRaycaster(canvas);
+let explorePicking: ExploreKind | null = null;
 
-function setDrivePicking(picking: boolean): void {
-  drivePicking = picking;
-  mapInput.onTap = picking ? pickDriveStart : null;
-  canvas.classList.toggle('drive-picking', picking);
-  driveButton?.setAttribute('aria-pressed', String(picking || driveMode.isActive()));
+function setExplorePicking(kind: ExploreKind | null): void {
+  explorePicking = kind;
+  mapInput.onTap = kind ? pickExploreStart : null;
+  canvas.classList.toggle('drive-picking', !!kind);
+  refreshExploreButton();
 }
 
-function pickDriveStart(clientX: number, clientY: number): void {
-  if (!cityState) return setDrivePicking(false);
-  const cell = driveRaycaster.getGridPosition(clientX, clientY, sceneManager.camera);
+function refreshExploreButton(): void {
+  const kind = explorePicking ?? exploreMode.getKind();
+  exploreButton?.setAttribute('aria-pressed', String(!!kind));
+  exploreMenu?.querySelectorAll<HTMLButtonElement>('[data-kind]').forEach(item =>
+    item.setAttribute('aria-pressed', String(item.dataset.kind === kind)));
+}
+
+function pickExploreStart(clientX: number, clientY: number): void {
+  const kind = explorePicking;
+  if (!cityState || !kind) return setExplorePicking(null);
+  const cell = exploreRaycaster.getGridPosition(clientX, clientY, sceneManager.camera);
   if (!cell) return;
-  if (!driveMode.start(cityState, { x: cell.x + 0.5, z: cell.z + 0.5 })) {
-    footerIndicator.toast('No road there. Click closer to a road');
+  if (!exploreMode.start(kind, cityState, { x: cell.x + 0.5, z: cell.z + 0.5 })) {
+    footerIndicator.toast(EXPLORE_MODES[kind].none);
     return;
   }
-  setDrivePicking(false);
-  footerIndicator.toast('Driving · Esc to get out');
+  setExplorePicking(null);
+  mapInput.enabled = false;
+  refreshExploreButton();
+  footerIndicator.toast(`${EXPLORE_MODES[kind].label} · Esc to stop`);
 }
 
-function toggleDriving(): void {
-  if (driveMode.isActive()) {
-    driveMode.stop();
-    return;
+function toggleExplore(kind: ExploreKind): void {
+  setExploreMenu(false);
+  const current = exploreMode.getKind();
+  if (current) {
+    exploreMode.stop();
+    if (current === kind) return;
   }
-  if (drivePicking) {
-    setDrivePicking(false);
+  if (explorePicking === kind) {
+    setExplorePicking(null);
     return;
   }
   if (!cityState) return;
-  if (!cityState.buildings.some(b => isRoad(b.type))) {
-    footerIndicator.toast('Build a road first, then take it for a drive');
+  if (!exploreMode.canStart(kind, cityState)) {
+    footerIndicator.toast(kind === 'drive' ? 'Build a road first, then take it for a drive' : 'This city has no water to sail on');
     return;
   }
   toolbar.close();
   setToolMode('pointer');
-  setDrivePicking(true);
-  footerIndicator.toast('Click a road on the map to start driving', 4000);
+  setExplorePicking(kind);
+  footerIndicator.toast(EXPLORE_MODES[kind].pick, 4000);
 }
-const driveButton = addHudAction('Drive', toggleDriving, { title: 'Drive through the city (C)' });
-driveButton.setAttribute('aria-pressed', 'false');
-driveMode.onExit = () => driveButton.setAttribute('aria-pressed', 'false');
+
+/** Leaves explore mode, or stops waiting for a starting spot. */
+function stopExploring(): void {
+  setExplorePicking(null);
+  exploreMode.stop();
+}
+
+const exploreButton = addHudAction('Explore', () => {
+  if (exploreMode.isActive() || explorePicking) return stopExploring();
+  setExploreMenu(exploreMenu.hidden);
+}, { title: 'Drive, walk, fly or sail through the city' });
+exploreButton.setAttribute('aria-pressed', 'false');
+exploreButton.setAttribute('aria-haspopup', 'menu');
+const exploreMenu = document.createElement('div');
+exploreMenu.className = 'explore-menu';
+exploreMenu.setAttribute('role', 'menu');
+exploreMenu.hidden = true;
+for (const kind of Object.keys(EXPLORE_MODES) as ExploreKind[]) {
+  const { label, key } = EXPLORE_MODES[kind];
+  const item = document.createElement('button');
+  item.className = 'explore-menu-item';
+  item.dataset.kind = kind;
+  item.setAttribute('role', 'menuitem');
+  item.innerHTML = `<span>${label}</span><kbd>${key}</kbd>`;
+  item.addEventListener('click', () => toggleExplore(kind));
+  exploreMenu.appendChild(item);
+}
+uiRoot.appendChild(exploreMenu);
+
+function setExploreMenu(open: boolean): void {
+  exploreMenu.hidden = !open;
+  exploreButton.setAttribute('aria-expanded', String(open));
+  if (!open) return;
+  const rect = exploreButton.getBoundingClientRect();
+  exploreMenu.style.top = `${rect.bottom + 6}px`;
+  exploreMenu.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 168))}px`;
+}
+document.addEventListener('pointerdown', (e) => {
+  if (!exploreMenu.hidden && !exploreMenu.contains(e.target as Node) && !exploreButton.contains(e.target as Node)) setExploreMenu(false);
+});
+exploreMode.onExit = () => {
+  mapInput.enabled = true;
+  refreshExploreButton();
+};
 
 addHudAction('Switch camera view', () => {
   footerIndicator.toast(`${CAMERA_VIEWS[optionsPanel.nextCameraView()].label} view`);
@@ -553,7 +608,7 @@ connect({
 
   onCityState: (city, players) => {
     if (cityState?.id !== city.id || (city.tick === 0 && cityState.tick > 0)) {
-      driveMode.stop();
+      exploreMode.stop();
       cameraController.frameCity(city);
     }
     setSite(city.siteId, city.grid);
@@ -896,7 +951,7 @@ const gameMenu = new GameMenu(uiRoot, {
       footerIndicator.toast('Read-only view — cannot restart', 2500);
       return;
     }
-    driveMode.stop();
+    exploreMode.stop();
     cityRenderer.clear();
     edgeRoadIndicator.clear();
     carManager.clear();
@@ -1032,8 +1087,10 @@ window.addEventListener('keydown', (e) => {
     gameMenu.show();
   } else if (gameMenu.isVisible()) {
     gameMenu.hide();
-  } else if (driveMode.isActive() || drivePicking) {
-    toggleDriving();
+  } else if (!exploreMenu.hidden) {
+    setExploreMenu(false);
+  } else if (exploreMode.isActive() || explorePicking) {
+    stopExploring();
   } else if (cityState) {
     if (buildMode.getSelectedType() || buildMode.getToolMode() === 'bulldoze') {
       setToolMode('pointer');
@@ -1053,12 +1110,13 @@ window.addEventListener('keydown', (e) => {
   if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
   if (!cityState || !gameClient || cityAdvisor.isOpen() || shareModal.isVisible() || gameMenu.isVisible() || optionsPanel.isVisible() || townPlanner.isVisible()) return;
 
-  if (e.code === 'KeyC') {
-    toggleDriving();
+  const exploreKey = ({ KeyC: 'drive', KeyG: 'walk', KeyH: 'fly', KeyN: 'boat' } as const)[e.code as 'KeyC'];
+  if (exploreKey) {
+    toggleExplore(exploreKey);
     return;
   }
-  // Drive mode owns the driving keys (Space brakes, V switches camera).
-  if (driveMode.isActive() && e.code !== 'Digit1' && e.code !== 'Digit2' && e.code !== 'Digit3') return;
+  // Explore mode owns the movement keys (Space brakes or jumps, V switches camera).
+  if (exploreMode.isActive() && e.code !== 'Digit1' && e.code !== 'Digit2' && e.code !== 'Digit3') return;
 
   if (e.code === 'Space' && !el?.closest('button, select')) {
     if (isReadOnlyCity) return;
@@ -1088,8 +1146,7 @@ window.addEventListener('keydown', (e) => {
 
 // --- Show world map helper ---
 function showWorldMap(): void {
-  setDrivePicking(false);
-  driveMode.stop();
+  stopExploring();
   cityAdvisor.hide();
   unhappyCityId = null;
   // No city on screen any more: drop the active tool and hide the HUD
@@ -1112,7 +1169,7 @@ function gameLoop(): void {
   const deltaTime = Math.min((now - lastTime) / 1000, 0.1);
   lastTime = now;
 
-  if (driveMode.isActive()) driveMode.update(deltaTime, cityState);
+  if (exploreMode.isActive()) exploreMode.update(deltaTime, cityState);
   else cameraController.update(deltaTime);
   lighting.update(deltaTime);
   sceneManager.post.setNight(lighting.getNight());

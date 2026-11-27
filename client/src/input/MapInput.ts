@@ -14,6 +14,8 @@ export class MapInput {
   private orbiting = false;
   /** When set, a left-click tap on the map goes here instead of the build tools. */
   onTap: ((clientX: number, clientY: number) => void) | null = null;
+  /** Off while the player is exploring the city: the map is not being edited or panned. */
+  enabled = true;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -32,6 +34,7 @@ export class MapInput {
     canvas.addEventListener('contextmenu', (event) => event.preventDefault());
     canvas.addEventListener('wheel', (event) => {
       event.preventDefault();
+      if (!this.enabled) return;
       this.camera.zoomByWheel(event.deltaMode === 1 ? event.deltaY * 33 : event.deltaY);
     }, { passive: false });
     window.addEventListener('blur', () => this.cancel());
@@ -56,6 +59,7 @@ export class MapInput {
   }
 
   private onDown = (event: PointerEvent): void => {
+    if (!this.enabled) return;
     if (event.button < 0 || event.button > 2) return;
     if (this.start && (event.pointerType !== 'touch' || this.start.pointerType !== 'touch')) return;
     if (event.button === 1) event.preventDefault();
@@ -87,6 +91,7 @@ export class MapInput {
   };
 
   private onMove = (event: PointerEvent): void => {
+    if (!this.enabled) return;
     if (!this.start) {
       if (event.pointerType !== 'touch') this.build.hover(event.clientX, event.clientY);
       return;

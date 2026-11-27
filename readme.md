@@ -2,7 +2,7 @@
 
 A real-time multiplayer 3D city builder game. Players collaborate to build and manage a shared city on a grid, placing buildings, laying roads, and watching their city come to life with animated traffic.
 
-Players found cities on one shared Earth. The first three sites are in California. Each site covers 3.2 km × 3.2 km, sampled at 50 m per cell. The playable map uses elevation shading, with open sea and slopes above a 40% grade closed to construction. Terrain is bundled with the game. [Mapzen elevation data and attribution](https://registry.opendata.aws/terrain-tiles/)
+Players found cities on one shared Earth, choosing from ~50 sites across every inhabited continent on an interactive 3D globe that opens on the player's location (time-zone estimate, or precise geolocation on request) and suggests the nearest open sites. Sites live in `shared/src/terrain/sites.ts`; refresh their terrain and the globe texture with `python3 scripts/sample-earth-sites.py --globe`. Each site covers 3.2 km × 3.2 km, sampled at 50 m per cell. The playable map uses elevation shading, with open sea and slopes above a 40% grade closed to construction. Terrain is bundled with the game. [Mapzen elevation data and attribution](https://registry.opendata.aws/terrain-tiles/)
 
 ## Play Now
 
