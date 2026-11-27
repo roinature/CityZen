@@ -62,7 +62,7 @@ export { DEFAULT_GRID_SIZE, CELL_SIZE } from './constants/grid.js';
 export {
   TICK_INTERVAL_MS, INITIAL_RESOURCES, AUTO_SAVE_INTERVAL_MS,
   MIN_TAX_RATE, MAX_TAX_RATE, TAX_RATE_STEP,
-  DEMAND_GROWTH_RATE, ZONE_GROWTH_CHANCE, MIN_DEMAND_TO_GROW,
+  DEMAND_GROWTH_RATE, ZONE_GROWTH_MIN_CHANCE, ZONE_GROWTH_CHANCE, MIN_DEMAND_TO_GROW,
   COMMERCIAL_JOBS_PER_WORKER, INDUSTRIAL_JOBS_PER_WORKER, MIN_JOBS_WANTED,
   HOUSING_BUFFER_RATIO, HOUSING_BUFFER_MIN,
   ZONE_LEVEL_MIN_HAPPINESS, DEMAND_UNHAPPY_BELOW,
@@ -110,7 +110,7 @@ export type { TownSettings, TownCharacter, TownPlan } from './logic/townPlan.js'
 export type { TaxBreakdown } from './logic/resources.js';
 export { calculateTaxBreakdown, calculateTaxRevenue, calculateMaintenance, calculateNetIncome, calculatePopulationGrowth, calculateHappiness, calculateHousingCapacity, calculateBudgetPenalty, calculateTaxPenalty, clamp, calculateCityScore } from './logic/resources.js';
 export { simulateTick, simulateCityTick, advanceClock } from './logic/simulation.js';
-export { calculateDemand, calculateDemandTargets, calculateGrowthBudget, getZoneLevelHappinessRequirement, processZoneGrowth } from './logic/demand.js';
+export { calculateDemand, calculateDemandTargets, calculateGrowthBudget, getZoneGrowthChance, getZoneLevelHappinessRequirement, processZoneGrowth } from './logic/demand.js';
 export { calculateBirthCount } from './logic/birth.js';
 export { getDeathProbability } from './logic/death.js';
 export {

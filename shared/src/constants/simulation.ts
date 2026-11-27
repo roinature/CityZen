@@ -22,17 +22,18 @@ export const DEFAULT_GAME_SPEED = 1;
 export const MAX_GAME_SPEED = 3;
 
 // Demand & zone growth
-export const DEMAND_GROWTH_RATE = 0.1;         // Per-tick lerp of each demand meter toward its target
-export const ZONE_GROWTH_CHANCE = 0.3;
-export const MIN_DEMAND_TO_GROW = 0.2;
+export const DEMAND_GROWTH_RATE = 0.25;        // Per-tick lerp of each demand meter toward its target
+export const ZONE_GROWTH_MIN_CHANCE = 0.08;    // Base per-tick growth chance whenever demand > 0
+export const ZONE_GROWTH_CHANCE = 0.4;         // Max per-tick growth chance at full demand (1.0)
+export const MIN_DEMAND_TO_GROW = 0;           // Any strictly positive demand (> 0) can actualize
 /**
- * Job targets per worker. Zones only develop while demand is at least
- * MIN_DEMAND_TO_GROW, so businesses stop opening at (1 - MIN_DEMAND_TO_GROW) of
- * these targets: 0.8 × 1.3 ≈ 1.04 jobs per worker. That keeps a job for
- * everyone, so residential demand never stalls on unemployment.
+ * Job targets per worker. Zones develop while demand > 0, up to 100% of these
+ * targets: 0.45 + 0.60 = 1.05 jobs per worker. That keeps a job for everyone,
+ * so residential demand never stalls on unemployment, without leaving a dead
+ * zone where the demand bar looks positive while nothing builds.
  */
-export const COMMERCIAL_JOBS_PER_WORKER = 0.55;
-export const INDUSTRIAL_JOBS_PER_WORKER = 0.75;
+export const COMMERCIAL_JOBS_PER_WORKER = 0.45;
+export const INDUSTRIAL_JOBS_PER_WORKER = 0.60;
 /** Homes get built ahead of demand up to this multiple of the population, plus a few spare. */
 export const HOUSING_BUFFER_RATIO = 1.25;
 export const HOUSING_BUFFER_MIN = 20;

@@ -41,7 +41,10 @@ export function simulateCityTick(state: CityState): CityState {
   };
 
   // Process zone growth (mutates building copies in place)
-  processZoneGrowth(working);
+  const growth = processZoneGrowth(working);
+  if (growth.upgradedBuildings.length > 0) {
+    working.resources = { ...working.resources, demand: calculateDemand(working) };
+  }
 
   // Calculate resource changes based on updated state
   const netIncome = calculateNetIncome(working);

@@ -3,7 +3,7 @@ import type { DemandState } from '../types/resources.js';
 import { BuildingType, isZone, type ZoneType } from '../types/building.js';
 import { getZoneLevelDef, type ZoneLevelDef } from '../constants/buildings.js';
 import {
-  DEMAND_GROWTH_RATE, MIN_DEMAND_TO_GROW, ZONE_GROWTH_CHANCE,
+  DEMAND_GROWTH_RATE, MIN_DEMAND_TO_GROW, ZONE_GROWTH_MIN_CHANCE, ZONE_GROWTH_CHANCE,
   ZONE_LEVEL_MIN_HAPPINESS, DEMAND_UNHAPPY_BELOW,
   COMMERCIAL_JOBS_PER_WORKER, INDUSTRIAL_JOBS_PER_WORKER, MIN_JOBS_WANTED,
   HOUSING_BUFFER_RATIO, HOUSING_BUFFER_MIN,
@@ -11,16 +11,18 @@ import {
 import { clamp } from './resources.js';
 import { calculateLaborStats } from './labor.js';
 
+function housingTarget(population: number): number {
+  return population * HOUSING_BUFFER_RATIO + HOUSING_BUFFER_MIN;
+}
+
 /**
  * Where each demand meter is heading, before smoothing (-1 to 1).
  *
- * Residential: people want to move in while there is work for them and the
- * existing homes are mostly taken. An unhappy city puts newcomers off.
+ * Residential: people want to move in while there is work for them and housing
+ * is below the target buffer. An unhappy city puts newcomers off.
  * Commercial / industrial: businesses open while the city has fewer of those
- * jobs than its workers can fill. The targets follow the workforce rather than
- * the head count, so a city of mostly working-age residents still gets enough
- * jobs, and they leave a job for every worker even after the growth threshold,
- * so housing and jobs keep pulling each other up instead of deadlocking.
+ * jobs than its workers can fill. Both targets and growth budgets share the
+ * exact same thresholds so positive demand always correlates with actualization.
  */
 function jobTargets(workers: number): { commercial: number; industrial: number } {
   return {
@@ -40,9 +42,10 @@ export function calculateDemandTargets(state: CityState): DemandState {
   const labourShortage = workers > 0 ? clamp(jobs / workers - 1, 0, 1) : 1;
   const jobPull = clamp(0.6 - 3 * unemployment + 0.4 * labourShortage, -1, 1);
 
-  // Housing: no point building more homes while a third of them stand empty.
-  const vacancy = housingCapacity > 0 ? Math.max(0, 1 - pop / housingCapacity) : 0;
-  const housingPull = clamp(1 - 3 * vacancy, -1, 1);
+  // Housing: +1 when homes are full (capacity <= pop), 0 at the exact growth
+  // budget ceiling (housingTarget), and negative when overbuilt.
+  const wantedHousing = housingTarget(pop);
+  const housingPull = clamp((wantedHousing - housingCapacity) / (wantedHousing - pop), -1, 1);
 
   // Mood: below DEMAND_UNHAPPY_BELOW the city's reputation drags demand down.
   const moodPenalty = Math.max(0, (DEMAND_UNHAPPY_BELOW - state.resources.happiness) / DEMAND_UNHAPPY_BELOW);
@@ -56,16 +59,33 @@ export function calculateDemandTargets(state: CityState): DemandState {
   };
 }
 
+function smoothDemand(current: number, target: number): number {
+  // Keep demand sign aligned with the target so the meter never reports
+  // positive demand after the growth budget is exhausted (or stalls negative
+  // once new demand appears).
+  if ((target <= 0 && current > 0) || (target > 0 && current <= 0)) {
+    return target * DEMAND_GROWTH_RATE;
+  }
+  return current + (target - current) * DEMAND_GROWTH_RATE;
+}
+
 export function calculateDemand(state: CityState): DemandState {
   const target = calculateDemandTargets(state);
 
-  // Smooth toward target (lerp from current demand)
+  // Smooth toward target while keeping sign aligned with actual growth eligibility
   const current = state.resources.demand ?? { residential: 0.5, commercial: 0, industrial: 0.3 };
   return {
-    residential: current.residential + (target.residential - current.residential) * DEMAND_GROWTH_RATE,
-    commercial: current.commercial + (target.commercial - current.commercial) * DEMAND_GROWTH_RATE,
-    industrial: current.industrial + (target.industrial - current.industrial) * DEMAND_GROWTH_RATE,
+    residential: smoothDemand(current.residential, target.residential),
+    commercial: smoothDemand(current.commercial, target.commercial),
+    industrial: smoothDemand(current.industrial, target.industrial),
   };
+}
+
+/** Per-tick probability that an eligible zone tile develops, scaled by demand. */
+export function getZoneGrowthChance(zoneDemand: number): number {
+  if (zoneDemand <= MIN_DEMAND_TO_GROW) return 0;
+  const clamped = clamp(zoneDemand, 0, 1);
+  return ZONE_GROWTH_MIN_CHANCE + (ZONE_GROWTH_CHANCE - ZONE_GROWTH_MIN_CHANCE) * clamped;
 }
 
 /** Happiness the city needs before a zone can develop to `level` (1-3). */
@@ -79,10 +99,9 @@ export interface ZoneGrowthResult {
 
 /**
  * How much each zone type may still add this tick: homes for residential, jobs
- * for commercial and industrial. The demand meters are smoothed, so without a
- * budget a city with hundreds of empty lots would develop all of them in the
- * few ticks before the meter catches up, and then pay upkeep on buildings
- * nobody uses.
+ * for commercial and industrial. Without a per-tick budget a city with hundreds
+ * of empty lots would develop all of them in a single tick and then pay upkeep
+ * on buildings nobody uses.
  */
 export function calculateGrowthBudget(state: CityState): DemandState {
   const { commercialJobs, industrialJobs, workers, housingCapacity } = calculateLaborStats(state);
@@ -90,7 +109,7 @@ export function calculateGrowthBudget(state: CityState): DemandState {
   const wanted = jobTargets(workers);
 
   return {
-    residential: pop * HOUSING_BUFFER_RATIO + HOUSING_BUFFER_MIN - housingCapacity,
+    residential: housingTarget(pop) - housingCapacity,
     commercial: wanted.commercial - commercialJobs,
     industrial: wanted.industrial - industrialJobs,
   };
@@ -111,14 +130,14 @@ export function processZoneGrowth(state: CityState): ZoneGrowthResult {
     const level = building.developmentLevel ?? 0;
     if (level >= 3) continue;
 
-    // Check if demand is high enough for this zone type
+    // Check if demand is positive for this zone type
     let zoneDemand = 0;
     let kind: keyof DemandState = 'residential';
     if (building.type === BuildingType.ZONE_RESIDENTIAL) { zoneDemand = demand.residential; kind = 'residential'; }
     if (building.type === BuildingType.ZONE_COMMERCIAL) { zoneDemand = demand.commercial; kind = 'commercial'; }
     if (building.type === BuildingType.ZONE_INDUSTRIAL) { zoneDemand = demand.industrial; kind = 'industrial'; }
 
-    if (zoneDemand < MIN_DEMAND_TO_GROW) continue;
+    if (zoneDemand <= MIN_DEMAND_TO_GROW) continue;
     if (budget[kind] <= 0) continue;
 
     // Bigger buildings only go up in a city people actually like living in
@@ -132,8 +151,8 @@ export function processZoneGrowth(state: CityState): ZoneGrowthResult {
 
     if (ticksSinceLast < ticksRequired) continue;
 
-    // Random chance scaled by demand
-    if (Math.random() < ZONE_GROWTH_CHANCE * zoneDemand) {
+    // Random chance scaled monotonically by demand
+    if (Math.random() < getZoneGrowthChance(zoneDemand)) {
       building.developmentLevel = level + 1;
       building.developedAt = currentTick;
       result.upgradedBuildings.push(building.id);

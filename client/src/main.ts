@@ -1078,14 +1078,14 @@ function generateAdvisorHints(city: CityState): void {
   const housingFull = labor.housingCapacity > 0 && res.population >= labor.housingCapacity * 0.9;
 
   if (hasAny('zone_residential') && (emptyOf('zone_residential') || housingFull)
-    && target.residential < MIN_DEMAND_TO_GROW && labor.employmentRate < 0.9) {
+    && target.residential <= MIN_DEMAND_TO_GROW && labor.employmentRate < 0.9) {
     advise('no_jobs', 'Not enough jobs',
       `There are ${Math.round(labor.jobs)} jobs for ${Math.round(labor.workers)} workers, so nobody new wants to move in. ` +
       (hasAny('zone_industrial') || hasAny('zone_commercial')
         ? 'Zone more commercial or industrial land. It also pays tax once staffed.'
         : 'Zone some commercial and industrial land next to your housing.'),
       city);
-  } else if (emptyOf('zone_commercial') && target.commercial < MIN_DEMAND_TO_GROW && city.tick > 30) {
+  } else if (emptyOf('zone_commercial') && target.commercial <= MIN_DEMAND_TO_GROW && city.tick > 30) {
     advise('no_customers', 'Shops have no customers',
       'Commercial zones develop as the population grows. Grow your residential zones first.',
       city, MessagePriority.LOW);

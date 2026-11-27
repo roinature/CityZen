@@ -86,13 +86,14 @@ export class CityRoom {
       }
     }
 
-    this.state = simulateCityTick(this.state);
-
-    // Sync population from PopulationManager (overrides legacy growth)
+    // Sync population from PopulationManager before simulating so demand,
+    // growth budgets, taxes and happiness use the current tick's demographics.
     if (populationSummary) {
       this.state.resources.population = populationSummary.total;
       this.state.resources.populationSummary = populationSummary;
     }
+
+    this.state = simulateCityTick(this.state);
 
     // Attach zone populations for client rendering
     if (zonePopulations) {

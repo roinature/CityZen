@@ -170,9 +170,9 @@ export class ResourceBar {
 
     // Update demand bars
     if (resources.demand) {
-      this.updateDemandBar(this.demandResEl, resources.demand.residential, '#66BB6A');
-      this.updateDemandBar(this.demandComEl, resources.demand.commercial, '#42A5F5');
-      this.updateDemandBar(this.demandIndEl, resources.demand.industrial, '#FFA726');
+      this.updateDemandBar(this.demandResEl, resources.demand.residential, '#66BB6A', 'Residential');
+      this.updateDemandBar(this.demandComEl, resources.demand.commercial, '#42A5F5', 'Commercial');
+      this.updateDemandBar(this.demandIndEl, resources.demand.industrial, '#FFA726', 'Industrial');
     }
   }
 
@@ -184,10 +184,15 @@ export class ResourceBar {
     this.moneyEl.classList.add(cls);
   }
 
-  private updateDemandBar(el: HTMLDivElement, value: number, color: string): void {
-    // value is -1 to 1, map to 0-100% width
-    const pct = Math.max(0, Math.min(100, (value + 1) * 50));
+  private updateDemandBar(el: HTMLDivElement, value: number, color: string, label: string): void {
+    // Only positive demand (0 to 1) triggers zone development; map it directly to 0-100% width.
+    const positive = Math.max(0, Math.min(1, value));
+    const pct = Math.round(positive * 100);
     el.style.width = `${pct}%`;
-    el.style.backgroundColor = value > 0 ? color : '#666';
+    el.style.backgroundColor = positive > 0 ? color : '#666';
+    const item = el.closest<HTMLElement>('.demand-item');
+    if (item) {
+      item.title = positive > 0 ? `${label} demand: ${pct}%` : `${label} demand: none`;
+    }
   }
 }
