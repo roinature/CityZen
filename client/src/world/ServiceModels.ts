@@ -9,8 +9,13 @@ type Build = (kit: Kit, w: number, d: number) => void;
 /** Small helper for putting together a model out of plain shapes. */
 class Kit {
   readonly group = new THREE.Group();
+  readonly style: CityStyle;
+  readonly accent: number;
 
-  constructor(readonly style: CityStyle, readonly accent: number) {}
+  constructor(style: CityStyle, accent: number) {
+    this.style = style;
+    this.accent = accent;
+  }
 
   add(geometry: THREE.BufferGeometry, color: number, x: number, y: number, z: number): THREE.Mesh {
     const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color, roughness: 0.85, flatShading: true }));

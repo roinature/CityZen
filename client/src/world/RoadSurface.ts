@@ -64,8 +64,15 @@ export interface RoadSurfaceOptions {
  */
 class RoadSurfaceBuilder {
   readonly mesh = new MeshBuilder();
+  private roads: RoadMap;
+  private gridSize: number;
+  private o: RoadSurfaceOptions;
 
-  constructor(private roads: RoadMap, private gridSize: number, private o: RoadSurfaceOptions) {}
+  constructor(roads: RoadMap, gridSize: number, o: RoadSurfaceOptions) {
+    this.roads = roads;
+    this.gridSize = gridSize;
+    this.o = o;
+  }
 
   private at(x: number, z: number): RoadTile | undefined {
     return this.roads.get(`${x},${z}`);

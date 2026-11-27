@@ -70,6 +70,7 @@ export class SoundManager {
 
     // Noise buffer (reused)
     private noiseBuffer: AudioBuffer | null = null;
+    private lastBulldozeAt = 0;
 
     // ---------------------------------------------------------------------------
     // Initialization
@@ -242,6 +243,9 @@ export class SoundManager {
     /** Play a bulldoze / demolition sound effect. */
     triggerBulldoze(): void {
         if (!this.ctx || !this._enabled) return;
+        const nowMs = performance.now();
+        if (nowMs - this.lastBulldozeAt < 50) return;
+        this.lastBulldozeAt = nowMs;
 
         const duration = 0.4;
         const osc = this.ctx.createOscillator();
