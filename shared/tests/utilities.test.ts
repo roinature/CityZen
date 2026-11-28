@@ -10,6 +10,9 @@ import {
   computePowerCableSpans,
   createEmptyGrid,
   evaluateCityUtilities,
+  getBuildingMaintenance,
+  getBuildingUtilityProfile,
+  getEffectivePumpLevel,
   getWaterSourceInfo,
   planTown,
   processZoneGrowth,
@@ -244,4 +247,115 @@ test('TownPlanner with services enabled lays connected power, water, and sewage 
   assert.ok(report.summary.poweredBuildings > 0, 'Planned town buildings should be powered');
   assert.ok(report.summary.wateredBuildings > 0, 'Planned town buildings should receive piped water');
   assert.ok(report.summary.drainedBuildings > 0, 'Planned town buildings should drain sewage');
+});
+
+test('water and sewage demand stay realistic and sewage never exceeds water consumption', () => {
+  const room = makeCleanRoom();
+  const sampleTypes = [
+    BuildingType.ZONE_RESIDENTIAL,
+    BuildingType.ZONE_COMMERCIAL,
+    BuildingType.ZONE_INDUSTRIAL,
+  ] as const;
+
+  let x = 5;
+  for (const type of sampleTypes) {
+    for (const density of [ZoneDensity.LOW, ZoneDensity.MEDIUM, ZoneDensity.HIGH]) {
+      for (const level of [1, 2, 3]) {
+        room.placeBuilding('p1', { x, z: 10 }, type, density);
+        const b = room.state.buildings[room.state.buildings.length - 1];
+        b.developmentLevel = level;
+        const p = getBuildingUtilityProfile(b);
+        assert.ok(p.waterDemandM3 > 0, `${type} ${density} L${level} should require water`);
+        assert.ok(
+          p.sewageOutputM3 <= p.waterDemandM3,
+          `${type} ${density} L${level} sewage (${p.sewageOutputM3}) must not exceed water (${p.waterDemandM3})`,
+        );
+        x++;
+      }
+    }
+  }
+
+  // Even 27 mixed buildings (including high-density L3) should stay well below a single Sewage Plant (1400 m³/h)
+  const report = evaluateCityUtilities(room.state);
+  assert.ok(
+    report.summary.sewageDemandM3 < 200,
+    `Expected realistic 27-building sewage load < 200 m³/h, got ${report.summary.sewageDemandM3}`,
+  );
+});
+
+test('water pumps and sewage pumping stations support Power Levels 1-5 scaling capacity, MW draw, and upkeep', () => {
+  const room = makeCleanRoom();
+  // Plenty of power for upgraded pumps
+  room.placeBuilding('p1', { x: 26, z: 31 }, BuildingType.ENERGY_COAL_PLANT);
+  // Water pump on central aquifer (31, 31) and sewage station nearby at (31, 26)
+  assert.equal(room.placeBuilding('p1', { x: 31, z: 31 }, BuildingType.WATER_PUMP_STATION).success, true);
+  assert.equal(room.placeBuilding('p1', { x: 31, z: 26 }, BuildingType.SEWAGE_PUMP_STATION).success, true);
+
+  const waterPump = room.state.buildings.find(b => b.type === BuildingType.WATER_PUMP_STATION)!;
+  const sewageStation = room.state.buildings.find(b => b.type === BuildingType.SEWAGE_PUMP_STATION)!;
+
+  assert.equal(getEffectivePumpLevel(waterPump), 1);
+  assert.equal(getEffectivePumpLevel(sewageStation), 1);
+
+  const baseReport = evaluateCityUtilities(room.state);
+  const baseWaterSupply = baseReport.summary.waterSupplyM3;
+  const baseSewageCap = baseReport.summary.sewageCapacityM3;
+  const baseWaterMW = getBuildingUtilityProfile(waterPump).powerDemandMW;
+  const baseSewageMW = getBuildingUtilityProfile(sewageStation).powerDemandMW;
+  const baseWaterMaint = getBuildingMaintenance(waterPump);
+  const baseSewageMaint = getBuildingMaintenance(sewageStation);
+
+  // Raise both to Power Level 4
+  assert.equal(room.setBuildingPumpLevel(waterPump.id, 4).success, true);
+  assert.equal(room.setBuildingPumpLevel(sewageStation.id, 4).success, true);
+  assert.equal(getEffectivePumpLevel(waterPump), 4);
+  assert.equal(getEffectivePumpLevel(sewageStation), 4);
+
+  const boostedReport = evaluateCityUtilities(room.state);
+  assert.ok(
+    boostedReport.summary.waterSupplyM3 > baseWaterSupply * 3.2,
+    `Expected Lv 4 water pump supply > 3.2x base (${baseWaterSupply}), got ${boostedReport.summary.waterSupplyM3}`,
+  );
+  assert.ok(
+    boostedReport.summary.sewageCapacityM3 > baseSewageCap * 3.2,
+    `Expected Lv 4 sewage station cap > 3.2x base (${baseSewageCap}), got ${boostedReport.summary.sewageCapacityM3}`,
+  );
+  assert.ok(getBuildingUtilityProfile(waterPump).powerDemandMW > baseWaterMW * 3.5, 'Higher pump level draws more MW');
+  assert.ok(getBuildingUtilityProfile(sewageStation).powerDemandMW > baseSewageMW * 3.5, 'Higher sewage pump level draws more MW');
+  assert.ok(getBuildingMaintenance(waterPump) > baseWaterMaint, 'Higher pump level increases upkeep');
+  assert.ok(getBuildingMaintenance(sewageStation) > baseSewageMaint, 'Higher sewage pump level increases upkeep');
+
+  // Clamping & resetting back to Level 1 clears optional pumpLevel field
+  assert.equal(room.setBuildingPumpLevel(waterPump.id, 99).success, true);
+  assert.equal(getEffectivePumpLevel(waterPump), 5);
+  assert.equal(room.setBuildingPumpLevel(waterPump.id, 1).success, true);
+  assert.equal(waterPump.pumpLevel, undefined);
+});
+
+test('overloaded sewage networks prioritize buildings closer to the pumping station', () => {
+  const room = makeCleanRoom();
+  // Power + Sewage Station (300 m³/h) at (10, 10)
+  room.placeBuilding('p1', { x: 6, z: 10 }, BuildingType.ENERGY_SOLAR_FARM);
+  room.placeBuilding('p1', { x: 10, z: 10 }, BuildingType.SEWAGE_PUMP_STATION);
+
+  // Run a sewer pipe eastward from x=12..35 along z=10
+  const pipes = [];
+  for (let x = 12; x <= 35; x++) pipes.push({ x, z: 10 });
+  room.placeBuildings('p1', { positions: pipes, type: BuildingType.UTILITY_SEWAGE_PIPE });
+
+  // Place 20 high-density L3 industrial buildings (20.4 m³/h sewage each => 408 m³/h > 300 m³/h)
+  // Insert them far-to-near so array order would otherwise favor far buildings!
+  const factories = [];
+  for (let x = 34; x >= 15; x--) {
+    room.placeBuilding('p1', { x, z: 12 }, BuildingType.ZONE_INDUSTRIAL, ZoneDensity.HIGH);
+    const b = room.state.buildings[room.state.buildings.length - 1];
+    b.developmentLevel = 3;
+    factories.push(b);
+  }
+
+  const report = evaluateCityUtilities(room.state);
+  const nearest = factories[factories.length - 1]; // x=15
+  const farthest = factories[0]; // x=34
+  assert.equal(report.buildings.get(nearest.id)?.sewageState, 'drained', 'Nearest building should stay drained');
+  assert.equal(report.buildings.get(farthest.id)?.sewageState, 'backed_up', 'Farthest downstream building should back up first');
 });

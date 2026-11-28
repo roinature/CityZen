@@ -443,6 +443,11 @@ export class LocalCityHost {
         if (res.success) this.markDirty();
         return res;
       }
+      case 'buildingPumpLevel': {
+        const res = room.setBuildingPumpLevel(String(args.buildingId || ''), Number(args.pumpLevel));
+        if (res.success) this.markDirty();
+        return res;
+      }
       case 'tax': {
         const res = args.taxRates ? room.setTaxRates(args.taxRates) : room.setTaxRate(args.taxRate);
         if (res.success) this.markDirty();

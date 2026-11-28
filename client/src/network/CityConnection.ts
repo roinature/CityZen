@@ -16,6 +16,7 @@ export interface CityConnection {
   paintBuildings(stroke: PlaceBuildingsPayload, playerId: string): Promise<void>;
   demolish(position: Position, playerId?: string, layer?: UtilityLayer): Promise<void>;
   setBuildingFleet(buildingId: string, fleetSize: number, playerId?: string): Promise<{ success: boolean; error?: string }>;
+  setBuildingPumpLevel(buildingId: string, pumpLevel: number, playerId?: string): Promise<{ success: boolean; error?: string }>;
   save(playerId?: string): Promise<void>;
   restart(playerId?: string): Promise<void>;
   generateTown(settings: TownSettings, playerId: string): Promise<boolean>;

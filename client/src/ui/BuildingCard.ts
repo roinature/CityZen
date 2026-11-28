@@ -5,6 +5,7 @@ import {
   INFRA_CATEGORIES,
   MaslowNeed,
   SERVICE_BUILDING_FLEETS,
+  UTILITY_PUMP_LEVELS,
   ZONE_DENSITY_COSTS,
   ZoneDensity,
   calculateLaborStats,
@@ -12,7 +13,10 @@ import {
   evaluateCityUtilities,
   getBuildingMaintenance,
   getEffectiveFleetSize,
+  getEffectivePumpLevel,
   getEffectiveSize,
+  getPumpCapacityMultiplier,
+  getPumpPowerMultiplier,
   getZoneLevelDef,
   getZoneLevelHappinessRequirement,
   hasOperationalResponder,
@@ -36,6 +40,7 @@ export interface BuildingCardCallbacks {
   getDepotStatus: (buildingId: string) => DepotFleetStatus;
   getMaritimeStatus: (buildingId: string) => BuildingMaritimeStatus;
   onSetFleetSize: (buildingId: string, fleetSize: number) => Promise<{ success: boolean; error?: string }>;
+  onSetPumpLevel: (buildingId: string, pumpLevel: number) => Promise<{ success: boolean; error?: string }>;
   onDispatchVehicle: (buildingId: string) => boolean;
   onRecallVehicles: (buildingId: string) => number;
   onDispatchVessel: (buildingId: string) => boolean;
@@ -168,16 +173,20 @@ export function computeBuildingServiceReach(
   };
 
   const targetFactor = getOperationalFactor(targetBuilding);
+  const targetPumpMult = (isWaterFacilityBuilding(targetBuilding.type) || isSewageFacilityBuilding(targetBuilding.type))
+    ? getPumpCapacityMultiplier(targetBuilding)
+    : 1;
   const population = Math.max(0, state.resources.population);
 
   return contributions.map(mc => {
-    const effectiveCapacity = Math.round(mc.capacityServed * targetFactor);
+    const scaledRawCap = Math.round(mc.capacityServed * targetPumpMult);
+    const effectiveCapacity = Math.round(scaledRawCap * targetFactor);
     if (effectiveCapacity <= 0 || population <= 0) {
       return {
         need: mc.need,
         served: 0,
         effectiveCapacity,
-        rawCapacity: mc.capacityServed,
+        rawCapacity: scaledRawCap,
         quality: mc.value,
         factor: targetFactor,
       };
@@ -191,7 +200,10 @@ export function computeBuildingServiceReach(
       const match = bContribs?.find(c => c.need === mc.need);
       if (!match) continue;
       const f = getOperationalFactor(b);
-      const cap = Math.round(match.capacityServed * f);
+      const pMult = (isWaterFacilityBuilding(b.type) || isSewageFacilityBuilding(b.type))
+        ? getPumpCapacityMultiplier(b)
+        : 1;
+      const cap = Math.round(match.capacityServed * pMult * f);
       if (cap > 0) providers.push({ id: b.id, value: match.value, cap });
     }
     providers.sort((a, b) => b.value - a.value);
@@ -212,7 +224,7 @@ export function computeBuildingServiceReach(
       need: mc.need,
       served: servedByTarget,
       effectiveCapacity,
-      rawCapacity: mc.capacityServed,
+      rawCapacity: scaledRawCap,
       quality: mc.value,
       factor: targetFactor,
     };
@@ -241,6 +253,7 @@ export class BuildingCard {
   private lastState: CityState | null = null;
   private readOnly = false;
   private busyFleet = false;
+  private busyPump = false;
   private confirmDemolish = false;
   private confirmTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -430,6 +443,10 @@ export class BuildingCard {
       subParts.push(lvl > 0 ? `Level ${lvl}/3` : 'Empty Lot');
     } else {
       subParts.push(`${w}×${d}`);
+      const pumpCfg = UTILITY_PUMP_LEVELS[building.type];
+      if (pumpCfg) {
+        subParts.push(`Power Lv ${getEffectivePumpLevel(building)}/${pumpCfg.maxLevel}`);
+      }
     }
     subParts.push(`(${building.position.x}, ${building.position.z})`);
     this.subtitleEl.textContent = subParts.join(' · ');
@@ -509,7 +526,15 @@ export class BuildingCard {
     }
 
     const { w, d } = getEffectiveSize(building.type, building.orientation);
-    const MaintNote = maintDelta !== 0 ? ` (${maintDelta > 0 ? '+' : ''}$${maintDelta} fleet)` : '';
+    const pumpCfg = UTILITY_PUMP_LEVELS[building.type];
+    const pumpMaintDelta = pumpCfg
+      ? (getEffectivePumpLevel(building) - pumpCfg.defaultLevel) * pumpCfg.upkeepPerLevel
+      : 0;
+    const fleetMaintDelta = maintDelta - pumpMaintDelta;
+    const deltaNotes: string[] = [];
+    if (fleetMaintDelta !== 0) deltaNotes.push(`${fleetMaintDelta > 0 ? '+' : ''}$${fleetMaintDelta} fleet`);
+    if (pumpMaintDelta !== 0) deltaNotes.push(`+$${pumpMaintDelta} pump`);
+    const MaintNote = deltaNotes.length > 0 ? ` (${deltaNotes.join(', ')})` : '';
 
     const grid = document.createElement('div');
     grid.className = 'building-stat-grid';
@@ -965,13 +990,16 @@ export class BuildingCard {
 
     // B. Water Supply Facilities
     if (isWaterFacilityBuilding(building.type)) {
-      const supply = def.effects.waterSupplyM3 ?? 0;
+      const capMult = getPumpCapacityMultiplier(building);
+      const baseSupply = def.effects.waterSupplyM3 ?? 0;
+      const supply = Math.round(baseSupply * capMult);
       const pipeState = utilities.waterPipeState.get(building.id) ?? 'pressurized';
       const powerOk = bStatus ? bStatus.powered : true;
+      this.appendPumpPowerControl(building);
       const rows: Array<[string, string, string?]> = [
-        ['Supply Capacity', `+${supply} m³/h`, pipeState === 'dry' ? 'negative' : 'positive'],
-        ['City Water Load', `${s.waterDemandM3} / ${s.waterSupplyM3} m³/h (${s.waterLoadPct}%)`, s.waterLoadPct > 100 ? 'negative' : undefined],
-        ['Pump Electricity', `${(bStatus?.powerDemandMW ?? def.effects.powerDemandMW ?? 0).toFixed(1)} MW · ${powerOk ? 'Powered' : 'No Power'}`, powerOk ? 'positive' : 'negative'],
+        ['Supply Capacity', `+${supply.toLocaleString()} m³/h`, pipeState === 'dry' ? 'negative' : 'positive'],
+        ['City Water Load', `${s.waterDemandM3.toLocaleString()} / ${s.waterSupplyM3.toLocaleString()} m³/h (${s.waterLoadPct}%)`, s.waterLoadPct > 100 ? 'negative' : undefined],
+        ['Pump Electricity', `${(bStatus?.powerDemandMW ?? ((def.effects.powerDemandMW ?? 0) * getPumpPowerMultiplier(building))).toFixed(1)} MW · ${powerOk ? 'Powered' : 'No Power'}`, powerOk ? 'positive' : 'negative'],
         ['Facility Status', pipeState === 'dry' ? 'Dry / Offline' : pipeState === 'low_pressure' ? 'Low Pressure' : 'Pressurized',
           pipeState === 'pressurized' ? 'positive' : 'negative'],
       ];
@@ -990,18 +1018,28 @@ export class BuildingCard {
 
     // C. Sewage Treatment Facilities
     if (isSewageFacilityBuilding(building.type)) {
-      const cap = def.effects.sewageCapacityM3 ?? 0;
+      const capMult = getPumpCapacityMultiplier(building);
+      const baseCap = def.effects.sewageCapacityM3 ?? 0;
+      const cap = Math.round(baseCap * capMult);
       const sewerState = utilities.sewagePipeState.get(building.id) ?? 'draining';
       const powerOk = bStatus ? bStatus.powered : true;
+      this.appendPumpPowerControl(building);
       const rows: Array<[string, string, string?]> = [
-        ['Treatment Capacity', `+${cap} m³/h`, sewerState === 'disconnected' ? 'negative' : 'positive'],
-        ['City Sewage Load', `${s.sewageDemandM3} / ${s.sewageCapacityM3} m³/h (${s.sewageLoadPct}%)`, s.sewageLoadPct > 100 ? 'negative' : undefined],
-        ['Plant Electricity', `${(bStatus?.powerDemandMW ?? def.effects.powerDemandMW ?? 0).toFixed(1)} MW · ${powerOk ? 'Powered' : 'No Power'}`, powerOk ? 'positive' : 'negative'],
+        ['Treatment Capacity', `+${cap.toLocaleString()} m³/h`, sewerState === 'disconnected' ? 'negative' : 'positive'],
+        ['City Sewage Load', `${s.sewageDemandM3.toLocaleString()} / ${s.sewageCapacityM3.toLocaleString()} m³/h (${s.sewageLoadPct}%)`, s.sewageLoadPct > 100 ? 'negative' : undefined],
+        ['Plant Electricity', `${(bStatus?.powerDemandMW ?? ((def.effects.powerDemandMW ?? 0) * getPumpPowerMultiplier(building))).toFixed(1)} MW · ${powerOk ? 'Powered' : 'No Power'}`, powerOk ? 'positive' : 'negative'],
         ['Drainage Status', sewerState === 'disconnected' ? 'Offline' : sewerState === 'backed_up' ? 'Overloaded' : 'Draining Cleanly',
           sewerState === 'draining' ? 'positive' : 'negative'],
       ];
       this.appendKvRows(rows);
       this.appendLoadBar(s.sewageLoadPct, '#26a69a');
+      const note = utilities.facilityNotes.get(building.id);
+      if (note) {
+        const warn = document.createElement('div');
+        warn.className = 'building-card-note warn';
+        warn.textContent = note;
+        this.usageEl.appendChild(warn);
+      }
       addLayerAction('sewage', '🚰 Inspect Sewage Network');
       return;
     }
@@ -1074,6 +1112,53 @@ export class BuildingCard {
     } else if (!bStatus.drained && bStatus.sewageState !== 'not_needed') {
       addLayerAction('sewage', '🚰 Connect Sewage');
     }
+  }
+
+  private appendPumpPowerControl(building: PlacedBuilding): void {
+    const cfg = UTILITY_PUMP_LEVELS[building.type];
+    if (!cfg) return;
+    const level = getEffectivePumpLevel(building);
+    const capMult = getPumpCapacityMultiplier(building);
+    const pwrMult = getPumpPowerMultiplier(building);
+    const icon = cfg.kind === 'water' ? '💧' : '🚰';
+    const radiusBonus = level >= 5 ? ' · +2 reach' : level >= 3 ? ' · +1 reach' : '';
+
+    const controlRow = document.createElement('div');
+    controlRow.className = 'fleet-control-row';
+
+    const meta = document.createElement('div');
+    meta.className = 'fleet-control-meta';
+    meta.innerHTML = `
+      <strong>${icon} Pump Power Level</strong>
+      <small>×${capMult} flow · ×${pwrMult} MW${radiusBonus} (max Lv ${cfg.maxLevel})</small>
+    `;
+
+    const stepper = document.createElement('div');
+    stepper.className = 'fleet-stepper';
+
+    const minusBtn = document.createElement('button');
+    minusBtn.type = 'button';
+    minusBtn.className = 'hud-button fleet-step-btn';
+    minusBtn.textContent = '−';
+    minusBtn.title = `Lower Pump Power Level (-$${cfg.upkeepPerLevel}/tick upkeep)`;
+    minusBtn.disabled = this.readOnly || this.busyPump || level <= 1;
+    minusBtn.addEventListener('click', () => void this.changePumpLevel(building.id, level - 1));
+
+    const valEl = document.createElement('span');
+    valEl.className = 'fleet-step-value';
+    valEl.textContent = `Lv ${level}`;
+
+    const plusBtn = document.createElement('button');
+    plusBtn.type = 'button';
+    plusBtn.className = 'hud-button fleet-step-btn';
+    plusBtn.textContent = '+';
+    plusBtn.title = `Raise Pump Power Level (+$${cfg.upkeepPerLevel}/tick upkeep, more MW & flow)`;
+    plusBtn.disabled = this.readOnly || this.busyPump || level >= cfg.maxLevel;
+    plusBtn.addEventListener('click', () => void this.changePumpLevel(building.id, level + 1));
+
+    stepper.append(minusBtn, valEl, plusBtn);
+    controlRow.append(meta, stepper);
+    this.usageEl.appendChild(controlRow);
   }
 
   private appendKvRows(rows: Array<[string, string, string?]>): void {
@@ -1152,6 +1237,24 @@ export class BuildingCard {
       this.setFeedback('Could not reach city host.', true);
     } finally {
       this.busyFleet = false;
+      if (this.lastState) this.refresh(this.lastState);
+    }
+  }
+
+  private async changePumpLevel(buildingId: string, nextLevel: number): Promise<void> {
+    if (this.busyPump || this.readOnly) return;
+    this.busyPump = true;
+    try {
+      const res = await this.callbacks.onSetPumpLevel(buildingId, nextLevel);
+      if (!res.success) {
+        this.setFeedback(res.error ?? 'Could not update pump power level', true);
+      } else {
+        this.setFeedback(`Pump power level set to Level ${nextLevel}.`);
+      }
+    } catch {
+      this.setFeedback('Could not reach city host.', true);
+    } finally {
+      this.busyPump = false;
       if (this.lastState) this.refresh(this.lastState);
     }
   }

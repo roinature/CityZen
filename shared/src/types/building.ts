@@ -332,6 +332,85 @@ export function getEffectiveFleetSize(building: Pick<PlacedBuilding, 'type' | 'f
   return Math.max(0, Math.min(cfg.maxFleet, Math.round(raw)));
 }
 
+export interface UtilityPumpConfig {
+  kind: 'water' | 'sewage';
+  defaultLevel: number;
+  maxLevel: number;
+  /** Output / treatment capacity multiplier for each level (index = level - 1). */
+  capacityMultipliers: readonly number[];
+  /** Electricity draw (MW) multiplier for each level (index = level - 1). */
+  powerMultipliers: readonly number[];
+  /** Extra maintenance ($/tick) per level above defaultLevel. */
+  upkeepPerLevel: number;
+}
+
+const STANDARD_PUMP_CAP_MULTS = [1, 1.75, 2.6, 3.6, 4.8] as const;
+const STANDARD_PUMP_PWR_MULTS = [1, 1.8, 2.8, 4.0, 5.5] as const;
+
+export const UTILITY_PUMP_LEVELS: Partial<Record<BuildingType, UtilityPumpConfig>> = {
+  [BuildingType.WATER_TOWER]: {
+    kind: 'water',
+    defaultLevel: 1,
+    maxLevel: 3,
+    capacityMultipliers: [1, 1.6, 2.2],
+    powerMultipliers: [1, 1.7, 2.6],
+    upkeepPerLevel: 2,
+  },
+  [BuildingType.WATER_PUMP_STATION]: {
+    kind: 'water',
+    defaultLevel: 1,
+    maxLevel: 5,
+    capacityMultipliers: STANDARD_PUMP_CAP_MULTS,
+    powerMultipliers: STANDARD_PUMP_PWR_MULTS,
+    upkeepPerLevel: 4,
+  },
+  [BuildingType.WATER_TREATMENT]: {
+    kind: 'water',
+    defaultLevel: 1,
+    maxLevel: 5,
+    capacityMultipliers: STANDARD_PUMP_CAP_MULTS,
+    powerMultipliers: STANDARD_PUMP_PWR_MULTS,
+    upkeepPerLevel: 8,
+  },
+  [BuildingType.SEWAGE_PUMP_STATION]: {
+    kind: 'sewage',
+    defaultLevel: 1,
+    maxLevel: 5,
+    capacityMultipliers: STANDARD_PUMP_CAP_MULTS,
+    powerMultipliers: STANDARD_PUMP_PWR_MULTS,
+    upkeepPerLevel: 3,
+  },
+  [BuildingType.WATER_SEWAGE_PLANT]: {
+    kind: 'sewage',
+    defaultLevel: 1,
+    maxLevel: 5,
+    capacityMultipliers: STANDARD_PUMP_CAP_MULTS,
+    powerMultipliers: STANDARD_PUMP_PWR_MULTS,
+    upkeepPerLevel: 10,
+  },
+};
+
+export function getEffectivePumpLevel(building: Pick<PlacedBuilding, 'type' | 'pumpLevel'>): number {
+  const cfg = UTILITY_PUMP_LEVELS[building.type];
+  if (!cfg) return 1;
+  const raw = building.pumpLevel ?? cfg.defaultLevel;
+  return Math.max(1, Math.min(cfg.maxLevel, Math.round(raw)));
+}
+
+export function getPumpCapacityMultiplier(building: Pick<PlacedBuilding, 'type' | 'pumpLevel'>): number {
+  const cfg = UTILITY_PUMP_LEVELS[building.type];
+  if (!cfg) return 1;
+  const lvl = getEffectivePumpLevel(building);
+  return cfg.capacityMultipliers[lvl - 1] ?? 1;
+}
+
+export function getPumpPowerMultiplier(building: Pick<PlacedBuilding, 'type' | 'pumpLevel'>): number {
+  const cfg = UTILITY_PUMP_LEVELS[building.type];
+  if (!cfg) return 1;
+  const lvl = getEffectivePumpLevel(building);
+  return cfg.powerMultipliers[lvl - 1] ?? 1;
+}
+
 export interface PlacedBuilding {
   id: string;
   type: BuildingType;
@@ -344,4 +423,6 @@ export interface PlacedBuilding {
   orientation?: RoadOrientation;
   /** Player-configured vehicle fleet count for service depots (overrides defaultFleet). */
   fleetSize?: number;
+  /** Player-configured pump power level (1..maxLevel) for water & sewage facilities. */
+  pumpLevel?: number;
 }

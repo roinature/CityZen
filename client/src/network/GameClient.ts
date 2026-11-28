@@ -275,6 +275,10 @@ export class GameClient implements CityConnection {
     return this.post('/api/building/fleet', { buildingId, fleetSize, playerId });
   }
 
+  async setBuildingPumpLevel(buildingId: string, pumpLevel: number, playerId?: string): Promise<{ success: boolean; error?: string }> {
+    return this.post('/api/building/pump-level', { buildingId, pumpLevel, playerId });
+  }
+
   async save(playerId?: string): Promise<void> {
     const result = await this.post('/api/city/save', { playerId });
     if (result.success) {

@@ -343,6 +343,7 @@ const buildingCard = new BuildingCard(uiRoot, {
   getDepotStatus: (buildingId) => carManager.getDepotFleetStatus(buildingId, cityState),
   getMaritimeStatus: (buildingId) => boatManager.getBuildingMaritimeStatus(buildingId, cityState),
   onSetFleetSize: (buildingId, fleetSize) => gameClient.setBuildingFleet(buildingId, fleetSize, playerId),
+  onSetPumpLevel: (buildingId, pumpLevel) => gameClient.setBuildingPumpLevel(buildingId, pumpLevel, playerId),
   onDispatchVehicle: (buildingId) => carManager.dispatchDepotVehicle(buildingId, cityState),
   onRecallVehicles: (buildingId) => carManager.recallDepotVehicles(buildingId),
   onDispatchVessel: (buildingId) => boatManager.dispatchVesselToBuilding(buildingId, cityState),

@@ -4,7 +4,7 @@ import type { Player } from '../types/player.js';
 import type { Position, UtilityLayer } from '../types/grid.js';
 import type { GameClock } from '../types/time.js';
 import type { PopulationSummary, TaxRates, ZonePopulationEntry } from '../types/resources.js';
-import { type PlacedBuilding, type RoadOrientation, BuildingType, SERVICE_BUILDING_FLEETS, ZoneDensity, isRoad, isWaterfront, isZone } from '../types/building.js';
+import { type PlacedBuilding, type RoadOrientation, BuildingType, SERVICE_BUILDING_FLEETS, UTILITY_PUMP_LEVELS, ZoneDensity, isRoad, isWaterfront, isZone } from '../types/building.js';
 import { type PlaceBuildingsPayload, S2C } from '../types/events.js';
 import { INITIAL_RESOURCES, MIN_TAX_RATE, MAX_TAX_RATE, DEFAULT_GAME_SPEED } from '../constants/simulation.js';
 import { BUILDING_DEFS, ZONE_DENSITY_COSTS } from '../constants/buildings.js';
@@ -510,6 +510,33 @@ export class CityRoom {
       delete building.fleetSize;
     } else {
       building.fleetSize = clamped;
+    }
+    this.state.updatedAt = Date.now();
+    this.broadcast(S2C.BUILDING_UPDATED, {
+      building,
+      resources: this.state.resources,
+    });
+    this.onMutated();
+    return { success: true, building };
+  }
+
+  setBuildingPumpLevel(buildingId: string, pumpLevel: number): { success: boolean; building?: PlacedBuilding; error?: string } {
+    const building = this.state.buildings.find(b => b.id === buildingId);
+    if (!building) {
+      return { success: false, error: 'Building not found' };
+    }
+    const cfg = UTILITY_PUMP_LEVELS[building.type];
+    if (!cfg) {
+      return { success: false, error: 'This building does not have adjustable pump power levels' };
+    }
+    if (!Number.isFinite(pumpLevel)) {
+      return { success: false, error: 'Invalid pump power level' };
+    }
+    const clamped = Math.max(1, Math.min(cfg.maxLevel, Math.round(pumpLevel)));
+    if (clamped === cfg.defaultLevel) {
+      delete building.pumpLevel;
+    } else {
+      building.pumpLevel = clamped;
     }
     this.state.updatedAt = Date.now();
     this.broadcast(S2C.BUILDING_UPDATED, {

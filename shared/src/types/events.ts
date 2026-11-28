@@ -114,6 +114,11 @@ export interface SetBuildingFleetPayload {
   fleetSize: number;
 }
 
+export interface SetBuildingPumpLevelPayload {
+  buildingId: string;
+  pumpLevel: number;
+}
+
 // Server -> Client payloads
 export interface CityStatePayload {
   city: CityState;

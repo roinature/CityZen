@@ -2,7 +2,7 @@ import type { CityState } from '../types/city.js';
 import type { MaslowContribution } from '../types/building.js';
 import { MaslowNeed, MASLOW_NEEDS_ORDERED, LifeStage } from '../types/person.js';
 import { BUILDING_DEFS } from '../constants/buildings.js';
-import { isUtilityConduit, isZone } from '../types/building.js';
+import { getPumpCapacityMultiplier, isUtilityConduit, isZone } from '../types/building.js';
 import {
   SERVICE_BASE_SATISFACTION, SERVICE_QUALITY_FACTOR,
   SMALL_TOWN_SATISFACTION, SMALL_TOWN_POPULATION, SMALL_TOWN_FADE_POPULATION,
@@ -86,8 +86,12 @@ export function calculateCityMaslowCapacity(state: CityState, utilityReport?: Ut
 
     if (operationalFactor <= 0) continue;
 
+    const pumpMult = (isWaterFacilityBuilding(building.type) || isSewageFacilityBuilding(building.type))
+      ? getPumpCapacityMultiplier(building)
+      : 1;
+
     for (const mc of contributions) {
-      const effectiveCap = Math.round(mc.capacityServed * operationalFactor);
+      const effectiveCap = Math.round(mc.capacityServed * pumpMult * operationalFactor);
       if (effectiveCap <= 0) continue;
       profile[mc.need].totalValue += mc.value * operationalFactor;
       profile[mc.need].totalCapacity += effectiveCap;

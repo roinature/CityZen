@@ -3,6 +3,7 @@ export type { Position, GridCell, Grid, UtilityLayer } from './types/grid.js';
 export {
   BuildingType, ZoneDensity, isZone, isRoad, isUtilityConduit, getBuildingUtilityLayer, isWaterfront, canDockBoats,
   SERVICE_BUILDING_FLEETS, getEffectiveFleetSize,
+  UTILITY_PUMP_LEVELS, getEffectivePumpLevel, getPumpCapacityMultiplier, getPumpPowerMultiplier,
   ZONE_TYPES, ROAD_TYPES, UTILITY_CONDUIT_TYPES,
   INFRA_CATEGORIES, INFRA_ART_TYPES, INFRA_WATERFRONT_TYPES,
   INFRA_ENERGY_TYPES, INFRA_WATER_TYPES, INFRA_SEWAGE_TYPES,
@@ -13,7 +14,7 @@ export {
 } from './types/building.js';
 export type {
   BuildingDef, BuildingEffects, MaslowContribution, PlacedBuilding,
-  ServiceFleetKind, ServiceFleetConfig,
+  ServiceFleetKind, ServiceFleetConfig, UtilityPumpConfig,
   ZoneType, RoadType, UtilityConduitType, WaterfrontType, RoadOrientation, InfraCategory,
 } from './types/building.js';
 export type {
@@ -63,6 +64,7 @@ export {
   type SetUnlimitedMoneyPayload,
   type SetGameSpeedPayload,
   type SetBuildingFleetPayload,
+  type SetBuildingPumpLevelPayload,
   type PopulationUpdatePayload,
   type MigrationEventPayload,
   type WorldTickPayload,

@@ -2,8 +2,8 @@ import type { CityState } from '../types/city.js';
 import type { CityMilestone, ResourceState, TaxRates } from '../types/resources.js';
 import { BUILDING_DEFS, getZoneLevelDef } from '../constants/buildings.js';
 import {
-  BuildingType, SERVICE_BUILDING_FLEETS, ZoneDensity,
-  getEffectiveFleetSize, isRoad, isUtilityConduit, isZone,
+  BuildingType, SERVICE_BUILDING_FLEETS, UTILITY_PUMP_LEVELS, ZoneDensity,
+  getEffectiveFleetSize, getEffectivePumpLevel, isRoad, isUtilityConduit, isZone,
   INFRA_ENERGY_TYPES, INFRA_WATER_TYPES, INFRA_SEWAGE_TYPES,
   INFRA_POLICE_TYPES, INFRA_FIRE_TYPES, INFRA_TRANS_TYPES,
   type PlacedBuilding, type ZoneType,
@@ -285,6 +285,12 @@ export function getBuildingMaintenance(b: PlacedBuilding): number {
     const effective = getEffectiveFleetSize(b);
     const delta = (effective - fleetCfg.defaultFleet) * fleetCfg.upkeepPerUnit;
     maint = Math.max(Math.ceil(maint * 0.4), maint + delta);
+  }
+
+  const pumpCfg = UTILITY_PUMP_LEVELS[b.type];
+  if (pumpCfg) {
+    const level = getEffectivePumpLevel(b);
+    maint += (level - pumpCfg.defaultLevel) * pumpCfg.upkeepPerLevel;
   }
 
   return maint;

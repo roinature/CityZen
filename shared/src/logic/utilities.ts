@@ -3,6 +3,9 @@ import { DEFAULT_GRID_SIZE } from '../constants/grid.js';
 import {
   BuildingType,
   ZoneDensity,
+  getEffectivePumpLevel,
+  getPumpCapacityMultiplier,
+  getPumpPowerMultiplier,
   isRoad,
   isUtilityConduit,
   isZone,
@@ -267,19 +270,19 @@ const IND_POWER: Record<ZoneDensity, [number, number, number]> = {
 };
 
 const RES_WATER: Record<ZoneDensity, [number, number, number]> = {
-  [ZoneDensity.LOW]: [4, 7, 11],
-  [ZoneDensity.MEDIUM]: [10, 22, 38],
-  [ZoneDensity.HIGH]: [22, 48, 85],
+  [ZoneDensity.LOW]: [0.8, 1.5, 2.4],
+  [ZoneDensity.MEDIUM]: [2.0, 4.5, 8.0],
+  [ZoneDensity.HIGH]: [4.0, 9.5, 18.0],
 };
 const COM_WATER: Record<ZoneDensity, [number, number, number]> = {
-  [ZoneDensity.LOW]: [3, 6, 10],
-  [ZoneDensity.MEDIUM]: [8, 16, 28],
-  [ZoneDensity.HIGH]: [18, 35, 60],
+  [ZoneDensity.LOW]: [0.6, 1.2, 2.0],
+  [ZoneDensity.MEDIUM]: [1.6, 3.2, 5.5],
+  [ZoneDensity.HIGH]: [3.5, 7.0, 12.0],
 };
 const IND_WATER: Record<ZoneDensity, [number, number, number]> = {
-  [ZoneDensity.LOW]: [6, 12, 20],
-  [ZoneDensity.MEDIUM]: [15, 30, 52],
-  [ZoneDensity.HIGH]: [32, 62, 100],
+  [ZoneDensity.LOW]: [1.5, 3.0, 5.0],
+  [ZoneDensity.MEDIUM]: [3.5, 7.0, 12.0],
+  [ZoneDensity.HIGH]: [7.5, 15.0, 24.0],
 };
 
 export function isGeneratorBuilding(type: BuildingType): boolean {
@@ -329,7 +332,7 @@ export function getBuildingUtilityProfile(building: PlacedBuilding): UtilityReso
       return {
         powerDemandMW: RES_POWER[d][idx],
         waterDemandM3: w,
-        sewageOutputM3: Math.round(w * 0.9 * 10) / 10,
+        sewageOutputM3: Math.round(w * 0.8 * 10) / 10,
         priority: 2,
         countedConsumer: true,
       };
@@ -339,7 +342,7 @@ export function getBuildingUtilityProfile(building: PlacedBuilding): UtilityReso
       return {
         powerDemandMW: COM_POWER[d][idx],
         waterDemandM3: w,
-        sewageOutputM3: Math.round(w * 0.85 * 10) / 10,
+        sewageOutputM3: Math.round(w * 0.75 * 10) / 10,
         priority: 3,
         countedConsumer: true,
       };
@@ -348,15 +351,16 @@ export function getBuildingUtilityProfile(building: PlacedBuilding): UtilityReso
     return {
       powerDemandMW: IND_POWER[d][idx],
       waterDemandM3: w,
-      sewageOutputM3: Math.round(w * 1.15 * 10) / 10,
+      sewageOutputM3: Math.round(w * 0.85 * 10) / 10,
       priority: 3,
       countedConsumer: true,
     };
   }
 
-  // Water & sewage facilities need electricity to run pumps/aerators, not consumer pipes
+  // Water & sewage facilities need electricity to run pumps/aerators, scaling with Pump Power Level
   if (isWaterFacilityBuilding(type) || isSewageFacilityBuilding(type)) {
-    const mw = BUILDING_DEFS[type]?.effects?.powerDemandMW ?? 1.5;
+    const baseMW = BUILDING_DEFS[type]?.effects?.powerDemandMW ?? 1.5;
+    const mw = Math.round(baseMW * getPumpPowerMultiplier(building) * 10) / 10;
     return { powerDemandMW: mw, waterDemandM3: 0, sewageOutputM3: 0, priority: 0, countedConsumer: false };
   }
 
@@ -364,7 +368,7 @@ export function getBuildingUtilityProfile(building: PlacedBuilding): UtilityReso
     const isPark = type === BuildingType.PARK || type === BuildingType.ART_SCULPTURE_PARK;
     return {
       powerDemandMW: 0.15,
-      waterDemandM3: isPark ? 3 : 0,
+      waterDemandM3: isPark ? 1 : 0,
       sewageOutputM3: 0,
       priority: 3,
       countedConsumer: false,
@@ -382,8 +386,8 @@ export function getBuildingUtilityProfile(building: PlacedBuilding): UtilityReso
     || type === BuildingType.POLICE_HQ;
 
   const powerDemandMW = def.effects.powerDemandMW ?? Math.round((0.35 * area + (def.cost / 2500)) * 10) / 10;
-  const waterDemandM3 = def.effects.waterDemandM3 ?? Math.round(4 * area + (def.cost / 500));
-  const sewageOutputM3 = def.effects.sewageOutputM3 ?? Math.round(waterDemandM3 * 0.9);
+  const waterDemandM3 = def.effects.waterDemandM3 ?? Math.max(1, Math.round((1.0 * area + (def.cost / 2000)) * 10) / 10);
+  const sewageOutputM3 = def.effects.sewageOutputM3 ?? Math.round(waterDemandM3 * 0.8 * 10) / 10;
 
   return {
     powerDemandMW,
@@ -1052,6 +1056,7 @@ export function evaluateCityUtilities(state: CityState): UtilityGridReport {
   const waterSubnetSupply: number[] = [];
   const waterSubnetTreated: boolean[] = [];
   const waterSubnetHasSource: boolean[] = [];
+  const waterSubnetCenters: Position[][] = [];
   let activeWaterSources = 0;
 
   for (let wid = 0; wid < waterComps.compMembers.length; wid++) {
@@ -1059,12 +1064,14 @@ export function evaluateCityUtilities(state: CityState): UtilityGridReport {
     let rawSupply = 0;
     let reservoirSupply = 0;
     let hasTreatment = false;
+    const centers: Position[] = [];
 
     for (const bid of waterComps.compMembers[wid]) {
       const b = byId.get(bid)!;
       if (!isWaterFacilityBuilding(b.type)) continue;
       const st = statusMap.get(b.id)!;
       const { w, d } = effectiveFootprint(b.type, b.orientation);
+      const capMult = getPumpCapacityMultiplier(b);
 
       let maxSourceRichness = 0;
       for (let dx = 0; dx < w; dx++) {
@@ -1085,31 +1092,35 @@ export function evaluateCityUtilities(state: CityState): UtilityGridReport {
         } else {
           hasSource = true;
           activeWaterSources++;
-          rawSupply += 450 * maxSourceRichness * st.powerRatio;
+          rawSupply += 450 * capMult * maxSourceRichness * st.powerRatio;
+          centers.push(b.position);
         }
       } else if (b.type === BuildingType.WATER_TOWER) {
         const effPower = Math.max(0.35, st.powerRatio);
         if (onSource) {
           hasSource = true;
           activeWaterSources++;
-          rawSupply += 150 * effPower;
+          rawSupply += 150 * capMult * effPower;
+          centers.push(b.position);
           if (st.powerRatio <= 0) {
             facilityNotes.set(b.id, 'Gravity reserve only (35%): connect Power Grid for full pressure');
           }
         } else {
-          reservoirSupply += 120 * effPower;
+          reservoirSupply += 120 * capMult * effPower;
+          centers.push(b.position);
         }
       } else if (b.type === BuildingType.WATER_TREATMENT) {
         if (st.powerRatio <= 0) {
           facilityNotes.set(b.id, 'Unpowered: connect Treatment Plant to the Power Grid');
         } else {
           hasTreatment = true;
+          centers.push(b.position);
           if (onSource) {
             hasSource = true;
             activeWaterSources++;
-            rawSupply += 1000 * st.powerRatio;
+            rawSupply += 1000 * capMult * st.powerRatio;
           } else {
-            reservoirSupply += 900 * st.powerRatio;
+            reservoirSupply += 900 * capMult * st.powerRatio;
           }
         }
       }
@@ -1128,6 +1139,7 @@ export function evaluateCityUtilities(state: CityState): UtilityGridReport {
     waterSubnetHasSource.push(hasSource);
     waterSubnetTreated.push(hasSource && hasTreatment);
     waterSubnetSupply.push(hasSource ? rawSupply + reservoirSupply : 0);
+    waterSubnetCenters.push(centers);
   }
 
   const waterCoverage = new Int16Array(totalCells).fill(-1);
@@ -1138,10 +1150,12 @@ export function evaluateCityUtilities(state: CityState): UtilityGridReport {
     const pressurized = waterSubnetSupply[wid] > 0;
     for (const bid of waterComps.compMembers[wid]) {
       const b = byId.get(bid)!;
+      const pumpLvl = isWaterFacilityBuilding(b.type) ? getEffectivePumpLevel(b) : 1;
+      const levelRadiusBonus = pumpLvl >= 5 ? 2 : pumpLvl >= 3 ? 1 : 0;
       const radius = b.type === BuildingType.WATER_TOWER
-        ? WATER_TOWER_RADIUS
+        ? WATER_TOWER_RADIUS + levelRadiusBonus
         : isWaterFacilityBuilding(b.type)
-          ? WATER_FACILITY_RADIUS
+          ? WATER_FACILITY_RADIUS + levelRadiusBonus
           : WATER_PIPE_RADIUS;
       const { w, d } = effectiveFootprint(b.type, b.orientation);
       for (let dx = 0; dx < w; dx++) {
@@ -1159,7 +1173,7 @@ export function evaluateCityUtilities(state: CityState): UtilityGridReport {
     if (waterCoverage[idx] !== -1) cellFlags[idx] |= CELL_FLAG_WATER;
   }
 
-  const waterSubnetConsumers: Array<Array<{ b: PlacedBuilding; profile: UtilityResourceProfile }>> =
+  const waterSubnetConsumers: Array<Array<{ b: PlacedBuilding; profile: UtilityResourceProfile; dist: number }>> =
     Array.from({ length: waterComps.compMembers.length }, () => []);
 
   for (const b of state.buildings) {
@@ -1180,7 +1194,13 @@ export function evaluateCityUtilities(state: CityState): UtilityGridReport {
       }
     }
     if (bestSubnet !== -1) {
-      waterSubnetConsumers[bestSubnet].push({ b, profile });
+      const centers = waterSubnetCenters[bestSubnet];
+      let minDist = 999;
+      for (const c of centers) {
+        const dist = Math.hypot(b.position.x - c.x, b.position.z - c.z);
+        if (dist < minDist) minDist = dist;
+      }
+      waterSubnetConsumers[bestSubnet].push({ b, profile, dist: minDist });
     } else if (dryPipeNearby) {
       statusMap.get(b.id)!.waterState = 'dry_pipe';
     }
@@ -1191,7 +1211,7 @@ export function evaluateCityUtilities(state: CityState): UtilityGridReport {
     const supply = waterSubnetSupply[wid];
     if (supply <= 0) continue;
     const consumers = waterSubnetConsumers[wid];
-    consumers.sort((a, b) => a.profile.priority - b.profile.priority);
+    consumers.sort((a, b) => (a.profile.priority - b.profile.priority) || (a.dist - b.dist));
     const demand = consumers.reduce((s, c) => s + c.profile.waterDemandM3, 0);
     if (demand > supply + 1e-6) waterSubnetLowPressure.add(wid);
 
@@ -1226,14 +1246,16 @@ export function evaluateCityUtilities(state: CityState): UtilityGridReport {
   // ── PASS 3: Sewage Network (Producers → Sewer Pipes → Treatment) ──
   const sewageComps = buildComponents(sewageCellNodes);
   const sewageSubnetCap: number[] = [];
+  const sewageSubnetCenters: Position[][] = [];
 
   for (let sid = 0; sid < sewageComps.compMembers.length; sid++) {
     let cap = 0;
+    const centers: Position[] = [];
     for (const bid of sewageComps.compMembers[sid]) {
       const b = byId.get(bid)!;
       if (!isSewageFacilityBuilding(b.type)) continue;
       const st = statusMap.get(b.id)!;
-      const rated = BUILDING_DEFS[b.type]?.effects?.sewageCapacityM3 ?? 300;
+      const rated = (BUILDING_DEFS[b.type]?.effects?.sewageCapacityM3 ?? 300) * getPumpCapacityMultiplier(b);
       const effPower = b.type === BuildingType.SEWAGE_PUMP_STATION
         ? Math.max(0.25, st.powerRatio)
         : Math.max(0.15, st.powerRatio);
@@ -1241,8 +1263,10 @@ export function evaluateCityUtilities(state: CityState): UtilityGridReport {
         facilityNotes.set(b.id, 'Unpowered: running on emergency gravity bypass only');
       }
       cap += rated * effPower;
+      centers.push(b.position);
     }
     sewageSubnetCap.push(cap);
+    sewageSubnetCenters.push(centers);
   }
 
   const sewageCoverage = new Int16Array(totalCells).fill(-1);
@@ -1253,7 +1277,11 @@ export function evaluateCityUtilities(state: CityState): UtilityGridReport {
     const active = sewageSubnetCap[sid] > 0;
     for (const bid of sewageComps.compMembers[sid]) {
       const b = byId.get(bid)!;
-      const radius = isSewageFacilityBuilding(b.type) ? SEWAGE_FACILITY_RADIUS : SEWAGE_PIPE_RADIUS;
+      const pumpLvl = isSewageFacilityBuilding(b.type) ? getEffectivePumpLevel(b) : 1;
+      const levelRadiusBonus = pumpLvl >= 5 ? 2 : pumpLvl >= 3 ? 1 : 0;
+      const radius = isSewageFacilityBuilding(b.type)
+        ? SEWAGE_FACILITY_RADIUS + levelRadiusBonus
+        : SEWAGE_PIPE_RADIUS;
       const { w, d } = effectiveFootprint(b.type, b.orientation);
       for (let dx = 0; dx < w; dx++) {
         for (let dz = 0; dz < d; dz++) {
@@ -1270,7 +1298,7 @@ export function evaluateCityUtilities(state: CityState): UtilityGridReport {
     if (sewageCoverage[idx] !== -1) cellFlags[idx] |= CELL_FLAG_SEWAGE;
   }
 
-  const sewageSubnetConsumers: Array<Array<{ b: PlacedBuilding; profile: UtilityResourceProfile }>> =
+  const sewageSubnetConsumers: Array<Array<{ b: PlacedBuilding; profile: UtilityResourceProfile; dist: number }>> =
     Array.from({ length: sewageComps.compMembers.length }, () => []);
 
   for (const b of state.buildings) {
@@ -1291,7 +1319,13 @@ export function evaluateCityUtilities(state: CityState): UtilityGridReport {
       }
     }
     if (bestSubnet !== -1) {
-      sewageSubnetConsumers[bestSubnet].push({ b, profile });
+      const centers = sewageSubnetCenters[bestSubnet];
+      let minDist = 999;
+      for (const c of centers) {
+        const dist = Math.hypot(b.position.x - c.x, b.position.z - c.z);
+        if (dist < minDist) minDist = dist;
+      }
+      sewageSubnetConsumers[bestSubnet].push({ b, profile, dist: minDist });
     } else if (disconnectedPipeNearby) {
       statusMap.get(b.id)!.sewageState = 'disconnected_pipe';
     }
@@ -1302,7 +1336,7 @@ export function evaluateCityUtilities(state: CityState): UtilityGridReport {
     const cap = sewageSubnetCap[sid];
     if (cap <= 0) continue;
     const consumers = sewageSubnetConsumers[sid];
-    consumers.sort((a, b) => a.profile.priority - b.profile.priority);
+    consumers.sort((a, b) => (a.profile.priority - b.profile.priority) || (a.dist - b.dist));
     const load = consumers.reduce((s, c) => s + c.profile.sewageOutputM3, 0);
     if (load > cap + 1e-6) sewageSubnetBackedUp.add(sid);
 

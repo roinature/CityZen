@@ -285,6 +285,10 @@ export function createGameRoutes(roomManager: RoomManager, worldManager: WorldMa
     return room.setBuildingFleetSize(String(body.buildingId || ''), Number(body.fleetSize));
   }));
 
+  router.post('/building/pump-level', cityAction((room, body: { buildingId?: string; pumpLevel?: number }) => {
+    return room.setBuildingPumpLevel(String(body.buildingId || ''), Number(body.pumpLevel));
+  }));
+
   router.post('/city/tax-rate', cityAction((room, body: SetTaxRatePayload) =>
     body.taxRates ? room.setTaxRates(body.taxRates) : room.setTaxRate(Number(body.taxRate)),
   ));

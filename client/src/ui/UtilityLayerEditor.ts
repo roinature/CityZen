@@ -408,7 +408,7 @@ export class UtilityLayerEditor {
       } else if (s.activeWaterSources === 0) {
         this.hintEl.textContent = 'Blue tiles mark shorelines and underground aquifers. Place a Pump Station or Water Tower on a blue source, then drag Water Pipes.';
       } else if (s.waterDemandM3 > s.waterSupplyM3) {
-        this.hintEl.textContent = 'Water demand exceeds pumping supply! Add a Pump Station on a water source or a Treatment Plant.';
+        this.hintEl.textContent = 'Water demand exceeds pumping supply! Click a Pump Station or Plant to raise its Power Level, or add another source.';
       } else if (s.unwateredBuildings > 0) {
         this.hintEl.textContent = `${s.unwateredBuildings} building${s.unwateredBuildings === 1 ? ' lacks' : 's lack'} piped water. Drag Water Pipes from your source network.`;
       } else {
@@ -426,7 +426,7 @@ export class UtilityLayerEditor {
       if (s.sewageCapacityM3 <= 0 && totalBld > 0) {
         this.hintEl.textContent = 'Build a Sewage Station or Sewage Plant (powered) and run Sewage Pipes to drain wastewater.';
       } else if (s.sewageDemandM3 > s.sewageCapacityM3) {
-        this.hintEl.textContent = 'Sewage treatment overloaded! Add a Sewage Plant to prevent backups.';
+        this.hintEl.textContent = 'Sewage treatment overloaded! Click a Sewage Station or Plant to raise its Power Level, or add another Sewage Plant.';
       } else if (s.backedUpBuildings > 0) {
         this.hintEl.textContent = `${s.backedUpBuildings} building${s.backedUpBuildings === 1 ? ' is' : 's are'} not connected to an active Sewer Pipe.`;
       } else {
