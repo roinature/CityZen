@@ -5,7 +5,7 @@ import type { ExploreWorld } from './ExploreWorld.js';
 import { METRES_PER_CELL, angleDelta, approach, type CameraShot, type ExploreInput, type Traveller } from './types.js';
 
 // All distances in cells, speeds in cells per second, angles in radians.
-const PLAYER_COLOR = 0xf4511e;
+const PLAYER_COLOR = 0xf2f4f8;
 const CAR_Y = 0.03;
 const HALF_LEN = 0.24;
 const HALF_WIDTH = 0.11;
@@ -38,7 +38,7 @@ export class CarTraveller implements Traveller {
   readonly kind = 'drive';
   readonly views = ['Chase', 'Hood', 'High'] as const;
   readonly object = new THREE.Group();
-  private body = createCarMesh(PLAYER_COLOR);
+  private body = createCarMesh(PLAYER_COLOR, { hero: true });
   x = 0;
   z = 0;
   yaw = 0;
@@ -47,6 +47,7 @@ export class CarTraveller implements Traveller {
   private pitch = 0;
   private roll = 0;
   private camYaw = 0;
+  private blinkTime = 0;
 
   constructor() {
     this.object.add(this.body);
@@ -123,6 +124,17 @@ export class CarTraveller implements Traveller {
     this.pitch += (THREE.MathUtils.clamp(accel * PITCH_PER_ACCEL, -0.06, 0.04) - this.pitch) * ease;
     this.roll += (THREE.MathUtils.clamp(yawRate * this.v * ROLL_PER_LATERAL, -0.07, 0.07) - this.roll) * ease;
     this.camYaw += angleDelta(this.camYaw, this.yaw) * (1 - Math.exp(-dt * 5));
+    // Dynamic brake lights & blinking amber turn signals
+    this.blinkTime += dt;
+    const blinkOn = Math.sin(this.blinkTime * 11) > 0;
+    const braking = input.action || (input.back && this.v > 0.15);
+    const tl = this.body.userData.taillightMat as THREE.MeshStandardMaterial | undefined;
+    if (tl) tl.emissiveIntensity = braking ? 3.8 : 1.5;
+    const ls = this.body.userData.leftSignalMat as THREE.MeshStandardMaterial | undefined;
+    const rs = this.body.userData.rightSignalMat as THREE.MeshStandardMaterial | undefined;
+    if (ls) ls.emissiveIntensity = steerInput > 0 && blinkOn ? 4.8 : 0.12;
+    if (rs) rs.emissiveIntensity = steerInput < 0 && blinkOn ? 4.8 : 0.12;
+
     this.pose();
     world.traffic.setPlayer({ x: this.x, z: this.z, yaw: this.yaw, v: this.v });
   }

@@ -1402,9 +1402,11 @@ body.in-city {
 /* Build dock (vertical left multi-level rail) */
 .build-dock {
   position: fixed;
-  top: 50%;
+  top: 0;
+  bottom: 0;
   left: max(12px, var(--ui-left));
-  transform: translateY(-50%);
+  margin: auto 0;
+  height: fit-content;
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -1420,9 +1422,11 @@ body.in-city {
 /* Secondary vertical toolbar (right side) */
 .secondary-dock {
   position: fixed;
-  top: 50%;
+  top: 0;
+  bottom: 0;
   right: max(12px, var(--ui-right));
-  transform: translateY(-50%);
+  margin: auto 0;
+  height: fit-content;
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -1820,9 +1824,9 @@ body.in-city {
 .message-notifications {
   position: fixed;
   top: 80px;
-  right: 20px;
+  right: calc(max(12px, var(--ui-right)) + 66px);
   width: 350px;
-  max-width: 90vw;
+  max-width: calc(100vw - 90px);
   z-index: 150;
   pointer-events: none;
 }
@@ -3473,13 +3477,14 @@ body.driving .compass-indicator {
   flex-direction: column;
   align-items: flex-start;
   gap: 7px;
+  margin-left: 66px;
   width: max-content;
-  max-width: min(356px, calc(100vw - 24px));
+  max-width: min(356px, calc(100vw - 90px));
   z-index: 28;
 }
 
 .utility-layer-dock:has(.utility-layer-panel:not([hidden])) {
-  width: min(356px, calc(100vw - 24px));
+  width: min(356px, calc(100vw - 90px));
 }
 
 .utility-layer-bar,
@@ -3689,12 +3694,13 @@ body.driving .compass-indicator {
   .utility-layer-dock {
     grid-row: 2;
     grid-column: 1;
-    max-width: 100%;
+    margin-left: 56px;
+    max-width: calc(100% - 56px);
   }
 
   .utility-layer-dock:has(.utility-layer-panel:not([hidden])) {
     grid-column: 1 / -1;
-    width: min(356px, 100%);
+    width: min(356px, calc(100% - 56px));
   }
 
   .utility-layer-panel {
@@ -3719,7 +3725,7 @@ body.driving .building-card {
   position: fixed;
   top: calc(max(10px, var(--ui-top)) + 64px);
   right: calc(max(12px, var(--ui-right)) + 66px);
-  width: min(362px, calc(100vw - 24px));
+  width: min(362px, calc(100vw - 90px));
   max-height: calc(100dvh - 168px);
   display: flex;
   flex-direction: column;

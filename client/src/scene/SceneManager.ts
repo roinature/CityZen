@@ -91,10 +91,14 @@ export class SceneManager {
     perspectiveCamera.aspect = aspect;
     perspectiveCamera.near = this.closeUp ? 0.03 : Math.max(0.2, distance * 0.04);
     perspectiveCamera.updateProjectionMatrix();
-    // Haze starts beyond the city whatever the zoom. Depth means nothing to an
-    // orthographic view, so it goes without.
-    this.fog.near = distance + 60;
-    this.fog.far = distance * 2 + 420;
+    // Haze starts beyond the city in overview, or softly across distant blocks at street level.
+    if (this.closeUp) {
+      this.fog.near = 24;
+      this.fog.far = 165;
+    } else {
+      this.fog.near = distance + 60;
+      this.fog.far = distance * 2 + 420;
+    }
     if (this.scene.background instanceof THREE.Color) this.fog.color = this.scene.background;
     this.scene.fog = this.perspective ? this.fog : null;
   }

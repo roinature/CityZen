@@ -155,7 +155,7 @@ const uiRoot = document.getElementById('ui-root')!;
 
 const sceneManager = new SceneManager(canvas);
 const cameraController = new CameraController(sceneManager);
-const lighting = setupLighting(sceneManager.scene);
+const lighting = setupLighting(sceneManager.scene, sceneManager.renderer);
 const { entranceRoad, setSite } = createTerrain(sceneManager.scene);
 const gridHelper = createGridOverlay(sceneManager.scene);
 const edgeRoadIndicator = new EdgeRoadIndicator(sceneManager.scene);

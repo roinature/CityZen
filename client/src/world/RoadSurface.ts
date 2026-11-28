@@ -553,6 +553,98 @@ function addLots(mesh: MeshBuilder, buildings: readonly PlacedBuilding[], roads:
   }
 }
 
+/**
+ * World-space procedural PBR surface for streets, sidewalks, concrete plazas and lawns:
+ * - Asphalt gets fine mineral grain, subtle weathered patches, and low-roughness sheen
+ *   so streets catch sky reflections at grazing angles.
+ * - Sidewalks and plazas get concrete paving-slab joints, per-slab tonal variation, and grit.
+ * - Lawns get soft organic mottling.
+ */
+function createRoadSurfaceMaterial(): THREE.MeshStandardMaterial {
+  const material = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.85,
+    metalness: 0.04,
+    side: THREE.DoubleSide,
+  });
+  material.customProgramCacheKey = () => 'cityzen-road-pbr-v1';
+  material.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>
+        varying vec3 vRoadWorldPos;`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        vRoadWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`);
+
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+        varying vec3 vRoadWorldPos;
+        float roadSurfaceRough;
+        float roadHash(vec2 p) {
+          p = fract(p * vec2(127.1, 311.7));
+          p += dot(p, p + 34.23);
+          return fract(p.x * p.y);
+        }
+        float roadNoise(vec2 p) {
+          vec2 i = floor(p);
+          vec2 f = fract(p);
+          f = f * f * (3.0 - 2.0 * f);
+          return mix(
+            mix(roadHash(i), roadHash(i + vec2(1.0, 0.0)), f.x),
+            mix(roadHash(i + vec2(0.0, 1.0)), roadHash(i + vec2(1.0, 1.0)), f.x),
+            f.y
+          );
+        }`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        roadSurfaceRough = 0.86;
+        vec2 rp = vRoadWorldPos.xz;
+        float luma = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+        float maxC = max(diffuseColor.r, max(diffuseColor.g, diffuseColor.b));
+        float minC = min(diffuseColor.r, min(diffuseColor.g, diffuseColor.b));
+        float sat = (maxC - minC) / max(maxC, 0.001);
+
+        // Asphalt: dark, low-saturation roadway
+        float isAsphalt = (1.0 - smoothstep(0.11, 0.22, luma)) * (1.0 - smoothstep(0.18, 0.35, sat));
+        // Concrete / sidewalks: mid-to-light neutral grey/beige, below bright white road paint
+        float isConcrete = smoothstep(0.20, 0.30, luma) * (1.0 - smoothstep(0.62, 0.76, luma)) * (1.0 - smoothstep(0.22, 0.38, sat));
+        // Grass / lawns: green-dominant
+        float isLawn = smoothstep(0.04, 0.14, diffuseColor.g - max(diffuseColor.r, diffuseColor.b) * 0.92);
+
+        if (isAsphalt > 0.01) {
+          float fine = roadNoise(rp * 38.0);
+          float med = roadNoise(rp * 9.5);
+          float macro = roadNoise(rp * 1.9);
+          float grain = (fine - 0.5) * 0.14 + (med - 0.5) * 0.10 + (macro - 0.5) * 0.08;
+          diffuseColor.rgb *= 1.0 + grain * isAsphalt;
+          // Sleek urban asphalt sheen: smoother patches catch cool sky reflections
+          float asphaltRough = clamp(0.36 + med * 0.22 + (1.0 - macro) * 0.10, 0.30, 0.68);
+          roadSurfaceRough = mix(roadSurfaceRough, asphaltRough, isAsphalt);
+        }
+
+        if (isConcrete > 0.01) {
+          // Paving slab grid (~0.26 world-unit squares) with mortar joints and per-slab variation
+          vec2 tileCoord = rp * 3.85;
+          vec2 tileId = floor(tileCoord);
+          vec2 tileF = fract(tileCoord);
+          float edge = min(min(tileF.x, 1.0 - tileF.x), min(tileF.y, 1.0 - tileF.y));
+          float fw = max(fwidth(tileCoord.x), fwidth(tileCoord.y));
+          float joint = (1.0 - smoothstep(0.025, 0.055 + fw, edge)) * (1.0 - smoothstep(0.22, 0.45, fw));
+          float slabTone = (roadHash(tileId) - 0.5) * 0.09;
+          float grit = (roadNoise(rp * 26.0) - 0.5) * 0.08;
+          diffuseColor.rgb *= mix(1.0, 1.0 + slabTone + grit - joint * 0.16, isConcrete);
+          roadSurfaceRough = mix(roadSurfaceRough, clamp(0.72 + slabTone * 0.9 + joint * 0.2, 0.62, 0.94), isConcrete);
+        }
+
+        if (isLawn > 0.01) {
+          float mottle = (roadNoise(rp * 6.5) - 0.5) * 0.14 + (roadNoise(rp * 22.0) - 0.5) * 0.09;
+          diffuseColor.rgb *= 1.0 + mottle * isLawn;
+          roadSurfaceRough = mix(roadSurfaceRough, 0.95, isLawn);
+        }`)
+      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+        roughnessFactor = roadSurfaceRough;`);
+  };
+  return material;
+}
+
 export function createRoadSurface(
   buildings: readonly PlacedBuilding[], roads: RoadMap, gridSize: number, options: RoadSurfaceOptions,
 ): THREE.Mesh {
@@ -561,7 +653,7 @@ export function createRoadSurface(
   builder.build(buildings);
   const geometry = builder.mesh.build();
   geometry.scale(CELL_SIZE, CELL_SIZE, CELL_SIZE);
-  const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, side: THREE.DoubleSide }));
+  const mesh = new THREE.Mesh(geometry, createRoadSurfaceMaterial());
   mesh.name = 'road-surface';
   mesh.receiveShadow = true;
   return mesh;

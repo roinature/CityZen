@@ -22,7 +22,78 @@ interface Item {
 }
 
 const LAMP_HEIGHT = 0.82;
-const PARKED_CARS = [0xb8352f, 0x2f5f9e, 0xd8d8d4, 0x30343a, 0x7d8a92, 0xc9a23a];
+const PARKED_CARS = [0xf2f4f8, 0xf6c324, 0x262b33, 0xd0d6de, 0x1d4e89, 0xc62828];
+const PED_TOPS = [0xe53935, 0x1e88e5, 0xfdd835, 0x00acc1, 0xff7043, 0x8e24aa, 0xf5f5f5, 0x43a047, 0xffb300];
+const PED_BOTTOMS = [0x1e293b, 0x334155, 0x1d4ed8, 0x3f3f46, 0x44403c];
+const PED_SKIN = [0xf5cfa8, 0xe0ac69, 0xc68642, 0x8d5524, 0xf1c27d];
+
+/** Merges multiple non-indexed BufferGeometries and bakes vertical AO shading into vertex colors. */
+function mergeCrownLobes(
+  lobes: Array<{ geo: THREE.BufferGeometry; shade: number }>,
+): THREE.BufferGeometry {
+  let totalVerts = 0;
+  const normalized = lobes.map(({ geo, shade }) => {
+    const g = geo.index ? geo.toNonIndexed() : geo;
+    if (g !== geo) geo.dispose();
+    g.computeVertexNormals();
+    totalVerts += g.attributes.position.count;
+    return { g, shade };
+  });
+
+  const positions = new Float32Array(totalVerts * 3);
+  const normals = new Float32Array(totalVerts * 3);
+  const colors = new Float32Array(totalVerts * 3);
+  let offset = 0;
+
+  for (const { g, shade } of normalized) {
+    const pos = g.attributes.position;
+    const norm = g.attributes.normal;
+    for (let i = 0; i < pos.count; i++) {
+      const idx = (offset + i) * 3;
+      const y = pos.getY(i);
+      const ny = norm.getY(i);
+      positions[idx] = pos.getX(i);
+      positions[idx + 1] = y;
+      positions[idx + 2] = pos.getZ(i);
+      normals[idx] = norm.getX(i);
+      normals[idx + 1] = ny;
+      normals[idx + 2] = norm.getZ(i);
+      // Sunlit upper crown, deeper cool-shadowed underside
+      const ao = THREE.MathUtils.clamp(shade * (0.76 + ny * 0.22 + (y - 0.45) * 0.28), 0.48, 1.18);
+      colors[idx] = ao;
+      colors[idx + 1] = ao;
+      colors[idx + 2] = ao;
+    }
+    offset += pos.count;
+    g.dispose();
+  }
+
+  const merged = new THREE.BufferGeometry();
+  merged.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  merged.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+  merged.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  return merged;
+}
+
+/** Lush multi-clustered broadleaf canopy geometry. */
+function createBroadleafCrownGeometry(): THREE.BufferGeometry {
+  return mergeCrownLobes([
+    { geo: new THREE.IcosahedronGeometry(0.24, 1).scale(1.05, 0.92, 1.05).translate(0, 0.70, 0), shade: 1.06 },
+    { geo: new THREE.IcosahedronGeometry(0.19, 1).scale(1.0, 0.85, 1.0).translate(0.15, 0.56, 0.08), shade: 0.94 },
+    { geo: new THREE.IcosahedronGeometry(0.18, 1).scale(1.0, 0.85, 1.0).translate(-0.14, 0.57, 0.09), shade: 0.92 },
+    { geo: new THREE.IcosahedronGeometry(0.18, 1).scale(1.0, 0.86, 1.0).translate(0.03, 0.55, -0.15), shade: 0.86 },
+    { geo: new THREE.IcosahedronGeometry(0.16, 1).scale(1.0, 0.82, 1.0).translate(-0.08, 0.64, -0.10), shade: 0.98 },
+  ]);
+}
+
+/** Layered 3-tier pine crown geometry. */
+function createPineCrownGeometry(): THREE.BufferGeometry {
+  return mergeCrownLobes([
+    { geo: new THREE.ConeGeometry(0.26, 0.42, 7).translate(0, 0.46, 0), shade: 0.86 },
+    { geo: new THREE.ConeGeometry(0.21, 0.38, 7).translate(0, 0.68, 0), shade: 0.98 },
+    { geo: new THREE.ConeGeometry(0.14, 0.32, 7).translate(0, 0.88, 0), shade: 1.10 },
+  ]);
+}
 
 function roll(x: number, z: number, salt: number): number {
   const v = Math.sin(x * 127.1 + z * 311.7 + salt * 74.7) * 43758.5453;
@@ -84,6 +155,7 @@ export class StreetFurniture {
     const bins: Item[] = [];
     const benches: Item[] = [];
     const signs: Item[] = [];
+    const pedestrians: Array<Item & { roll: number }> = [];
     const road = (x: number, z: number) => roads.get(`${x},${z}`);
 
     for (const { x, z, type, building } of roads.values()) {
@@ -137,6 +209,22 @@ export class StreetFurniture {
           const binp = at(0.06, -0.26);
           if ((shops || lot === BuildingType.ZONE_RESIDENTIAL) && roll(x, z, d + 50) < (shops ? 0.6 : 0.2) && clear(binp)) bins.push({ ...binp, ...facing });
         }
+        // Stylized pedestrians strolling along urban sidewalks (busier outside shops & parks)
+        const busy = lot === BuildingType.ZONE_COMMERCIAL || lot === BuildingType.PARK;
+        const pedChance = busy ? 0.58 : lot === BuildingType.ZONE_RESIDENTIAL ? 0.24 : 0.10;
+        const pedRoll = roll(x, z, d + 71);
+        if (pedRoll < pedChance) {
+          const count = busy && pedRoll < 0.24 ? 2 : 1;
+          for (let p = 0; p < count; p++) {
+            const shift = (roll(x, z, d + 80 + p * 7) - 0.5) * 0.65;
+            const inset = SIDEWALK * (0.28 + roll(x, z, d + 90 + p * 11) * 0.42);
+            const pt = at(inset, shift);
+            if (!clear(pt)) continue;
+            // Face along the sidewalk in either direction
+            const dir = roll(x, z, d + 100 + p * 13) < 0.5 ? 1 : -1;
+            pedestrians.push({ ...pt, fx: ax * dir, fz: az * dir, roll: roll(x, z, d + 115 + p * 17) });
+          }
+        }
       }
     }
 
@@ -168,6 +256,7 @@ export class StreetFurniture {
     if (showTrees) this.addTrees(trees, style);
     this.addLamps(lamps);
     this.addCars(cars);
+    this.addPedestrians(pedestrians);
     this.addStreetItems(showTrees ? trees.filter(tree => tree.pit) : [], hydrants, bins, benches, signs);
     this.setNight(this.nightAmount);
   }
@@ -187,9 +276,9 @@ export class StreetFurniture {
     if (!trees.length) return;
     const t = new THREE.Object3D();
     const color = new THREE.Color();
-    const leaf = () => new THREE.MeshStandardMaterial({ roughness: 0.9, flatShading: true });
-    const trunks = this.batch(new THREE.CylinderGeometry(0.028, 0.04, 0.4, 5).translate(0, 0.2, 0),
-      new THREE.MeshStandardMaterial({ color: 0x6b4f35, roughness: 1 }), trees.length);
+    const leaf = () => new THREE.MeshStandardMaterial({ roughness: 0.86, flatShading: true, vertexColors: true });
+    const trunks = this.batch(new THREE.CylinderGeometry(0.026, 0.042, 0.44, 6).translate(0, 0.22, 0),
+      new THREE.MeshStandardMaterial({ color: 0x5c4028, roughness: 0.96 }), trees.length);
     const place = (mesh: THREE.InstancedMesh, i: number, tree: Tree, stretch = 1) => {
       t.position.set(tree.x * CELL_SIZE, 0.03, tree.z * CELL_SIZE);
       t.rotation.y = tree.roll * 40;
@@ -201,16 +290,16 @@ export class StreetFurniture {
       color.setHex(colors[Math.floor(tree.roll * 97) % colors.length]).multiplyScalar(0.88 + ((tree.roll * 31) % 1) * 0.24);
     trees.forEach((tree, i) => place(trunks, i, tree));
     if (pines.length) {
-      const mesh = this.batch(new THREE.ConeGeometry(0.24, 0.85, 7).translate(0, 0.62, 0), leaf(), pines.length);
+      const mesh = this.batch(createPineCrownGeometry(), leaf(), pines.length);
       pines.forEach((tree, i) => {
-        place(mesh, i, tree, 1.1);
+        place(mesh, i, tree, 1.05);
         mesh.setColorAt(i, tint(style.pines, tree));
       });
     }
     if (broad.length) {
-      const mesh = this.batch(new THREE.IcosahedronGeometry(0.3, 1).translate(0, 0.62, 0), leaf(), broad.length);
+      const mesh = this.batch(createBroadleafCrownGeometry(), leaf(), broad.length);
       broad.forEach((tree, i) => {
-        place(mesh, i, tree, 1 + ((tree.roll * 17) % 1) * 0.2);
+        place(mesh, i, tree, 0.96 + ((tree.roll * 17) % 1) * 0.22);
         mesh.setColorAt(i, tint(style.leaves, tree));
       });
     }
@@ -244,8 +333,16 @@ export class StreetFurniture {
     if (!cars.length) return;
     const t = new THREE.Object3D();
     const color = new THREE.Color();
-    const bodies = this.batch(new THREE.BoxGeometry(0.1, 0.045, 0.22), new THREE.MeshStandardMaterial({ roughness: 0.35, metalness: 0.4 }), cars.length);
-    const cabins = this.batch(new THREE.BoxGeometry(0.086, 0.04, 0.11), new THREE.MeshStandardMaterial({ color: 0x20262c, roughness: 0.15, metalness: 0.6 }), cars.length);
+    const bodies = this.batch(
+      new THREE.BoxGeometry(0.1, 0.046, 0.22),
+      new THREE.MeshPhysicalMaterial({ roughness: 0.24, metalness: 0.25, clearcoat: 1.0, clearcoatRoughness: 0.08 }),
+      cars.length,
+    );
+    const cabins = this.batch(
+      new THREE.BoxGeometry(0.086, 0.04, 0.115),
+      new THREE.MeshPhysicalMaterial({ color: 0x091326, roughness: 0.06, metalness: 0.15, clearcoat: 1.0 }),
+      cars.length,
+    );
     const wheels = this.batch(new THREE.CylinderGeometry(0.022, 0.022, 0.104, 10).rotateZ(Math.PI / 2),
       new THREE.MeshStandardMaterial({ color: 0x1b1b1c, roughness: 0.9 }), cars.length * 2);
     cars.forEach(({ x, z, roll: r }, i) => {
@@ -262,6 +359,41 @@ export class StreetFurniture {
         t.updateMatrix();
         wheels.setMatrixAt(i * 2 + k, t.matrix);
       }
+    });
+  }
+
+  /** Colorful stylized pedestrians lining urban sidewalks, instanced. */
+  private addPedestrians(pedestrians: Array<Item & { roll: number }>): void {
+    if (!pedestrians.length) return;
+    const t = new THREE.Object3D();
+    const color = new THREE.Color();
+    const mat = () => new THREE.MeshStandardMaterial({ roughness: 0.72, metalness: 0.02 });
+    const legs = this.batch(new THREE.BoxGeometry(0.028, 0.056, 0.022), mat(), pedestrians.length);
+    const torsos = this.batch(new THREE.BoxGeometry(0.036, 0.054, 0.024), mat(), pedestrians.length);
+    const heads = this.batch(new THREE.SphereGeometry(0.017, 8, 6), mat(), pedestrians.length);
+
+    pedestrians.forEach((p, i) => {
+      const s = 0.9 + ((p.roll * 19) % 1) * 0.22;
+      const wx = p.x * CELL_SIZE;
+      const wz = p.z * CELL_SIZE;
+      const yaw = Math.atan2(p.fx, p.fz);
+      t.rotation.set(0, yaw, 0);
+      t.scale.setScalar(s);
+
+      t.position.set(wx, WALK_Y + 0.028 * s, wz);
+      t.updateMatrix();
+      legs.setMatrixAt(i, t.matrix);
+      legs.setColorAt(i, color.setHex(PED_BOTTOMS[Math.floor(p.roll * 41) % PED_BOTTOMS.length]));
+
+      t.position.set(wx, WALK_Y + 0.082 * s, wz);
+      t.updateMatrix();
+      torsos.setMatrixAt(i, t.matrix);
+      torsos.setColorAt(i, color.setHex(PED_TOPS[Math.floor(p.roll * 83) % PED_TOPS.length]));
+
+      t.position.set(wx, WALK_Y + 0.125 * s, wz);
+      t.updateMatrix();
+      heads.setMatrixAt(i, t.matrix);
+      heads.setColorAt(i, color.setHex(PED_SKIN[Math.floor(p.roll * 29) % PED_SKIN.length]));
     });
   }
 

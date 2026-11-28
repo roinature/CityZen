@@ -98,8 +98,8 @@ function easeOutBack(t: number): number {
  * manhattan-free-roam (MIT, see THIRD_PARTY_NOTICES.md).
  */
 function createFacadeMaterial(night: { value: number }): THREE.MeshStandardMaterial {
-  const material = new THREE.MeshStandardMaterial({ roughness: 0.82, metalness: 0.02 });
-  material.customProgramCacheKey = () => 'cityzen-facade-v1';
+  const material = new THREE.MeshStandardMaterial({ roughness: 0.82, metalness: 0.04 });
+  material.customProgramCacheKey = () => 'cityzen-facade-v2';
   const varyings = `#include <common>
     varying vec3 vFacade;
     varying vec3 vFacadeNormal;
@@ -120,45 +120,61 @@ function createFacadeMaterial(night: { value: number }): THREE.MeshStandardMater
         float facadeLit;
         float facadeGlass;
         vec2 facadePane;
+        vec3 facadeBillboard;
         float facadeHash(vec2 p) {
           p = fract(p * vec2(123.34, 456.21));
           p += dot(p, p + 45.32);
           return fract(p.x * p.y);
         }
+        vec3 billboardPalette(float idx) {
+          float m = mod(floor(idx), 6.0);
+          if (m < 0.5) return vec3(0.06, 0.72, 1.0);   // electric cyan
+          if (m < 1.5) return vec3(1.0, 0.16, 0.48);   // Times Square magenta
+          if (m < 2.5) return vec3(1.0, 0.45, 0.05);   // vibrant orange
+          if (m < 3.5) return vec3(0.16, 0.36, 1.0);   // cobalt blue
+          if (m < 4.5) return vec3(0.98, 0.82, 0.12);  // bright gold
+          return vec3(0.62, 0.24, 1.0);                // neon violet
+        }
         // What glass mirrors in world direction r (linear colour). seed: the building's own number.
         vec3 facadeReflection(vec3 r, float seed) {
           float level = max(length(r.xz), 1e-3);
           float elev = r.y / level;
-          vec3 horizon = mix(vec3(0.62, 0.70, 0.78), vec3(0.012, 0.016, 0.04), uNight);
-          vec3 zenith = mix(vec3(0.16, 0.34, 0.70), vec3(0.002, 0.004, 0.014), uNight);
-          vec3 c = mix(horizon, zenith, smoothstep(0.0, 1.2, elev));
+          vec3 horizon = mix(vec3(0.76, 0.85, 0.96), vec3(0.018, 0.024, 0.055), uNight);
+          vec3 zenith = mix(vec3(0.14, 0.40, 0.86), vec3(0.004, 0.008, 0.022), uNight);
+          vec3 c = mix(horizon, zenith, smoothstep(0.0, 1.05, elev));
+          // soft reflected clouds in the upper sky
+          float cloudBand = smoothstep(0.18, 0.65, elev) * (1.0 - uNight);
+          float cl = sin(r.x * 5.0 + seed * 12.0) * cos(r.z * 4.5 - seed * 7.0);
+          c = mix(c, vec3(0.96, 0.97, 1.0), smoothstep(0.25, 0.85, cl) * cloudBand * 0.45);
           // the buildings across the street: a ragged skyline, filling everything below it
           float az = atan(r.z, r.x) * 6.0 + seed * 40.0;
           float block = floor(az);
-          float tall = 0.04 + 0.5 * pow(facadeHash(vec2(block, floor(seed * 9.0))), 2.0);
+          float tall = 0.05 + 0.52 * pow(facadeHash(vec2(block, floor(seed * 9.0))), 2.0);
           float there = (1.0 - smoothstep(tall - 0.015, tall + 0.015, elev)) * step(0.08, fract(az));
           float shade = facadeHash(vec2(block, 11.0));
-          vec3 wall = mix(vec3(0.16, 0.16, 0.17), vec3(0.40, 0.36, 0.31), shade) * mix(1.0, 0.06, uNight);
+          vec3 wall = mix(vec3(0.12, 0.14, 0.18), vec3(0.38, 0.36, 0.33), shade) * mix(1.0, 0.08, uNight);
           vec2 g = vec2(az * 8.0, elev * 40.0);
           // their windows, faded out once smaller than a pixel so the far city does not shimmer
           float fine = 1.0 - smoothstep(0.25, 0.5, max(fwidth(g.x), fwidth(g.y)));
           float pane = step(0.35, fract(g.x)) * step(0.4, fract(g.y)) * fine;
-          wall *= 1.0 - 0.3 * pane * (1.0 - uNight);
-          wall += vec3(1.0, 0.62, 0.3) * pane * step(0.7, facadeHash(floor(g) + block)) * uNight * 0.7;
+          wall *= 1.0 - 0.32 * pane * (1.0 - uNight);
+          wall += vec3(1.0, 0.65, 0.32) * pane * step(0.68, facadeHash(floor(g) + block)) * uNight * 0.85;
           c = mix(c, wall, there);
           // and, looking steeply down, the street
-          vec3 street = mix(vec3(0.10, 0.10, 0.095), vec3(0.008, 0.008, 0.012), uNight);
+          vec3 street = mix(vec3(0.09, 0.10, 0.12), vec3(0.008, 0.01, 0.016), uNight);
           return mix(c, street, smoothstep(-0.5, -1.4, elev));
         }`)
       .replace('#include <color_fragment>', `#include <color_fragment>
         facadeLit = 0.0;
         facadeGlass = 0.0;
         facadePane = vec2(0.0);
+        facadeBillboard = vec3(0.0);
         if (abs(vFacadeNormal.y) < 0.5) {
           bool side = abs(vFacadeNormal.x) > 0.5;
           float span = side ? vFacadeSize.z : vFacadeSize.x;
           float along = (side ? vFacade.z : vFacade.x) + span * 0.5;
           float kind = vFacadeInfo.x;
+          float seed = vFacadeInfo.y;
           float pitch = kind > 2.5 ? 0.34 : kind > 1.5 ? 0.2 : 0.22;
           float floorHeight = kind < 0.5 ? 0.34 : kind > 2.5 ? 0.42 : 0.3;
           // Whole windows only: stretch the spacing to fit the wall.
@@ -169,35 +185,111 @@ function createFacadeMaterial(night: { value: number }): THREE.MeshStandardMater
           float fu = fract(u);
           float fv = fract(v);
           bool ground = v < 1.0;
-          bool glass = fu > 0.24 && fu < 0.76 && fv > 0.3 && fv < 0.78;
-          if (kind > 2.5) glass = fv > 0.5 && fv < 0.74 && fu > 0.06 && fu < 0.94;
-          if (kind > 0.5 && kind < 2.5 && ground) glass = fu > 0.08 && fu < 0.92 && fv > 0.08 && fv < 0.68;
-          // Glass towers, for some of the tall ones.
-          bool curtain = kind > 1.5 && kind < 2.5 && vFacadeInfo.y > 0.62 && !ground;
-          if (curtain) glass = fu > 0.08 && fu < 0.92 && fv > 0.16;
-          vec3 wall = diffuseColor.rgb;
-          if (glass) {
-            facadeGlass = curtain ? 1.0 : 0.7;
-            facadePane = vec2(floor(u), floor(v)) + (side ? vec2(0.5, 0.0) : vec2(0.0));
-            vec3 pane = mix(vec3(0.10, 0.14, 0.19), vec3(0.22, 0.30, 0.37), fract(v * 0.37 + u * 0.23 + vFacadeInfo.y));
-            diffuseColor.rgb = mix(wall, pane, 0.86);
-            float roll = fract(sin(dot(vec2(floor(u), floor(v)) + vFacadeInfo.y * 71.0 + (side ? 13.0 : 0.0), vec2(12.9898, 78.233))) * 43758.5453);
-            facadeLit = roll < (ground && kind > 0.5 ? 0.8 : 0.42) ? 0.55 + roll : 0.0;
-          } else if (kind > 0.5 && kind < 1.5 && ground && fv > 0.74) {
-            // Shop fascia.
-            diffuseColor.rgb = wall * vec3(0.55, 0.5, 0.5);
-          } else if (fv < 0.045 && kind > 0.5) {
-            diffuseColor.rgb = wall * 0.86;
+
+          // Times Square-style glowing LED billboards on select commercial / downtown facades
+          float faceSignSeed = facadeHash(vec2(floor(seed * 97.0), side ? 3.0 : 7.0));
+          bool hasBillboard = (kind > 0.5 && kind < 2.5) && floors >= 2.5 && span >= 0.48
+            && faceSignSeed > 0.62 && v >= 1.05 && v < min(floors - 0.35, kind > 1.5 ? 6.5 : 3.6)
+            && along > 0.04 && along < span - 0.04;
+
+          if (hasBillboard) {
+            // Split billboard zone into 1..3 bold adjacent LED screen panels
+            float panelCols = span > 1.1 ? 3.0 : (span > 0.7 ? 2.0 : 1.0);
+            float pu = (along - 0.04) / max(span - 0.08, 0.01) * panelCols;
+            float pv = (v - 1.05) / max(min(floors - 0.35, kind > 1.5 ? 6.5 : 3.6) - 1.05, 0.5);
+            float pfu = fract(pu);
+            float pfv = fract(pv * (kind > 1.5 ? 2.0 : 1.0));
+            vec2 panelId = vec2(floor(pu) + floor(seed * 53.0), floor(pv * (kind > 1.5 ? 2.0 : 1.0)) + (side ? 11.0 : 0.0));
+            bool bezel = pfu < 0.045 || pfu > 0.955 || pfv < 0.055 || pfv > 0.945;
+            if (bezel) {
+              diffuseColor.rgb = vec3(0.05, 0.06, 0.08);
+            } else {
+              float style = facadeHash(panelId);
+              vec3 c1 = billboardPalette(style * 6.0);
+              vec3 c2 = billboardPalette(style * 6.0 + 2.0 + floor(facadeHash(panelId + 4.1) * 3.0));
+              vec3 c3 = vec3(0.98, 0.99, 1.0);
+              vec3 graphic = c1;
+              if (style < 0.33) {
+                // Bold horizontal neon stripes + bright headline band
+                float stripe = step(0.5, fract(pfv * 6.0));
+                graphic = mix(c1, c2, stripe);
+                if (pfv > 0.28 && pfv < 0.62 && pfu > 0.14 && pfu < 0.86) graphic = mix(c3, c2, 0.25);
+              } else if (style < 0.66) {
+                // Framed poster with bold geometric centre block and accent border
+                bool inner = pfu > 0.14 && pfu < 0.86 && pfv > 0.18 && pfv < 0.82;
+                bool banner = pfv < 0.30 && pfu > 0.12 && pfu < 0.88;
+                graphic = banner ? c2 : (inner ? c1 : mix(c2, c3, 0.35));
+                if (inner && pfv > 0.42 && pfv < 0.58) graphic = c3;
+              } else {
+                // Diagonal color-block graphic
+                float diag = step(0.0, (pfu - 0.5) + (pfv - 0.5) * 0.85);
+                graphic = mix(c1, c2, diag);
+                if (length(vec2(pfu - 0.5, (pfv - 0.5) * 1.2)) < 0.24) graphic = c3;
+              }
+              // Subtle LED pixel matrix scanlines
+              float led = 0.90 + 0.10 * step(0.18, fract(pfu * 24.0)) * step(0.18, fract(pfv * 18.0));
+              diffuseColor.rgb = graphic * 0.22;
+              facadeBillboard = graphic * led * mix(1.05, 1.55, uNight);
+              facadeGlass = 0.25;
+            }
+          } else {
+            bool glass = fu > 0.22 && fu < 0.78 && fv > 0.28 && fv < 0.80;
+            bool frame = !glass && fu > 0.17 && fu < 0.83 && fv > 0.23 && fv < 0.85;
+            if (kind > 2.5) {
+              glass = fv > 0.48 && fv < 0.76 && fu > 0.06 && fu < 0.94;
+              frame = false;
+            }
+            if (kind > 0.5 && kind < 2.5 && ground) {
+              glass = fu > 0.07 && fu < 0.93 && fv > 0.06 && fv < 0.70;
+              frame = false;
+            }
+            // Glass curtain-wall towers for tall modern skyscrapers
+            bool curtain = kind > 1.5 && kind < 2.5 && seed > 0.52 && !ground;
+            if (curtain) {
+              glass = fu > 0.07 && fu < 0.93 && fv > 0.14 && fv < 0.94;
+              frame = !glass;
+            }
+            vec3 wall = diffuseColor.rgb;
+            if (glass) {
+              facadeGlass = curtain ? 1.0 : 0.78;
+              facadePane = vec2(floor(u), floor(v)) + (side ? vec2(0.5, 0.0) : vec2(0.0));
+              float paneVar = facadeHash(facadePane + seed * 19.0);
+              vec3 pane = mix(vec3(0.06, 0.11, 0.18), vec3(0.18, 0.28, 0.38), paneVar);
+              // Subtle interior blind / top shadow inside each window recess
+              float recess = mix(0.68, 1.0, smoothstep(0.80, 0.55, fv));
+              diffuseColor.rgb = mix(wall, pane * recess, curtain ? 0.92 : 0.88);
+              float roll = fract(sin(dot(vec2(floor(u), floor(v)) + seed * 71.0 + (side ? 13.0 : 0.0), vec2(12.9898, 78.233))) * 43758.5453);
+              facadeLit = roll < (ground && kind > 0.5 ? 0.84 : 0.45) ? 0.6 + roll : 0.0;
+            } else {
+              // Subtle masonry / architectural paneling grain
+              float brick = facadeHash(floor(vec2(along * 18.0, vFacade.y * 28.0)));
+              wall *= 0.94 + brick * 0.12;
+              if (curtain && frame) {
+                // Dark metallic curtain-wall mullions & spandrel bands
+                wall = wall * 0.42 + vec3(0.05, 0.07, 0.10);
+              } else if (frame && kind < 2.5) {
+                // Recessed window frame + lighter stone sill
+                wall *= fv < 0.28 ? 1.12 : 0.66;
+              } else if (kind > 0.5 && kind < 2.5 && ground && fv > 0.72) {
+                // Dark storefront canopy / cornice separating ground retail from upper floors
+                wall = wall * vec3(0.32, 0.33, 0.38);
+              } else if (fv < 0.06 && kind > 0.5) {
+                // Horizontal architectural belt course / cornice shadow
+                wall *= 0.80;
+              }
+              diffuseColor.rgb = wall;
+            }
           }
-          // Darker at the foot, where wall meets ground.
-          diffuseColor.rgb *= mix(0.72, 1.0, smoothstep(0.0, 0.22, vFacade.y));
+          // Darker at the foot, where wall meets sidewalk (ambient occlusion).
+          diffuseColor.rgb *= mix(0.66, 1.0, smoothstep(0.0, 0.26, vFacade.y));
         }`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
-        totalEmissiveRadiance += facadeLit * uNight * mix(vec3(1.0, 0.62, 0.26), vec3(0.62, 0.8, 1.0), step(0.88, vFacadeInfo.y)) * 0.75;`)
+        totalEmissiveRadiance += facadeBillboard;
+        totalEmissiveRadiance += facadeLit * uNight * mix(vec3(1.0, 0.65, 0.28), vec3(0.62, 0.82, 1.0), step(0.85, vFacadeInfo.y)) * 0.9;`)
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
-        if (facadeGlass > 0.0) roughnessFactor = 0.06;`)
+        if (facadeGlass > 0.0) roughnessFactor = mix(0.22, 0.05, facadeGlass);`)
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
-        if (facadeGlass > 0.0) {
+        if (facadeGlass > 0.5) {
           // each pane tilted a hair, sideways and up or down
           vec3 worldNormal = inverseTransformDirection(normal, viewMatrix);
           vec3 along = normalize(cross(vec3(0.0, 1.0, 0.0), worldNormal));
@@ -207,11 +299,11 @@ function createFacadeMaterial(night: { value: number }): THREE.MeshStandardMater
           normal = normalize((viewMatrix * vec4(tilted, 0.0)).xyz);
         }`)
       .replace('#include <lights_physical_fragment>', `#include <lights_physical_fragment>
-        if (facadeGlass > 0.0) material.specularColor = mix(material.specularColor, vec3(0.07, 0.08, 0.09), facadeGlass);`)
+        if (facadeGlass > 0.0) material.specularColor = mix(material.specularColor, vec3(0.09, 0.11, 0.13), facadeGlass);`)
       .replace('#include <lights_fragment_maps>', `#include <lights_fragment_maps>
-        if (facadeGlass > 0.0) {
+        if (facadeGlass > 0.5) {
           vec3 mirrored = inverseTransformDirection(reflect(-geometryViewDir, geometryNormal), viewMatrix);
-          radiance += facadeReflection(mirrored, vFacadeInfo.y) * facadeGlass * 2.0;
+          radiance += facadeReflection(mirrored, vFacadeInfo.y) * facadeGlass * 2.3;
         }`);
   };
   return material;

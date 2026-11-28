@@ -92,9 +92,9 @@ const FINISH = /* glsl */ `
       float l = dot(graded, vec3(0.2126, 0.7152, 0.0722));
       graded = clamp(mix(vec3(l), graded, 1.08), 0.0, 1.0);
       graded = mix(graded, graded * graded * (3.0 - 2.0 * graded), 0.16);
-      // warm the lights, cool the shadows; more so at night
-      vec3 cool = mix(vec3(0.985, 0.995, 1.025), vec3(0.97, 0.99, 1.05), uNight);
-      graded *= mix(cool, vec3(1.025, 1.0, 0.97), smoothstep(0.1, 0.75, l));
+      // warm the lights, cool the shadows (crisp late-afternoon urban contrast)
+      vec3 cool = mix(vec3(0.955, 0.98, 1.055), vec3(0.96, 0.985, 1.06), uNight);
+      graded *= mix(cool, vec3(1.035, 1.005, 0.96), smoothstep(0.12, 0.72, l));
       // the corners fall off a little, as through a lens
       vec2 d = (vUv - 0.5) * vec2(uAspect, 1.0);
       graded *= 1.0 - (0.16 + 0.1 * uNight) * smoothstep(0.4, 1.1, length(d));
@@ -191,7 +191,7 @@ export class PostProcessing {
       const u = this.finish.uniforms;
       u.tScene.value = sceneTarget.texture;
       u.tGlow.value = this.levels[0].texture;
-      u.uStrength.value = glow ? 0.12 + 0.38 * this.night : 0;
+      u.uStrength.value = glow ? 0.19 + 0.36 * this.night : 0;
       u.uGrade.value = glow ? 1 : 0;
       u.uNight.value = this.night;
       u.uTime.value = (performance.now() / 1000) % 1000;
