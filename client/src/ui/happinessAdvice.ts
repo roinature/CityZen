@@ -1,7 +1,7 @@
 import {
   BUILDING_DEFS, BuildingType, INFRA_CATEGORIES, MASLOW_NEEDS_ORDERED, MaslowNeed, TAX_COMFORT_RATE,
   calculateBaseMaslowTargets, calculateBudgetPenalty, calculateCityMaslowCapacity, calculateLoanPayments,
-  calculateNetIncome, calculateTaxPenalty, canPlaceBuilding, evaluateCityUtilities,
+  calculateNetIncome, calculateTaxPenalty, canPlaceBuilding, evaluateCityUtilities, getEffectiveTaxRates,
   getZoneLevelHappinessRequirement, isUtilityConduit, isZone,
   type CityState, type UtilityLayer,
 } from '@cityzen/shared';
@@ -49,7 +49,9 @@ export function getBlockedZoneLevel(city: CityState): number | undefined {
 export function getHappinessAdvice(city: CityState): HappinessAdvice[] {
   if (city.resources.population <= 0) return [];
 
-  const { money, population, populationSummary, taxRate } = city.resources;
+  const { money, population, populationSummary } = city.resources;
+  const effectiveRates = getEffectiveTaxRates(city.resources);
+  const resTaxRate = effectiveRates.residential;
   const advice: HappinessAdvice[] = [];
   if (money < 0) {
     return [{
@@ -59,16 +61,20 @@ export function getHappinessAdvice(city: CityState): HappinessAdvice[] {
     }];
   }
 
-  if (taxRate > TAX_COMFORT_RATE) {
+  if (resTaxRate > TAX_COMFORT_RATE) {
     const netAtLowerRate = calculateNetIncome({
-      ...city, resources: { ...city.resources, taxRate: TAX_COMFORT_RATE },
+      ...city,
+      resources: {
+        ...city.resources,
+        taxRates: { ...effectiveRates, residential: TAX_COMFORT_RATE },
+      },
     }) - calculateLoanPayments(city.resources);
     advice.push({
-      title: 'Review high taxes',
-      detail: `Taxes are at ${taxRate}%. Rates above ${TAX_COMFORT_RATE}% reduce satisfaction across all needs. ` +
+      title: 'Review high residential taxes',
+      detail: `Residential taxes are at ${resTaxRate}%. Rates above ${TAX_COMFORT_RATE}% reduce satisfaction across all needs. ` +
         (netAtLowerRate < 0
           ? `At ${TAX_COMFORT_RATE}%, the city would lose about $${Math.ceil(-netAtLowerRate).toLocaleString()} per tick. Review expenses before cutting the rate.`
-          : `Try lowering the rate toward ${TAX_COMFORT_RATE}% while the budget can support it.`),
+          : `Try lowering residential tax toward ${TAX_COMFORT_RATE}% while the budget can support it.`),
       action: { kind: 'finance' },
     });
   }
@@ -108,7 +114,7 @@ export function getHappinessAdvice(city: CityState): HappinessAdvice[] {
 
   const profile = calculateCityMaslowCapacity(city, utilities);
   const baseline = calculateBaseMaslowTargets(profile, population);
-  const penalty = calculateBudgetPenalty(money) * calculateTaxPenalty(taxRate);
+  const penalty = calculateBudgetPenalty(money) * calculateTaxPenalty(city.resources);
   const recommended = new Set<BuildingType>();
   let unaffordableImprovement = false;
   let noRoomForService = false;

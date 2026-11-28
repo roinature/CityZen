@@ -1,7 +1,7 @@
 import prisma from './prismaClient.js';
 import type { Prisma } from '../generated/prisma/index.js';
 import { writeWorldCityEdges } from './worldStore.js';
-import type { WorldCityEntry, CityState, PlacedBuilding, RoadOrientation, Loan } from '@cityzen/shared';
+import type { WorldCityEntry, CityState, PlacedBuilding, RoadOrientation, Loan, TaxRates } from '@cityzen/shared';
 import { applySiteTerrain, createEmptyGrid, MaslowNeed, calculateEdgeConnections, setGridBuilding } from '@cityzen/shared';
 
 // Loans are stored in City.loans (JSONB), added by the 20261114000000_city_loans
@@ -41,29 +41,66 @@ async function loadCityLoans(cityId: string, db: Prisma.TransactionClient, persi
   return Array.isArray(loans) ? (loans as Loan[]) : [];
 }
 
+interface StoredFinances {
+  taxRates?: TaxRates;
+  claimedMilestones?: string[];
+}
+
+let financesColumnExists = false;
+let financesColumnCheckedAt = 0;
+
+async function hasFinancesColumn(): Promise<boolean> {
+  if (financesColumnExists) return true;
+  if (Date.now() - financesColumnCheckedAt < 60_000) return false;
+  financesColumnCheckedAt = Date.now();
+  try {
+    const rows = await prisma.$queryRaw<unknown[]>`
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = current_schema() AND table_name = 'City' AND column_name = 'finances'
+    `;
+    financesColumnExists = rows.length > 0;
+  } catch {
+    financesColumnExists = false;
+  }
+  return financesColumnExists;
+}
+
+async function loadCityFinances(
+  cityId: string,
+  db: Prisma.TransactionClient,
+  persistFinances: boolean,
+): Promise<StoredFinances> {
+  if (!persistFinances) return {};
+  const rows = await db.$queryRaw<Array<{ finances: unknown }>>`
+    SELECT "finances" FROM "City" WHERE "id" = ${cityId}
+  `;
+  const raw = rows[0]?.finances;
+  return raw && typeof raw === 'object' ? (raw as StoredFinances) : {};
+}
+
 const cityTransactionOptions = { maxWait: 10_000, timeout: 15_000 };
 
 export async function saveCityState(cityId: string, state: CityState, expectedRevision?: number): Promise<number | null> {
-  const persistLoans = await hasLoansColumn();
+  const [persistLoans, persistFinances] = await Promise.all([hasLoansColumn(), hasFinancesColumn()]);
   return prisma.$transaction(async (tx) => {
     if (expectedRevision !== undefined) {
       const revision = await lockCity(tx, cityId);
       if (revision !== expectedRevision) return null;
     }
-    return writeCityState(tx, cityId, state, persistLoans, expectedRevision);
+    return writeCityState(tx, cityId, state, persistLoans, persistFinances, expectedRevision);
   }, cityTransactionOptions);
 }
 
 /** Commit the site claim and its playable city together, including across workers. */
 export async function foundEarthCity(state: CityState, entry: WorldCityEntry): Promise<number | null> {
-  const persistLoans = await hasLoansColumn();
+  const [persistLoans, persistFinances] = await Promise.all([hasLoansColumn(), hasFinancesColumn()]);
   return prisma.$transaction(async tx => {
     const count = await tx.$executeRaw`
       UPDATE "World" SET "cities" = "cities" || ${JSON.stringify([entry])}::jsonb, "updatedAt" = NOW()
       WHERE "id" = 'default' AND NOT ("cities" @> ${JSON.stringify([{ siteId: entry.siteId }])}::jsonb)
     `;
     if (!count) return null;
-    return writeCityState(tx, state.id, state, persistLoans);
+    return writeCityState(tx, state.id, state, persistLoans, persistFinances);
   }, cityTransactionOptions);
 }
 
@@ -75,7 +112,8 @@ async function lockCity(tx: Prisma.TransactionClient, cityId: string): Promise<n
 }
 
 async function writeCityState(
-  tx: Prisma.TransactionClient, cityId: string, state: CityState, persistLoans: boolean, previousRevision?: number,
+  tx: Prisma.TransactionClient, cityId: string, state: CityState,
+  persistLoans: boolean, persistFinances: boolean, previousRevision?: number,
   previousBuildings?: Map<string, PlacedBuilding>,
 ): Promise<number> {
   const updatedAt = new Date(Math.max(Date.now(), (previousRevision ?? 0) + 1));
@@ -115,6 +153,14 @@ async function writeCityState(
     await tx.$executeRaw`UPDATE "City" SET "loans" = ${loansJson}::jsonb WHERE "id" = ${cityId}`;
   }
 
+  if (persistFinances) {
+    const financesJson = JSON.stringify({
+      taxRates: state.resources.taxRates,
+      claimedMilestones: state.resources.claimedMilestones ?? [],
+    });
+    await tx.$executeRaw`UPDATE "City" SET "finances" = ${financesJson}::jsonb WHERE "id" = ${cityId}`;
+  }
+
   const buildingsToWrite = state.buildings.filter(building => previousBuildings?.get(building.id) !== building);
   if (previousBuildings) {
     const currentBuildings = new Map(state.buildings.map(building => [building.id, building]));
@@ -148,17 +194,17 @@ async function writeCityState(
 export async function mutateCityState<T extends { success: boolean; roadsChanged?: boolean }>(
   cityId: string, mutate: (state: CityState) => { result: T; state: CityState },
 ): Promise<{ result: T; state: CityState; updatedWorldIds: string[] } | null> {
-  const persistLoans = await hasLoansColumn();
+  const [persistLoans, persistFinances] = await Promise.all([hasLoansColumn(), hasFinancesColumn()]);
   return prisma.$transaction(async (tx) => {
     const revision = await lockCity(tx, cityId);
     if (revision === null) return null;
-    const savedState = await readCityState(cityId, tx, persistLoans);
+    const savedState = await readCityState(cityId, tx, persistLoans, persistFinances);
     if (!savedState) return null;
     const previousBuildings = new Map(savedState.buildings.map(building => [building.id, building]));
     const { result, state } = mutate(savedState);
     let updatedWorldIds: string[] = [];
     if (result.success) {
-      state.updatedAt = await writeCityState(tx, cityId, state, persistLoans, revision, previousBuildings);
+      state.updatedAt = await writeCityState(tx, cityId, state, persistLoans, persistFinances, revision, previousBuildings);
       if (result.roadsChanged) {
         const before = calculateEdgeConnections([...previousBuildings.values()]);
         const after = calculateEdgeConnections(state.buildings);
@@ -172,16 +218,23 @@ export async function mutateCityState<T extends { success: boolean; roadsChanged
 }
 
 export async function loadCityState(cityId: string): Promise<CityState | null> {
-  return readCityState(cityId, prisma, await hasLoansColumn());
+  const [persistLoans, persistFinances] = await Promise.all([hasLoansColumn(), hasFinancesColumn()]);
+  return readCityState(cityId, prisma, persistLoans, persistFinances);
 }
 
-async function readCityState(cityId: string, db: Prisma.TransactionClient, persistLoans: boolean): Promise<CityState | null> {
-  const [city, loans] = await Promise.all([
+async function readCityState(
+  cityId: string,
+  db: Prisma.TransactionClient,
+  persistLoans: boolean,
+  persistFinances: boolean,
+): Promise<CityState | null> {
+  const [city, loans, finances] = await Promise.all([
     db.city.findUnique({
       where: { id: cityId },
       include: { buildings: true },
     }),
     loadCityLoans(cityId, db, persistLoans),
+    loadCityFinances(cityId, db, persistFinances),
   ]);
 
   if (!city) return null;
@@ -218,6 +271,8 @@ async function readCityState(cityId: string, db: Prisma.TransactionClient, persi
       population: city.population,
       happiness: city.happiness,
       taxRate: city.taxRate,
+      ...(finances.taxRates ? { taxRates: finances.taxRates } : {}),
+      ...(finances.claimedMilestones ? { claimedMilestones: finances.claimedMilestones } : {}),
       demand: {
         residential: city.demandResidential,
         commercial: city.demandCommercial,

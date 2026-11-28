@@ -230,7 +230,14 @@ export function createAdminRoutes(
         if (data.money !== undefined) room.state.resources.money = data.money;
         if (data.population !== undefined) room.state.resources.population = data.population;
         if (data.happiness !== undefined) room.state.resources.happiness = data.happiness;
-        if (data.taxRate !== undefined) room.state.resources.taxRate = data.taxRate;
+        if (data.taxRate !== undefined) {
+          room.state.resources.taxRate = data.taxRate;
+          room.state.resources.taxRates = {
+            residential: data.taxRate,
+            commercial: data.taxRate,
+            industrial: data.taxRate,
+          };
+        }
         if (data.name !== undefined) room.state.name = data.name;
       }
 
@@ -253,7 +260,7 @@ export function createAdminRoutes(
           const { ownerId } = await tx.city.update({
             where: { id },
             data: {
-              money: 5000, population: 0, happiness: 50, taxRate: 10,
+              money: 15000, population: 0, happiness: 50, taxRate: 9,
               demandResidential: 0.5, demandCommercial: 0, demandIndustrial: 0.3,
               clockGameTimeMs: 0, clockSpeed: 1, clockGameDay: 0, clockGameYear: 1,
               tick: 0,

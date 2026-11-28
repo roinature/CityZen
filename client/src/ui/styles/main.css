@@ -2099,12 +2099,223 @@ body:not(.in-city) .density-picker {
   to { transform: rotate(360deg); }
 }
 
-/* --- Finance panel: loans --- */
+/* --- Finance panel: loans & smart framework --- */
 .finance-panel {
-  width: 380px;
+  width: 420px;
   max-width: calc(100vw - 32px);
   max-height: calc(100vh - 32px);
   overflow-y: auto;
+}
+
+.finance-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.finance-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.finance-header-row h2 {
+  margin-bottom: 0;
+  text-align: left;
+}
+
+.finance-rating-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+  letter-spacing: 0.04em;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.finance-rating-badge.rating-aaa,
+.finance-rating-badge.rating-aa {
+  background: rgba(76, 175, 80, 0.25);
+  color: #81c784;
+}
+
+.finance-rating-badge.rating-a,
+.finance-rating-badge.rating-bbb {
+  background: rgba(66, 165, 245, 0.22);
+  color: #90caf9;
+}
+
+.finance-rating-badge.rating-bb,
+.finance-rating-badge.rating-b {
+  background: rgba(244, 67, 54, 0.25);
+  color: #ef9a9a;
+}
+
+.finance-cadence-toggle {
+  display: inline-flex;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.finance-cadence-btn {
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.finance-cadence-btn.active {
+  background: rgba(76, 175, 80, 0.35);
+  color: #fff;
+}
+
+.finance-milestone {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 12px;
+}
+
+.finance-milestone-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.finance-milestone-title {
+  opacity: 0.88;
+}
+
+.finance-milestone-grant {
+  font-weight: 700;
+  color: #81c784;
+  white-space: nowrap;
+}
+
+.finance-milestone-track {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.12);
+  margin-top: 6px;
+  overflow: hidden;
+}
+
+.finance-milestone-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #4caf50, #81c784);
+  transition: width 0.25s ease;
+}
+
+.finance-tax-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.finance-section-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.75;
+}
+
+.finance-mode-btn {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.finance-mode-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.finance-sector-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.finance-sector-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.finance-sector-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.finance-tax-val-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.finance-tax-tag {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+}
+
+.finance-tag-boost {
+  background: rgba(76, 175, 80, 0.22);
+  color: #81c784;
+}
+
+.finance-tag-neutral {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.finance-tag-drag {
+  background: rgba(255, 167, 38, 0.22);
+  color: #ffcc80;
+}
+
+.finance-tag-warn {
+  background: rgba(244, 67, 54, 0.24);
+  color: #ef9a9a;
+}
+
+.finance-section-heading {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.6;
+  margin-top: 6px;
+}
+
+.finance-row-total {
+  border-top: 1px dashed rgba(255, 255, 255, 0.12);
+  padding-top: 6px;
+}
+
+.finance-row-total .finance-label {
+  opacity: 1;
+  font-weight: 600;
 }
 
 .finance-loans {

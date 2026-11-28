@@ -1,9 +1,13 @@
-import type { CityState, Loan } from '@cityzen/shared';
+import type { CityState, Loan, TaxRates } from '@cityzen/shared';
 import {
   calculateTaxBreakdown,
+  calculateExpenseBreakdown,
   calculateLaborStats,
-  calculateMaintenance,
   calculateLoanPayments,
+  calculateCreditRating,
+  calculateTaxCompliance,
+  evaluateMilestones,
+  getEffectiveTaxRates,
   getAvailableCredit,
   getOutstandingDebt,
   quoteLoan,
@@ -17,28 +21,67 @@ import {
   MAX_TAX_RATE,
   TAX_RATE_STEP,
   TAX_COMFORT_RATE,
+  TAX_LAFFER_THRESHOLD,
 } from '@cityzen/shared';
 
 export interface FinancePanelCallbacks {
   onTaxRateChange: (rate: number) => void;
+  onTaxRatesChange?: (rates: Partial<TaxRates>) => void;
   onTakeLoan: (amount: number, termDays: number) => Promise<{ success: boolean; error?: string }>;
   onRepayLoan: (loanId: string) => Promise<{ success: boolean; error?: string }>;
 }
 
-function money(value: number): string {
-  const rounded = Math.round(value);
-  return `${rounded < 0 ? '-' : ''}$${Math.abs(rounded).toLocaleString()}`;
+type SectorKey = keyof TaxRates;
+type CadenceMode = 'tick' | 'day';
+
+function money(value: number, decimals = false): string {
+  const abs = Math.abs(value);
+  const formatted = decimals && abs < 100
+    ? abs.toFixed(1)
+    : Math.round(abs).toLocaleString();
+  return `${value < -0.005 ? '-' : ''}$${formatted}`;
 }
 
-function signedMoney(value: number): string {
-  const rounded = Math.round(value);
-  return `${rounded < 0 ? '-' : '+'}$${Math.abs(rounded).toLocaleString()}`;
+function signedMoney(value: number, decimals = false): string {
+  const abs = Math.abs(value);
+  const formatted = decimals && abs < 100
+    ? abs.toFixed(1)
+    : Math.round(abs).toLocaleString();
+  return `${value < -0.005 ? '-' : '+'}$${formatted}`;
+}
+
+function describeTaxPolicy(rate: number): { text: string; cls: string } {
+  if (rate < TAX_COMFORT_RATE) {
+    return { text: 'Incentive', cls: 'finance-tag-boost' };
+  }
+  if (rate <= TAX_COMFORT_RATE + 1) {
+    return { text: 'Neutral', cls: 'finance-tag-neutral' };
+  }
+  if (rate > TAX_LAFFER_THRESHOLD) {
+    const eff = Math.round(calculateTaxCompliance(rate) * 100);
+    return { text: `${eff}% coll.`, cls: 'finance-tag-warn' };
+  }
+  return { text: 'Drag', cls: 'finance-tag-drag' };
 }
 
 export class FinancePanel {
   private overlay: HTMLDivElement;
-  private taxSlider!: HTMLInputElement;
-  private taxRateEl!: HTMLSpanElement;
+  private ratingBadgeEl!: HTMLSpanElement;
+  private cadenceBtns: HTMLButtonElement[] = [];
+  private milestoneEl!: HTMLDivElement;
+
+  // Tax controls
+  private modeToggleBtn!: HTMLButtonElement;
+  private unifiedBox!: HTMLDivElement;
+  private sectorBox!: HTMLDivElement;
+  private unifiedSlider!: HTMLInputElement;
+  private unifiedRateEl!: HTMLSpanElement;
+  private unifiedTagEl!: HTMLSpanElement;
+  private sectorSliders!: Record<SectorKey, HTMLInputElement>;
+  private sectorRateEls!: Record<SectorKey, HTMLSpanElement>;
+  private sectorTagEls!: Record<SectorKey, HTMLSpanElement>;
+  private perSectorMode = false;
+
   private bodyEl!: HTMLDivElement;
   private loansEl!: HTMLDivElement;
   private amountSlider!: HTMLInputElement;
@@ -51,6 +94,7 @@ export class FinancePanel {
 
   private callbacks: FinancePanelCallbacks | null;
   private state: CityState | null = null;
+  private cadence: CadenceMode = 'day';
   private selectedTermDays: number = LOAN_TERMS[1].days;
   private busy = false;
   private visible = false;
@@ -72,15 +116,52 @@ export class FinancePanel {
     const panel = document.createElement('div');
     panel.className = 'finance-panel';
 
+    // Header with Credit Rating badge + Per Tick / Per Day toggle
+    const headerRow = document.createElement('div');
+    headerRow.className = 'finance-header-row';
+    const titleWrap = document.createElement('div');
+    titleWrap.className = 'finance-title-wrap';
     const header = document.createElement('h2');
     header.textContent = 'City Finances';
-    panel.appendChild(header);
+    this.ratingBadgeEl = document.createElement('span');
+    this.ratingBadgeEl.className = 'finance-rating-badge';
+    this.ratingBadgeEl.title = 'Municipal Credit Rating (affects loan interest rates)';
+    titleWrap.append(header, this.ratingBadgeEl);
 
+    const cadenceWrap = document.createElement('div');
+    cadenceWrap.className = 'finance-cadence-toggle';
+    for (const [mode, label] of [['tick', '/tick'], ['day', '/day']] as const) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'finance-cadence-btn';
+      btn.dataset.mode = mode;
+      btn.textContent = label;
+      btn.addEventListener('click', () => {
+        this.cadence = mode;
+        this.syncCadenceButtons();
+        if (this.state) this.update(this.state);
+      });
+      cadenceWrap.appendChild(btn);
+      this.cadenceBtns.push(btn);
+    }
+    headerRow.append(titleWrap, cadenceWrap);
+    panel.appendChild(headerRow);
+    this.syncCadenceButtons();
+
+    // Next milestone progress card
+    this.milestoneEl = document.createElement('div');
+    this.milestoneEl.className = 'finance-milestone';
+    panel.appendChild(this.milestoneEl);
+
+    // Tax policy section
+    panel.appendChild(this.renderTaxControls());
+
+    // Categorized cashflow ledger
     this.bodyEl = document.createElement('div');
     this.bodyEl.className = 'finance-body';
-    panel.appendChild(this.renderTaxControls());
     panel.appendChild(this.bodyEl);
 
+    // Loans
     panel.appendChild(this.renderLoanSection());
 
     const closeBtn = document.createElement('button');
@@ -92,28 +173,130 @@ export class FinancePanel {
     this.overlay.appendChild(panel);
   }
 
+  private syncCadenceButtons(): void {
+    for (const btn of this.cadenceBtns) {
+      btn.classList.toggle('active', btn.dataset.mode === this.cadence);
+    }
+  }
+
   private renderTaxControls(): HTMLDivElement {
     const controls = document.createElement('div');
     controls.className = 'finance-tax-controls';
-    controls.innerHTML = `
+
+    const topRow = document.createElement('div');
+    topRow.className = 'finance-tax-header';
+    const title = document.createElement('span');
+    title.className = 'finance-section-title';
+    title.textContent = 'Tax Policy';
+    this.modeToggleBtn = document.createElement('button');
+    this.modeToggleBtn.type = 'button';
+    this.modeToggleBtn.className = 'finance-mode-btn';
+    this.modeToggleBtn.textContent = 'Per Sector';
+    this.modeToggleBtn.addEventListener('click', () => {
+      this.perSectorMode = !this.perSectorMode;
+      this.syncTaxModeUI();
+    });
+    topRow.append(title, this.modeToggleBtn);
+    controls.appendChild(topRow);
+
+    // Unified single slider
+    this.unifiedBox = document.createElement('div');
+    this.unifiedBox.innerHTML = `
       <label class="finance-row" for="tax-slider">
-        <span>Tax rate</span>
-        <span class="finance-value" id="finance-tax-rate"></span>
+        <span>All Sectors</span>
+        <span class="finance-tax-val-wrap">
+          <span class="finance-tax-tag" id="finance-tax-tag"></span>
+          <span class="finance-value" id="finance-tax-rate"></span>
+        </span>
       </label>
       <input type="range" id="tax-slider" class="finance-loan-slider"
-        min="${MIN_TAX_RATE}" max="${MAX_TAX_RATE}" step="${TAX_RATE_STEP}"
-        aria-describedby="finance-tax-hint" />
-      <p id="finance-tax-hint">Taxes above ${TAX_COMFORT_RATE}% lower happiness.</p>
+        min="${MIN_TAX_RATE}" max="${MAX_TAX_RATE}" step="${TAX_RATE_STEP}" />
     `;
-    this.taxRateEl = controls.querySelector('#finance-tax-rate')!;
-    this.taxSlider = controls.querySelector('#tax-slider')!;
-    this.taxSlider.addEventListener('input', () => {
-      this.taxRateEl.textContent = `${this.taxSlider.value}%`;
+    this.unifiedRateEl = this.unifiedBox.querySelector('#finance-tax-rate')!;
+    this.unifiedTagEl = this.unifiedBox.querySelector('#finance-tax-tag')!;
+    this.unifiedSlider = this.unifiedBox.querySelector('#tax-slider')!;
+    this.unifiedSlider.addEventListener('input', () => {
+      const val = this.unifiedSlider.valueAsNumber;
+      this.unifiedRateEl.textContent = `${val}%`;
+      this.applyTag(this.unifiedTagEl, val);
     });
-    this.taxSlider.addEventListener('change', () => {
-      this.callbacks?.onTaxRateChange(this.taxSlider.valueAsNumber);
+    this.unifiedSlider.addEventListener('change', () => {
+      this.callbacks?.onTaxRateChange(this.unifiedSlider.valueAsNumber);
     });
+    controls.appendChild(this.unifiedBox);
+
+    // Per-sector sliders (R / C / I)
+    this.sectorBox = document.createElement('div');
+    this.sectorBox.className = 'finance-sector-grid';
+    this.sectorSliders = {} as Record<SectorKey, HTMLInputElement>;
+    this.sectorRateEls = {} as Record<SectorKey, HTMLSpanElement>;
+    this.sectorTagEls = {} as Record<SectorKey, HTMLSpanElement>;
+
+    const sectors: Array<{ key: SectorKey; label: string; color: string }> = [
+      { key: 'residential', label: 'Residential', color: '#66BB6A' },
+      { key: 'commercial', label: 'Commercial', color: '#42A5F5' },
+      { key: 'industrial', label: 'Industrial', color: '#FFA726' },
+    ];
+    for (const s of sectors) {
+      const wrap = document.createElement('div');
+      wrap.className = 'finance-sector-row';
+      wrap.innerHTML = `
+        <label class="finance-row" for="tax-slider-${s.key}">
+          <span class="finance-sector-label">
+            <span class="finance-sector-dot" style="background:${s.color}"></span>
+            ${s.label}
+          </span>
+          <span class="finance-tax-val-wrap">
+            <span class="finance-tax-tag" id="finance-tax-tag-${s.key}"></span>
+            <span class="finance-value" id="finance-tax-rate-${s.key}"></span>
+          </span>
+        </label>
+        <input type="range" id="tax-slider-${s.key}" class="finance-loan-slider"
+          style="accent-color:${s.color}"
+          min="${MIN_TAX_RATE}" max="${MAX_TAX_RATE}" step="${TAX_RATE_STEP}" />
+      `;
+      const slider = wrap.querySelector<HTMLInputElement>(`#tax-slider-${s.key}`)!;
+      const rateEl = wrap.querySelector<HTMLSpanElement>(`#finance-tax-rate-${s.key}`)!;
+      const tagEl = wrap.querySelector<HTMLSpanElement>(`#finance-tax-tag-${s.key}`)!;
+      slider.addEventListener('input', () => {
+        const val = slider.valueAsNumber;
+        rateEl.textContent = `${val}%`;
+        this.applyTag(tagEl, val);
+      });
+      slider.addEventListener('change', () => {
+        const val = slider.valueAsNumber;
+        if (this.callbacks?.onTaxRatesChange) {
+          this.callbacks.onTaxRatesChange({ [s.key]: val });
+        } else {
+          this.callbacks?.onTaxRateChange(val);
+        }
+      });
+      this.sectorSliders[s.key] = slider;
+      this.sectorRateEls[s.key] = rateEl;
+      this.sectorTagEls[s.key] = tagEl;
+      this.sectorBox.appendChild(wrap);
+    }
+    controls.appendChild(this.sectorBox);
+
+    const hint = document.createElement('p');
+    hint.id = 'finance-tax-hint';
+    hint.textContent = `Under ${TAX_COMFORT_RATE}% boosts demand; above ${TAX_LAFFER_THRESHOLD}% triggers tax evasion.`;
+    controls.appendChild(hint);
+
+    this.syncTaxModeUI();
     return controls;
+  }
+
+  private applyTag(el: HTMLSpanElement, rate: number): void {
+    const info = describeTaxPolicy(rate);
+    el.textContent = info.text;
+    el.className = `finance-tax-tag ${info.cls}`;
+  }
+
+  private syncTaxModeUI(): void {
+    this.unifiedBox.style.display = this.perSectorMode ? 'none' : 'block';
+    this.sectorBox.style.display = this.perSectorMode ? 'flex' : 'none';
+    this.modeToggleBtn.textContent = this.perSectorMode ? 'Unified' : 'Per Sector';
   }
 
   private renderLoanSection(): HTMLDivElement {
@@ -121,15 +304,13 @@ export class FinancePanel {
     section.className = 'finance-loans';
 
     const title = document.createElement('h3');
-    title.textContent = 'Loans';
+    title.textContent = 'Municipal Bonds & Loans';
     section.appendChild(title);
 
-    // Active loans (re-rendered on every update)
     this.loansEl = document.createElement('div');
     this.loansEl.className = 'finance-loan-list';
     section.appendChild(this.loansEl);
 
-    // New loan form (built once so the slider keeps its position between ticks)
     const form = document.createElement('div');
     form.className = 'finance-loan-form';
 
@@ -168,10 +349,10 @@ export class FinancePanel {
       btn.dataset.days = String(term.days);
       const days = document.createElement('span');
       days.className = 'finance-term-days';
-      days.textContent = `${term.days} days`;
+      days.textContent = `${term.days}d`;
       const rate = document.createElement('span');
       rate.className = 'finance-term-rate';
-      rate.textContent = `${Math.round(term.interestRate * 100)}% interest`;
+      rate.textContent = `${Math.round(term.interestRate * 100)}%`;
       btn.append(days, rate);
       btn.addEventListener('click', () => {
         this.selectedTermDays = term.days;
@@ -201,62 +382,145 @@ export class FinancePanel {
 
   update(state: CityState): void {
     this.state = state;
-    const taxes = calculateTaxBreakdown(state);
-    const revenue = taxes.total;
-    const labor = calculateLaborStats(state);
-    const maintenance = calculateMaintenance(state);
-    const loanPayments = calculateLoanPayments(state.resources);
-    const net = revenue - maintenance - loanPayments;
     const res = state.resources;
+    const taxes = calculateTaxBreakdown(state);
+    const expenses = calculateExpenseBreakdown(state);
+    const labor = calculateLaborStats(state);
+    const loanPayments = calculateLoanPayments(res);
+    const credit = calculateCreditRating(state);
+    const rates = getEffectiveTaxRates(res);
     const debt = getOutstandingDebt(res);
-    if (!this.taxSlider.matches(':active')) {
-      this.taxSlider.value = String(res.taxRate);
-      this.taxRateEl.textContent = `${res.taxRate}%`;
+
+    // Auto-switch to Per Sector if the city already has diverging rates
+    if (rates.residential !== rates.commercial || rates.commercial !== rates.industrial) {
+      if (!this.perSectorMode) {
+        this.perSectorMode = true;
+        this.syncTaxModeUI();
+      }
     }
 
-    const rows: [string, string, string?][] = [
-      ['Population', res.population.toLocaleString()],
-      ['Happiness', `${Math.round(res.happiness)}%`],
-      ['', ''],
-      ['Jobs / Workers', `${Math.round(labor.jobs).toLocaleString()} / ${Math.round(labor.workers).toLocaleString()}`,
-        labor.employmentRate < 0.87 ? 'negative' : undefined],
-      ['', ''],
-      ['Resident Taxes', signedMoney(Math.round(taxes.residents)), 'positive'],
-      ['Business Taxes', signedMoney(Math.round(taxes.businesses)), 'positive'],
-      ['Tax Revenue', signedMoney(revenue), 'positive'],
-      ['Maintenance', `-${money(maintenance)}`, 'negative'],
-    ];
-    if (loanPayments > 0) {
-      rows.push(['Loan Repayments', `-${money(loanPayments)}`, 'negative']);
+    // Credit rating badge
+    this.ratingBadgeEl.textContent = credit.rating;
+    this.ratingBadgeEl.className = `finance-rating-badge rating-${credit.rating.toLowerCase()}`;
+
+    // Next milestone progress card
+    this.renderMilestoneCard(res.population, res.claimedMilestones ?? []);
+
+    // Sync sliders (unless actively dragged)
+    if (!this.unifiedSlider.matches(':active')) {
+      this.unifiedSlider.value = String(res.taxRate);
+      this.unifiedRateEl.textContent = `${res.taxRate}%`;
+      this.applyTag(this.unifiedTagEl, res.taxRate);
     }
-    rows.push(
-      ['Net Income / tick', signedMoney(net), net >= 0 ? 'positive' : 'negative'],
-      ['', ''],
-      ['Treasury', money(res.money), res.money < 0 ? 'negative' : undefined],
-    );
-    if (debt > 0) {
-      rows.push(['Owed on Loans', money(debt), 'negative']);
+    for (const key of ['residential', 'commercial', 'industrial'] as const) {
+      const slider = this.sectorSliders[key];
+      if (!slider.matches(':active')) {
+        slider.value = String(rates[key]);
+        this.sectorRateEls[key].textContent = `${rates[key]}%`;
+        this.applyTag(this.sectorTagEls[key], rates[key]);
+      }
     }
-    rows.push(['Buildings', String(state.buildings.length)]);
+
+    // Scale revenue/expense figures by cadence (per-tick vs per-day)
+    const mult = this.cadence === 'day' ? TICKS_PER_GAME_DAY : 1;
+    const useDecimals = this.cadence === 'tick';
+    const unitLabel = this.cadence === 'day' ? '/day' : '/tick';
+    const totalOutflow = expenses.total + loanPayments;
+    const net = taxes.total - totalOutflow;
 
     this.bodyEl.innerHTML = '';
-    for (const [label, value, colorClass] of rows) {
-      if (!label && !value) {
-        const sep = document.createElement('div');
-        sep.className = 'finance-separator';
-        this.bodyEl.appendChild(sep);
-        continue;
-      }
-      this.bodyEl.appendChild(this.createRow(label, value, colorClass));
+
+    // Revenue section
+    this.bodyEl.appendChild(this.createSectionHeader(`Revenue (${unitLabel})`));
+    this.bodyEl.appendChild(this.createRow('Residential Tax', signedMoney(taxes.residents * mult, useDecimals), 'positive'));
+    this.bodyEl.appendChild(this.createRow('Commercial Tax', signedMoney(taxes.commercial * mult, useDecimals), 'positive'));
+    this.bodyEl.appendChild(this.createRow('Industrial Tax', signedMoney(taxes.industrial * mult, useDecimals), 'positive'));
+    if (taxes.subsidy > 0) {
+      this.bodyEl.appendChild(this.createRow('Small-Town Grant', signedMoney(taxes.subsidy * mult, useDecimals), 'positive'));
+    }
+    this.bodyEl.appendChild(this.createRow('Total Revenue', signedMoney(taxes.total * mult, useDecimals), 'positive', true));
+
+    // Expenses section
+    this.bodyEl.appendChild(this.createSectionHeader(`Expenses (${unitLabel})`));
+    if (expenses.utilities > 0) {
+      this.bodyEl.appendChild(this.createRow('Utilities (Power/Water/Sewage)', `-${money(expenses.utilities * mult, useDecimals)}`, 'negative'));
+    }
+    if (expenses.safety > 0) {
+      this.bodyEl.appendChild(this.createRow('Safety (Police/Fire)', `-${money(expenses.safety * mult, useDecimals)}`, 'negative'));
+    }
+    if (expenses.civic > 0) {
+      this.bodyEl.appendChild(this.createRow('Civic, Health & Education', `-${money(expenses.civic * mult, useDecimals)}`, 'negative'));
+    }
+    if (expenses.roads > 0) {
+      this.bodyEl.appendChild(this.createRow('Roads & Transit', `-${money(expenses.roads * mult, useDecimals)}`, 'negative'));
+    }
+    if (expenses.zones > 0) {
+      this.bodyEl.appendChild(this.createRow('District Servicing', `-${money(expenses.zones * mult, useDecimals)}`, 'negative'));
+    }
+    if (loanPayments > 0) {
+      this.bodyEl.appendChild(this.createRow('Loan Repayments', `-${money(loanPayments * mult, useDecimals)}`, 'negative'));
+    }
+    this.bodyEl.appendChild(this.createRow('Total Expenses', `-${money(totalOutflow * mult, useDecimals)}`, 'negative', true));
+
+    // Summary section
+    const sep = document.createElement('div');
+    sep.className = 'finance-separator';
+    this.bodyEl.appendChild(sep);
+
+    this.bodyEl.appendChild(
+      this.createRow(`Net Cashflow ${unitLabel}`, signedMoney(net * mult, useDecimals), net >= 0 ? 'positive' : 'negative', true),
+    );
+    this.bodyEl.appendChild(this.createRow('Treasury', money(res.money), res.money < 0 ? 'negative' : undefined, true));
+    this.bodyEl.appendChild(
+      this.createRow(
+        'Jobs / Workers',
+        `${Math.round(labor.jobs).toLocaleString()} / ${Math.round(labor.workers).toLocaleString()}`,
+        labor.employmentRate < 0.87 ? 'negative' : undefined,
+      ),
+    );
+    if (debt > 0) {
+      this.bodyEl.appendChild(this.createRow('Owed on Loans', money(debt), 'negative'));
     }
 
     this.renderLoans(res.loans ?? [], res.money);
     this.refreshQuote();
   }
 
-  private createRow(label: string, value: string, colorClass?: string): HTMLDivElement {
+  private renderMilestoneCard(population: number, claimed: string[]): void {
+    const evalResult = evaluateMilestones(population, claimed);
+    const next = evalResult.nextMilestone;
+    if (!next) {
+      this.milestoneEl.innerHTML = `
+        <div class="finance-milestone-row">
+          <span class="finance-milestone-title">All municipal charters earned</span>
+          <span class="finance-milestone-grant">Metropolis</span>
+        </div>
+      `;
+      return;
+    }
+
+    const pct = Math.max(0, Math.min(100, (population / next.population) * 100));
+    this.milestoneEl.innerHTML = `
+      <div class="finance-milestone-row">
+        <span class="finance-milestone-title">Next: ${next.label} (${Math.floor(population).toLocaleString()} / ${next.population.toLocaleString()} pop)</span>
+        <span class="finance-milestone-grant">+${money(next.grant)}</span>
+      </div>
+      <div class="finance-milestone-track">
+        <div class="finance-milestone-fill" style="width:${pct.toFixed(1)}%"></div>
+      </div>
+    `;
+  }
+
+  private createSectionHeader(text: string): HTMLDivElement {
+    const el = document.createElement('div');
+    el.className = 'finance-section-heading';
+    el.textContent = text;
+    return el;
+  }
+
+  private createRow(label: string, value: string, colorClass?: string, bold = false): HTMLDivElement {
     const row = document.createElement('div');
-    row.className = 'finance-row';
+    row.className = bold ? 'finance-row finance-row-total' : 'finance-row';
     const labelEl = document.createElement('span');
     labelEl.className = 'finance-label';
     labelEl.textContent = label;
@@ -316,7 +580,7 @@ export class FinancePanel {
     }
   }
 
-  /** Recompute slider bounds, the quote and whether the loan can be taken. */
+  /** Recompute slider bounds, credit-adjusted term rates, quote, and availability. */
   private refreshQuote(): void {
     if (!this.state) return;
     const available = getAvailableCredit(this.state);
@@ -328,20 +592,26 @@ export class FinancePanel {
     }
     const amount = Number(this.amountSlider.value);
     this.amountLabel.textContent = money(amount);
-    this.creditEl.textContent = `Credit available: ${money(available)} (grows with population)`;
+    this.creditEl.textContent = `Credit available: ${money(available)} (scales with pop & tax base)`;
 
     for (const btn of this.termBtns) {
-      btn.classList.toggle('active', Number(btn.dataset.days) === this.selectedTermDays);
+      const days = Number(btn.dataset.days);
+      btn.classList.toggle('active', days === this.selectedTermDays);
+      const q = quoteLoan(amount, days, this.state);
+      const rateEl = btn.querySelector('.finance-term-rate');
+      if (q && rateEl) {
+        rateEl.textContent = `${(q.interestRate * 100).toFixed(1).replace(/\.0$/, '')}%`;
+      }
     }
 
-    const quote = quoteLoan(amount, this.selectedTermDays);
+    const quote = quoteLoan(amount, this.selectedTermDays, this.state);
     const check = validateLoanRequest(this.state, amount, this.selectedTermDays);
     this.amountSlider.disabled = available < LOAN_MIN_AMOUNT || loanCount >= MAX_ACTIVE_LOANS;
 
     this.quoteEl.innerHTML = '';
     if (quote) {
       this.quoteEl.append(
-        this.createRow('Interest', money(quote.interest)),
+        this.createRow('Interest', `${money(quote.interest)} (${(quote.interestRate * 100).toFixed(1).replace(/\.0$/, '')}%)`),
         this.createRow('Total to repay', money(quote.totalDue)),
         this.createRow('Repayment', `${money(quote.paymentPerDay)}/day (${quote.paymentPerTick.toFixed(1)}/tick)`),
       );

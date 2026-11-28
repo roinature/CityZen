@@ -444,7 +444,7 @@ export class LocalCityHost {
         return res;
       }
       case 'tax': {
-        const res = room.setTaxRate(args.taxRate);
+        const res = args.taxRates ? room.setTaxRates(args.taxRates) : room.setTaxRate(args.taxRate);
         if (res.success) this.markDirty();
         return res;
       }

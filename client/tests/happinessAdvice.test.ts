@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  BuildingType, MaslowNeed, ZONE_LEVEL_MIN_HAPPINESS,
+  BuildingType, DEFAULT_TAX_RATE, MaslowNeed, ZONE_LEVEL_MIN_HAPPINESS,
   type CityState, type GridTile,
 } from '@cityzen/shared';
 import {
@@ -42,7 +42,7 @@ function makeCity(overrides: {
       money: overrides.money ?? 100_000,
       population,
       happiness: overrides.happiness,
-      taxRate: overrides.taxRate ?? 10,
+      taxRate: overrides.taxRate ?? DEFAULT_TAX_RATE,
       demand: { residential: 0.5, commercial: 0.5, industrial: 0.5 },
       populationSummary: overrides.maslow ? {
         totalPopulation: population,

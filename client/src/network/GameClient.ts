@@ -307,6 +307,10 @@ export class GameClient implements CityConnection {
     await this.post('/api/city/tax-rate', { taxRate, playerId });
   }
 
+  async setTaxRates(taxRates: Partial<{ residential: number; commercial: number; industrial: number }>, playerId?: string): Promise<void> {
+    await this.post('/api/city/tax-rate', { taxRates, playerId });
+  }
+
   async takeLoan(amount: number, termDays: number, playerId?: string): Promise<{ success: boolean; error?: string }> {
     return this.post('/api/city/loan/take', { amount, termDays, playerId });
   }

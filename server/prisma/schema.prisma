@@ -45,10 +45,10 @@ model City {
   ownerId   String
 
   // Resources (flattened from ResourceState)
-  money      Float    @default(5000)
+  money      Float    @default(15000)
   population Float    @default(0)
   happiness  Float    @default(50)
-  taxRate    Int      @default(10)
+  taxRate    Int      @default(9)
 
   // Demand (flattened from DemandState)
   demandResidential Float @default(0.5)

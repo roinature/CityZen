@@ -1,5 +1,5 @@
 import type {
-  BuildingType, CityListItem, PlaceBuildingsPayload, Position, RoadOrientation, TownSettings, UtilityLayer, ZoneDensity,
+  BuildingType, CityListItem, PlaceBuildingsPayload, Position, RoadOrientation, TaxRates, TownSettings, UtilityLayer, ZoneDensity,
 } from '@cityzen/shared';
 
 /**
@@ -20,6 +20,7 @@ export interface CityConnection {
   restart(playerId?: string): Promise<void>;
   generateTown(settings: TownSettings, playerId: string): Promise<boolean>;
   setTaxRate(taxRate: number, playerId?: string): Promise<void>;
+  setTaxRates(taxRates: Partial<TaxRates>, playerId?: string): Promise<void>;
   takeLoan(amount: number, termDays: number, playerId?: string): Promise<{ success: boolean; error?: string }>;
   repayLoan(loanId: string, playerId?: string): Promise<{ success: boolean; error?: string }>;
   setUnlimitedMoney(enabled: boolean, playerId?: string): Promise<void>;

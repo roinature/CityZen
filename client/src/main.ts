@@ -334,6 +334,7 @@ function setToolMode(mode: ToolMode): void {
 let isNight = false;
 const financePanel = new FinancePanel(uiRoot, {
   onTaxRateChange: (rate) => gameClient.setTaxRate(rate, playerId),
+  onTaxRatesChange: (rates) => gameClient.setTaxRates(rates, playerId),
   onTakeLoan: (amount, termDays) => gameClient.takeLoan(amount, termDays, playerId),
   onRepayLoan: (loanId) => gameClient.repayLoan(loanId, playerId),
 });

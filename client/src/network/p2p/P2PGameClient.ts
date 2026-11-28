@@ -887,6 +887,16 @@ export class P2PGameClient implements CityConnection {
     }
   }
 
+  async setTaxRates(
+    taxRates: Partial<{ residential: number; commercial: number; industrial: number }>,
+    playerId = this.playerId,
+  ): Promise<void> {
+    const result = await this.sendCityCommand('tax', { taxRates }, playerId);
+    if (!result.success && result.error) {
+      this.callbacks.onError({ message: result.error, code: result.code || 'TAX_FAILED' });
+    }
+  }
+
   async takeLoan(amount: number, termDays: number, playerId = this.playerId): Promise<{ success: boolean; error?: string }> {
     return this.sendCityCommand('loanTake', { amount, termDays }, playerId);
   }
