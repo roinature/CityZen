@@ -23,6 +23,8 @@ export interface CityConnection {
   repayLoan(loanId: string, playerId?: string): Promise<{ success: boolean; error?: string }>;
   setUnlimitedMoney(enabled: boolean, playerId?: string): Promise<void>;
   setGameSpeed(speed: number, playerId?: string): Promise<void>;
+  reportEmergencyResponding(emergencyId: string, playerId?: string): Promise<void>;
+  reportEmergencyResolved(emergencyId: string, playerId?: string): Promise<void>;
   leave(playerId?: string): Promise<void>;
   disconnect(): void;
   /** Optional local backup export (P2P mode). */

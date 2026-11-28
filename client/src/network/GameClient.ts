@@ -13,6 +13,9 @@ import {
   type PopulationUpdatePayload,
   type MigrationEventPayload,
   type WorldTickPayload,
+  type EmergencyStartedPayload,
+  type EmergencyRespondingPayload,
+  type EmergencyOutcomePayload,
   type Position,
   type BuildingType,
   type ZoneDensity,
@@ -42,6 +45,9 @@ export interface GameCallbacks {
   onPopulationUpdate?: (summary: PopulationSummary) => void;
   onMigrationEvent?: (payload: MigrationEventPayload) => void;
   onWorldTick?: (payload: WorldTickPayload) => void;
+  onEmergencyStarted?: (payload: EmergencyStartedPayload) => void;
+  onEmergencyResponding?: (payload: EmergencyRespondingPayload) => void;
+  onEmergencyOutcome?: (payload: EmergencyOutcomePayload) => void;
   /** Fired when viewing an offline peer's cached city (read-only) or returning to live editing. */
   onReadOnlyChange?: (readOnly: boolean, reason?: string) => void;
   /** Fired when connected WebRTC peer count changes (P2P mode). */
@@ -156,6 +162,15 @@ export class GameClient implements CityConnection {
         })
         .on('broadcast', { event: S2C.MIGRATION_EVENT }, (msg) => {
           this.callbacks.onMigrationEvent?.(msg.payload as MigrationEventPayload);
+        })
+        .on('broadcast', { event: S2C.EMERGENCY_STARTED }, (msg) => {
+          this.callbacks.onEmergencyStarted?.(msg.payload as EmergencyStartedPayload);
+        })
+        .on('broadcast', { event: S2C.EMERGENCY_RESPONDING }, (msg) => {
+          this.callbacks.onEmergencyResponding?.(msg.payload as EmergencyRespondingPayload);
+        })
+        .on('broadcast', { event: S2C.EMERGENCY_OUTCOME }, (msg) => {
+          this.callbacks.onEmergencyOutcome?.(msg.payload as EmergencyOutcomePayload);
         })
         .subscribe((status) => {
           if (status === 'SUBSCRIBED') resolve();
@@ -296,6 +311,14 @@ export class GameClient implements CityConnection {
 
   async setGameSpeed(speed: number, playerId?: string): Promise<void> {
     await this.post('/api/city/game-speed', { speed, playerId });
+  }
+
+  async reportEmergencyResponding(emergencyId: string, playerId?: string): Promise<void> {
+    await this.post('/api/city/emergency/respond', { emergencyId, playerId });
+  }
+
+  async reportEmergencyResolved(emergencyId: string, playerId?: string): Promise<void> {
+    await this.post('/api/city/emergency/resolve', { emergencyId, playerId });
   }
 
   async leave(playerId?: string): Promise<void> {

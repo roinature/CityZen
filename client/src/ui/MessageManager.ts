@@ -24,7 +24,10 @@ export class MessageManager {
 
     // Create UI components
     this.banner = new MessageBanner(parent);
-    this.notifications = new MessageNotifications(parent);
+    this.notifications = new MessageNotifications(parent, (msg) => {
+      this.markAsRead(msg.id);
+      this.callbacks.onMessageClick?.(msg);
+    });
   }
 
   // Add a new message to the system

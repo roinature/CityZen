@@ -5,8 +5,10 @@ export class MessageNotifications {
   private notifications: Map<string, HTMLDivElement> = new Map();
   private maxNotifications: number = 5;
   private notificationLifetime: number = 10000; // 10 seconds
+  private onClick?: (message: GameMessage) => void;
 
-  constructor(parent: HTMLElement) {
+  constructor(parent: HTMLElement, onClick?: (message: GameMessage) => void) {
+    this.onClick = onClick;
     this.container = document.createElement('div');
     this.container.className = 'message-notifications';
     parent.appendChild(this.container);
@@ -55,8 +57,9 @@ export class MessageNotifications {
       this.removeNotification(message.id);
     });
 
-    // Click to mark as read and remove
+    // Click to focus/handle and remove
     notification.addEventListener('click', () => {
+      this.onClick?.(message);
       this.removeNotification(message.id);
     });
 

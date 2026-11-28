@@ -1,5 +1,12 @@
 import * as THREE from 'three';
-import { type CityState, type PlacedBuilding, CELL_SIZE, getEffectiveSize, isRoad } from '@cityzen/shared';
+import {
+  type CityEmergency,
+  type CityState,
+  type PlacedBuilding,
+  CELL_SIZE,
+  getEffectiveSize,
+  isRoad,
+} from '@cityzen/shared';
 import {
   DX,
   DZ,
@@ -16,6 +23,7 @@ import {
 } from './traffic/RoadNetwork.js';
 import { TrafficLights, signalFor } from './traffic/TrafficLights.js';
 import {
+  EMERGENCY_SERVICE_KIND,
   SERVICE_FLEETS,
   SERVICE_PROFILES,
   createServiceVehicleMesh,
@@ -89,6 +97,8 @@ interface ServiceTrip {
   /** Seconds left parked at the current stop (≤ 0 when driving). */
   dwell: number;
   flashers: THREE.MeshStandardMaterial[];
+  /** Active city emergency this vehicle is responding to, if any. */
+  emergencyId?: string;
 }
 
 /** A service building and the road cell its vehicles pull out onto. */
@@ -198,6 +208,13 @@ export class CarManager {
   /** Stand-in for the player's car: an obstacle that is always "waiting legitimately". */
   private player: Car | null = null;
   private depots = new Map<string, Depot>();
+  private reportedResponding = new Set<string>();
+  private reportedResolved = new Set<string>();
+
+  /** Fired once when a service vehicle arrives at an active city emergency. */
+  onEmergencyArrived?: (emergencyId: string) => void;
+  /** Fired once when a service vehicle finishes working on an emergency and resolves it. */
+  onEmergencyResolved?: (emergencyId: string) => void;
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -206,7 +223,14 @@ export class CarManager {
 
   setEnabled(enabled: boolean): void {
     this.enabled = enabled;
-    if (!enabled) this.clear();
+    if (!enabled) {
+      for (let i = this.cars.length - 1; i >= 0; i--) {
+        if (!this.cars[i].service?.emergencyId) {
+          this.removeMesh(this.cars[i]);
+          this.cars.splice(i, 1);
+        }
+      }
+    }
   }
 
   /** Make traffic queue behind (and not spawn on top of) the player's car. Null removes it. */
@@ -237,6 +261,8 @@ export class CarManager {
     for (const car of this.cars) this.removeMesh(car);
     this.cars = [];
     this.depots.clear();
+    this.reportedResponding.clear();
+    this.reportedResolved.clear();
     this.network = null;
     this.roadSig = '';
     this.lastBuildings = null;
@@ -245,7 +271,9 @@ export class CarManager {
   }
 
   update(deltaTime: number, state: CityState | null): void {
-    if (!state || !this.enabled) return;
+    // Even if ambient traffic is toggled off, emergency vehicles must still respond when incidents happen!
+    const hasEmergencies = (state?.emergencies?.length ?? 0) > 0;
+    if (!state || (!this.enabled && !hasEmergencies && !this.cars.some(c => c.service?.emergencyId))) return;
     const dt = Math.min(deltaTime, 0.05);
     this.time += dt;
     this.frame++;
@@ -262,8 +290,9 @@ export class CarManager {
       for (const [car, w] of j.waiting) if (w.frame < this.frame - 2) j.waiting.delete(car);
     }
 
-    this.adjustCarCount(net, dt);
-    this.dispatchServices(net);
+    if (this.enabled) this.adjustCarCount(net, dt);
+    this.dispatchEmergencies(net, state);
+    if (this.enabled) this.dispatchServices(net);
     this.buildHash();
 
     // Who is in (or cleared into) which junction.
@@ -307,11 +336,11 @@ export class CarManager {
       }
     }
 
-    // Light bars: sirens flash on the way out, work beacons whenever out.
+    // Light bars: sirens flash on the way out (or when rushing to an emergency), work beacons whenever out.
     for (const car of this.cars) {
       const sv = car.service;
       if (!sv || !sv.flashers.length) continue;
-      const emergency = SERVICE_PROFILES[sv.kind].emergency;
+      const emergency = SERVICE_PROFILES[sv.kind].emergency || Boolean(sv.emergencyId);
       const on = emergency ? !sv.returning : true;
       const tick = Math.floor(this.time * (emergency ? 7 : 2.5) + car.id);
       sv.flashers.forEach((m, i) => {
@@ -549,6 +578,212 @@ export class CarManager {
       if (Math.abs(t.x - from.x) + Math.abs(t.z - from.z) >= MIN_TRIP) return t;
     }
     return fallback;
+  }
+
+  /** Urgent dispatch to active city emergencies (fire, robbery, medical, sewage overflow). */
+  private dispatchEmergencies(net: RoadNetwork, state: CityState): void {
+    const emergencies = state.emergencies ?? [];
+    const activeIds = new Set(emergencies.map(e => e.id));
+
+    // Clean up tracking sets and release responders whose incident already ended
+    for (const id of this.reportedResponding) if (!activeIds.has(id)) this.reportedResponding.delete(id);
+    for (const id of this.reportedResolved) if (!activeIds.has(id)) this.reportedResolved.delete(id);
+
+    const assigned = new Set<string>();
+    const outByDepot = new Map<string, number>();
+
+    for (const car of this.cars) {
+      const sv = car.service;
+      if (!sv) continue;
+      outByDepot.set(sv.home, (outByDepot.get(sv.home) ?? 0) + 1);
+      if (sv.emergencyId) {
+        if (!activeIds.has(sv.emergencyId)) {
+          // Incident already concluded (e.g. timed out or bulldozed): head home
+          sv.emergencyId = undefined;
+          sv.stopsLeft = 0;
+          if (sv.dwell > 0) sv.dwell = 0.01;
+        } else {
+          assigned.add(sv.emergencyId);
+        }
+      }
+    }
+
+    if (!emergencies.length) return;
+
+    for (const em of emergencies) {
+      if (assigned.has(em.id)) continue;
+      const targetBuilding = state.buildings.find(b => b.id === em.buildingId);
+      if (!targetBuilding) continue;
+      const access = this.findAccess(net, targetBuilding);
+      if (!access) continue;
+
+      const neededKind = EMERGENCY_SERVICE_KIND[em.kind];
+
+      // 1. Try spawning immediately from the nearest depot of that kind with spare fleet
+      const candidateDepots = Array.from(this.depots.values())
+        .filter(d => d.kind === neededKind && (outByDepot.get(d.id) ?? 0) < d.fleet)
+        .sort((a, b) =>
+          (Math.abs(a.tile.x - access.tile.x) + Math.abs(a.tile.z - access.tile.z)) -
+          (Math.abs(b.tile.x - access.tile.x) + Math.abs(b.tile.z - access.tile.z))
+        );
+
+      let dispatched = false;
+      for (const depot of candidateDepots) {
+        const car = this.spawnEmergencyVehicle(net, depot, access.tile, em);
+        if (car) {
+          this.cars.push(car);
+          outByDepot.set(depot.id, (outByDepot.get(depot.id) ?? 0) + 1);
+          assigned.add(em.id);
+          dispatched = true;
+          break;
+        }
+      }
+      if (dispatched) continue;
+
+      // 2. Otherwise divert an already-out non-emergency vehicle of the right kind!
+      const freeCars = this.cars
+        .filter(c => c.leaving < 0 && c.service && c.service.kind === neededKind && !c.service.emergencyId)
+        .sort((a, b) =>
+          (Math.abs(a.x - access.tile.x) + Math.abs(a.z - access.tile.z)) -
+          (Math.abs(b.x - access.tile.x) + Math.abs(b.z - access.tile.z))
+        );
+
+      for (const car of freeCars) {
+        if (this.divertVehicleToEmergency(net, car, access.tile, em)) {
+          assigned.add(em.id);
+          break;
+        }
+      }
+    }
+  }
+
+  private spawnEmergencyVehicle(
+    net: RoadNetwork,
+    depot: Depot,
+    goalTile: Tile,
+    em: CityEmergency,
+  ): Car | null {
+    const profile = SERVICE_PROFILES[depot.kind];
+    const emergencyBoost = Math.max(profile.speed, 1.3);
+
+    let steps: { tile: Tile; dir: number }[];
+    let path: Path;
+
+    if (depot.tile === goalTile) {
+      const dir = (depot.side + 1) & 3;
+      steps = [{ tile: goalTile, dir }];
+      path = net.buildPath({ steps, entering: false, exitDir: -1 }, 0);
+      if (path.xs.length < 2) {
+        appendPoints(path, [[goalTile.x + 0.5, goalTile.z + 0.5]], DRIVEWAY_SPEED);
+      }
+    } else {
+      const trip = this.planTrip(net, depot.tile, [0, 1, 2, 3], goalTile);
+      if (!trip) return null;
+      steps = trip.steps;
+      path = trip.path;
+    }
+
+    if (this.isOccupied(path.xs[0], path.zs[0], SPAWN_CLEARANCE * 0.65)) return null;
+    for (let k = 0; k < path.speed.length; k++) path.speed[k] *= emergencyBoost;
+    prependPoints(path, this.driveway(depot, false, steps[0].dir), DRIVEWAY_SPEED * 1.25);
+
+    const { group, flashers } = createServiceVehicleMesh(depot.kind);
+    this.scene.add(group);
+    const car: Car = {
+      id: this.nextId++,
+      mesh: group,
+      tiles: steps.map(st => st.tile),
+      dirs: steps.map(st => st.dir),
+      finalDir: steps[steps.length - 1].dir,
+      exiting: false,
+      entering: true,
+      path,
+      s: 0,
+      v: 0,
+      seg: 0,
+      x: path.xs[0],
+      z: path.zs[0],
+      yaw: 0,
+      ev: 0,
+      permitted: false,
+      movement: null,
+      leader: null,
+      leaderGap: Infinity,
+      controlGap: Infinity,
+      ignoreLeader: false,
+      waitMemo: 0,
+      stuck: 0,
+      stuckTotal: 0,
+      ghost: 0,
+      age: 0,
+      leaving: -1,
+      service: {
+        kind: depot.kind,
+        home: depot.id,
+        stopsLeft: 1,
+        returning: false,
+        dwell: 0,
+        flashers,
+        emergencyId: em.id,
+      },
+    };
+    this.place(car);
+    return car;
+  }
+
+  private divertVehicleToEmergency(
+    net: RoadNetwork,
+    car: Car,
+    goalTile: Tile,
+    em: CityEmergency,
+  ): boolean {
+    const sv = car.service!;
+    const stepIdx = this.currentStep(car);
+    const curTile = car.tiles[stepIdx] ?? net.tileAt(Math.floor(car.x), Math.floor(car.z));
+    if (!curTile) return false;
+    const curDir = car.dirs[stepIdx] ?? 0;
+
+    if (curTile === goalTile) {
+      sv.emergencyId = em.id;
+      sv.returning = false;
+      sv.stopsLeft = 1;
+      sv.dwell = rand(SERVICE_PROFILES[sv.kind].dwell);
+      car.v = 0;
+      this.notifyEmergencyArrived(em.id);
+      return true;
+    }
+
+    const trip = this.planTrip(net, curTile, [curDir], goalTile);
+    if (!trip) return false;
+
+    const emergencyBoost = Math.max(SERVICE_PROFILES[sv.kind].speed, 1.3);
+    for (let k = 0; k < trip.path.speed.length; k++) trip.path.speed[k] *= emergencyBoost;
+    if (Math.hypot(trip.path.xs[0] - car.x, trip.path.zs[0] - car.z) > 1e-3) {
+      prependPoints(trip.path, [[car.x, car.z]], Math.min(TURN_SPEED, trip.path.speed[0]));
+    }
+
+    // Remove from any junction wait list before switching routes
+    const prevEv = car.path.events[car.ev];
+    prevEv?.junction?.waiting.delete(car);
+
+    this.setPath(car, trip.path, trip.steps.map(st => st.tile), trip.steps.map(st => st.dir));
+    sv.emergencyId = em.id;
+    sv.returning = false;
+    sv.stopsLeft = 1;
+    sv.dwell = 0;
+    return true;
+  }
+
+  private notifyEmergencyArrived(emergencyId: string): void {
+    if (this.reportedResponding.has(emergencyId)) return;
+    this.reportedResponding.add(emergencyId);
+    this.onEmergencyArrived?.(emergencyId);
+  }
+
+  private notifyEmergencyResolved(emergencyId: string): void {
+    if (this.reportedResolved.has(emergencyId)) return;
+    this.reportedResolved.add(emergencyId);
+    this.onEmergencyResolved?.(emergencyId);
   }
 
   private dispatchServices(net: RoadNetwork): void {
@@ -915,7 +1150,15 @@ export class CarManager {
       car.v = 0;
       car.age += dt;
       sv.dwell -= dt;
-      if (sv.dwell <= 0 && !this.continueService(car)) car.leaving = 0;
+      if (sv.dwell <= 0) {
+        if (sv.emergencyId) {
+          const resolvedId = sv.emergencyId;
+          sv.emergencyId = undefined;
+          sv.stopsLeft = 0;
+          this.notifyEmergencyResolved(resolvedId);
+        }
+        if (!this.continueService(car)) car.leaving = 0;
+      }
       this.place(car, dt);
       return true;
     }
@@ -963,6 +1206,9 @@ export class CarManager {
           if (depot) depot.next = Math.max(depot.next, this.time + rand(SERVICE_PROFILES[sv.kind].rest));
           car.leaving = 0;
         } else {
+          if (sv.emergencyId) {
+            this.notifyEmergencyArrived(sv.emergencyId);
+          }
           sv.dwell = rand(SERVICE_PROFILES[sv.kind].dwell);
           car.v = 0;
         }

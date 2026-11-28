@@ -19,7 +19,12 @@ import type { PopulationManager } from './PopulationManager.js';
 export interface TickRoom {
   id: string;
   state: CityState;
-  worldTick(clock: GameClock, summary?: PopulationSummary, zonePopulations?: ZonePopulationEntry[]): void;
+  worldTick(
+    clock: GameClock,
+    summary?: PopulationSummary,
+    zonePopulations?: ZonePopulationEntry[],
+    populationManager?: PopulationManager,
+  ): void;
 }
 
 /** Where world-level events go: everyone, or one city's players. */
@@ -147,13 +152,14 @@ export class WorldTickEngine {
 
       const summary = this.populationManager.getCityPopulationSummary(room.id);
       const zonePopulations = this.populationManager.getZonePopulations(room.id, room.state.buildings);
-      room.worldTick(clock, summary, zonePopulations);
+      room.worldTick(clock, summary, zonePopulations, this.populationManager);
 
-      // Update world city entry with latest population/happiness
+      // Update world city entry with latest population/happiness (including any emergency casualties)
+      const finalSummary = room.state.resources.populationSummary ?? summary;
       const cityEntry = this.worldState.cities.find(c => c.cityId === room.id);
       if (cityEntry) {
-        cityEntry.population = summary.total;
-        cityEntry.happiness = summary.averageHappiness;
+        cityEntry.population = finalSummary.total;
+        cityEntry.happiness = finalSummary.averageHappiness;
       }
     }
 

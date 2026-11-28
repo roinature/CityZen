@@ -2,6 +2,7 @@ import type { Grid } from './grid.js';
 import type { PlacedBuilding } from './building.js';
 import type { ResourceState } from './resources.js';
 import type { GameClock } from './time.js';
+import type { CityEmergency } from './emergencies.js';
 
 export interface CityState {
   siteId?: string;
@@ -15,4 +16,6 @@ export interface CityState {
   tick: number;
   createdAt: number;
   updatedAt: number;
+  /** Active city incidents awaiting or receiving emergency vehicle response. */
+  emergencies?: CityEmergency[];
 }

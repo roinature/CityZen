@@ -289,6 +289,14 @@ export function createGameRoutes(roomManager: RoomManager, worldManager: WorldMa
 
   router.post('/city/loan/repay', cityAction((room, body: { loanId: string }) => room.repayLoan(body.loanId)));
 
+  router.post('/city/emergency/respond', cityAction((room, body: { emergencyId: string }) =>
+    room.markEmergencyResponding(String(body.emergencyId || '')),
+  ));
+
+  router.post('/city/emergency/resolve', cityAction((room, body: { emergencyId: string }) =>
+    room.resolveEmergency(String(body.emergencyId || '')),
+  ));
+
   router.post('/city/unlimited-money', (req: Request, res: Response) => {
     const { playerId, enabled } = req.body as SetUnlimitedMoneyPayload & { playerId: string };
     const session = readCitySession(req, playerId);

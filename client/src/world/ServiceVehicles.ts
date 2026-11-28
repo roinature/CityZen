@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BuildingType } from '@cityzen/shared';
+import { BuildingType, type CityEmergencyKind } from '@cityzen/shared';
 import { createContactShadow } from './CarManager.js';
 
 /**
@@ -9,6 +9,13 @@ import { createContactShadow } from './CarManager.js';
  */
 
 export type ServiceKind = 'police' | 'fire' | 'ambulance' | 'garbage' | 'bus';
+
+export const EMERGENCY_SERVICE_KIND: Record<CityEmergencyKind, ServiceKind> = {
+  robbery: 'police',
+  fire: 'fire',
+  medical: 'ambulance',
+  sewage_overflow: 'garbage',
+};
 
 export interface ServiceProfile {
   /** Stops per trip before heading back to base. */

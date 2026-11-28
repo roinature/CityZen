@@ -2,7 +2,15 @@ import { registerHooks } from 'node:module';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { BuildingType, type PlacedBuilding } from '@cityzen/shared';
+import {
+  BuildingType,
+  CityRoom,
+  PopulationManager,
+  S2C,
+  createEmptyGrid,
+  type CityEmergencyOutcome,
+  type PlacedBuilding,
+} from '@cityzen/shared';
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
@@ -27,6 +35,7 @@ registerHooks({
 };
 
 const { CarManager } = await import('../src/world/CarManager.ts');
+const { EmergencyEffects } = await import('../src/world/EmergencyEffects.ts');
 
 let nextId = 1;
 const place = (type: BuildingType, x: number, z: number): PlacedBuilding => ({
@@ -92,3 +101,168 @@ for (const [service, kind] of [
     assert.ok(returned, 'it came back');
   });
 }
+
+function createEmergencyTestRoom() {
+  const events: Array<{ event: string; data: unknown }> = [];
+  class TestRoom extends CityRoom {
+    protected override broadcast(event: string, data: unknown): void {
+      events.push({ event, data });
+    }
+  }
+  const room = new TestRoom('c-em', 'Metro', 'p1', 'Mayor');
+  room.state.grid = createEmptyGrid();
+  room.state.buildings = [];
+  room.unlimitedMoney = true;
+  room.addPlayer('p1', 'Mayor');
+
+  // Straight east-west street
+  for (let x = 4; x <= 30; x++) {
+    room.placeBuilding('p1', { x, z: 12 }, BuildingType.ROAD_STREET);
+  }
+
+  // Developed zones along the street
+  for (let i = 0; i < 4; i++) {
+    const x = 18 + i * 3;
+    room.placeBuilding('p1', { x, z: 11 }, i % 2 === 0 ? BuildingType.ZONE_RESIDENTIAL : BuildingType.ZONE_COMMERCIAL);
+    const b = room.state.buildings.find(item => item.position.x === x && item.position.z === 11)!;
+    b.developmentLevel = 2;
+    b.developedAt = 1;
+  }
+
+  const pop = new PopulationManager();
+  pop.initWorldPopulation(30, 0);
+  pop.seedCity(room.id, 20);
+  pop.assignPeopleToZones(room.id, room.state.buildings);
+
+  return { room, pop, events };
+}
+
+for (const [emergencyKind, serviceBuilding, expectedVehicle] of [
+  ['fire', BuildingType.FIRE_STATION, 'fire'],
+  ['robbery', BuildingType.POLICE_STATION, 'police'],
+  ['medical', BuildingType.HEALTH_CLINIC, 'ambulance'],
+  ['sewage_overflow', BuildingType.WATER_SEWAGE_PLANT, 'garbage'],
+] as const) {
+  test(`${emergencyKind} dispatches a ${expectedVehicle} vehicle to the incident, resolves it, and returns to depot`, () => {
+    const { room, events } = createEmergencyTestRoom();
+    room.placeBuilding('p1', { x: 6, z: 13 }, serviceBuilding);
+
+    const target = room.state.buildings.find(b => b.position.x === 24 && b.position.z === 11)!;
+    const em = room.spawnEmergency(emergencyKind, target.id)!;
+    assert.ok(em, 'emergency spawned');
+
+    const scene = new THREE.Scene();
+    const cars = new CarManager(scene);
+    const effects = new EmergencyEffects();
+    scene.add(effects.group);
+    cars.setMaxCars(0);
+
+    let arrivedCount = 0;
+    let resolvedCount = 0;
+    cars.onEmergencyArrived = (id) => {
+      assert.equal(id, em.id);
+      arrivedCount++;
+      room.markEmergencyResponding(id);
+    };
+    cars.onEmergencyResolved = (id) => {
+      assert.equal(id, em.id);
+      resolvedCount++;
+      room.resolveEmergency(id);
+    };
+
+    effects.update(1 / 60, room.state);
+    assert.equal(effects.group.children.length, 1, '3D visual effect added while emergency active');
+
+    let returnedHome = false;
+    for (let frame = 0; frame < 60 * 90 && !returnedHome; frame++) {
+      cars.update(1 / 60, room.state);
+      effects.update(1 / 60, room.state);
+      const list = (cars as unknown as { cars: { leaving: number; service?: { kind: string; returning: boolean } }[] }).cars;
+      if (resolvedCount > 0 && list.some(c => c.service?.kind === expectedVehicle && c.service.returning && c.leaving >= 0)) {
+        returnedHome = true;
+      }
+    }
+
+    assert.equal(arrivedCount, 1, 'responder arrived on scene');
+    assert.equal(resolvedCount, 1, 'responder resolved the emergency');
+    assert.equal(room.state.emergencies?.length ?? 0, 0, 'emergency cleared from city state');
+    assert.equal(effects.group.children.length, 0, '3D visual effect cleaned up after resolution');
+    assert.ok(returnedHome, 'responder drove back to its depot afterwards');
+
+    const outcomeEvt = events.find(e => e.event === S2C.EMERGENCY_OUTCOME) as { data: { outcome: CityEmergencyOutcome } } | undefined;
+    assert.equal(outcomeEvt?.data.outcome.resolution, 'resolved');
+    assert.equal(outcomeEvt?.data.outcome.deaths, 0);
+  });
+}
+
+test('unanswered emergencies expire with building destruction and citizen deaths', () => {
+  // 1. Fire without Fire Station -> razes zone to level 0 & kills citizens
+  {
+    const { room, pop } = createEmergencyTestRoom();
+    const target = room.state.buildings.find(b => b.position.x === 18 && b.position.z === 11)!;
+    const popBefore = pop.getCityPopulationCount(room.id);
+    const em = room.spawnEmergency('fire', target.id)!;
+
+    const clock = { gameTimeMs: 0, speed: 1, gameDay: 0, gameYear: 1 };
+    while ((room.state.emergencies ?? []).some(e => e.id === em.id)) {
+      clock.gameTimeMs += 3_600_000;
+      room.worldTick(clock, pop.getCityPopulationSummary(room.id), undefined, pop);
+    }
+
+    const updatedTarget = room.state.buildings.find(b => b.id === target.id)!;
+    assert.equal(updatedTarget.developmentLevel, 0, 'unanswered fire burned zone down to level 0');
+    assert.ok(pop.getCityPopulationCount(room.id) < popBefore, 'unanswered fire caused citizen deaths');
+  }
+
+  // 2. Fire on non-zone civic building -> completely demolishes building
+  {
+    const { room, pop } = createEmergencyTestRoom();
+    room.placeBuilding('p1', { x: 10, z: 13 }, BuildingType.EDU_LIBRARY);
+    const library = room.state.buildings.find(b => b.type === BuildingType.EDU_LIBRARY)!;
+    const em = room.spawnEmergency('fire', library.id)!;
+
+    const clock = { gameTimeMs: 0, speed: 1, gameDay: 0, gameYear: 1 };
+    while ((room.state.emergencies ?? []).some(e => e.id === em.id)) {
+      clock.gameTimeMs += 3_600_000;
+      room.worldTick(clock, pop.getCityPopulationSummary(room.id), undefined, pop);
+    }
+    assert.equal(room.state.buildings.find(b => b.id === library.id), undefined, 'civic building destroyed by fire');
+  }
+
+  // 3. Medical emergency without Clinic/Hospital -> citizen deaths
+  {
+    const { room, pop } = createEmergencyTestRoom();
+    const target = room.state.buildings.find(b => b.position.x === 18 && b.position.z === 11)!;
+    const popBefore = pop.getCityPopulationCount(room.id);
+    const em = room.spawnEmergency('medical', target.id)!;
+
+    const clock = { gameTimeMs: 0, speed: 1, gameDay: 0, gameYear: 1 };
+    while ((room.state.emergencies ?? []).some(e => e.id === em.id)) {
+      clock.gameTimeMs += 3_600_000;
+      room.worldTick(clock, pop.getCityPopulationSummary(room.id), undefined, pop);
+    }
+    assert.ok(pop.getCityPopulationCount(room.id) < popBefore, 'unanswered medical emergency caused deaths');
+  }
+
+  // 4. Robbery & Sewage overflow without police/sewage -> money loss, property damage, casualties
+  for (const kind of ['robbery', 'sewage_overflow'] as const) {
+    const { room, pop, events } = createEmergencyTestRoom();
+    room.unlimitedMoney = false;
+    room.state.resources.money = 5000;
+    const target = room.state.buildings.find(b => b.position.x === 21 && b.position.z === 11)!;
+    const levelBefore = target.developmentLevel!;
+    const em = room.spawnEmergency(kind, target.id)!;
+
+    const clock = { gameTimeMs: 0, speed: 1, gameDay: 0, gameYear: 1 };
+    while ((room.state.emergencies ?? []).some(e => e.id === em.id)) {
+      clock.gameTimeMs += 3_600_000;
+      room.worldTick(clock, pop.getCityPopulationSummary(room.id), undefined, pop);
+    }
+
+    const outcomeEvt = events.filter(e => e.event === S2C.EMERGENCY_OUTCOME).pop() as { data: { outcome: CityEmergencyOutcome } };
+    assert.equal(outcomeEvt.data.outcome.resolution, 'failed');
+    assert.ok(outcomeEvt.data.outcome.moneyLost > 0, `${kind} caused treasury loss`);
+    const updatedTarget = room.state.buildings.find(b => b.id === target.id)!;
+    assert.ok((updatedTarget.developmentLevel ?? 0) < levelBefore, `${kind} damaged building development level`);
+  }
+});

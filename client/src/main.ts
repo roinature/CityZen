@@ -6,8 +6,11 @@ import {
   type WorldState,
   type EdgeDirection,
   type PlacedBuilding,
+  CELL_SIZE,
+  EMERGENCY_LABELS,
   clearGridBuilding,
   getBuildingUtilityLayer,
+  hasOperationalResponder,
   levelRoadTerrain,
   setGridBuilding,
   findAdjacentCity,
@@ -235,7 +238,10 @@ const messageManager = new MessageManager(cityHud, {
     console.log(`Message read: ${messageId}`);
   },
   onMessageClick: (message) => {
-    console.log(`Message clicked: ${message.title}`);
+    const pos = message.data?.position as { x: number; z: number } | undefined;
+    if (pos && !exploreMode.isActive()) {
+      cameraController.lookAt((pos.x + 0.5) * CELL_SIZE, (pos.z + 0.5) * CELL_SIZE);
+    }
   }
 });
 const toolbar = new Toolbar(uiRoot, resourceBar.demand, (type: BuildingType, density?: ZoneDensity) => {
@@ -788,6 +794,79 @@ connect({
     const otherName = worldState?.cities.find(c => c.cityId === otherCityId)?.name ?? otherCityId;
     maslowPanel.showMigrationWarning(payload.personCount, direction, otherName);
   },
+
+  onEmergencyStarted: ({ emergency }) => {
+    if (!cityState) return;
+    const existing = cityState.emergencies ?? [];
+    if (!existing.some(e => e.id === emergency.id)) {
+      cityState.emergencies = [...existing, emergency];
+    }
+    const responderOk = hasOperationalResponder(cityState, emergency.kind);
+    const neededLabel = {
+      robbery: 'Police Station',
+      fire: 'Fire Station',
+      medical: 'Clinic or Hospital',
+      sewage_overflow: 'Sewage Station or Plant',
+    }[emergency.kind];
+    const icon = {
+      robbery: '🚨',
+      fire: '🔥',
+      medical: '🚑',
+      sewage_overflow: '☣️',
+    }[emergency.kind];
+
+    messageManager.addMessage({
+      id: `em_start_${emergency.id}`,
+      type: MessageType.GAME_EVENT,
+      category: MessageCategory.SYSTEM,
+      priority: responderOk ? MessagePriority.HIGH : MessagePriority.CRITICAL,
+      title: `${icon} ${EMERGENCY_LABELS[emergency.kind]}!`,
+      content: responderOk
+        ? `Emergency units are dispatching to (${emergency.position.x}, ${emergency.position.z}). Click to view.`
+        : `No ${neededLabel} connected by road! Build one fast or face catastrophe!`,
+      data: { position: emergency.position, emergencyId: emergency.id },
+      cityId: cityState.id,
+      playerId,
+      createdAt: Date.now(),
+      isRead: false,
+      displayType: responderOk ? DisplayType.NOTIFICATION : DisplayType.BOTH,
+    });
+    soundManager.triggerEmergencyAlert();
+  },
+
+  onEmergencyResponding: ({ emergencyId, respondingAtTick }) => {
+    if (!cityState?.emergencies) return;
+    const em = cityState.emergencies.find(e => e.id === emergencyId);
+    if (em) em.respondingAtTick = respondingAtTick;
+  },
+
+  onEmergencyOutcome: ({ outcome, resources }) => {
+    if (!cityState) return;
+    cityState.emergencies = (cityState.emergencies ?? []).filter(e => e.id !== outcome.emergency.id);
+    cityState.resources = resources;
+    resourceBar.update(resources, cityState);
+    refreshCityAdvisor(cityState);
+
+    if (outcome.resolution === 'failed') {
+      messageManager.addMessage({
+        id: `em_fail_${outcome.emergency.id}`,
+        type: MessageType.SYSTEM_ALERT,
+        category: MessageCategory.SYSTEM,
+        priority: MessagePriority.CRITICAL,
+        title: `💀 ${EMERGENCY_LABELS[outcome.emergency.kind]} — Disaster!`,
+        content: outcome.summary,
+        data: { position: outcome.emergency.position },
+        cityId: cityState.id,
+        playerId,
+        createdAt: Date.now(),
+        isRead: false,
+        displayType: DisplayType.BOTH,
+      });
+      soundManager.triggerBulldoze();
+    } else {
+      footerIndicator.toast(`✅ ${outcome.summary}`, 3500);
+    }
+  },
 }).then((client) => {
   gameClient = client;
 
@@ -815,6 +894,15 @@ connect({
 });
 
 // --- Build mode wiring ---
+carManager.onEmergencyArrived = (emergencyId) => {
+  if (isReadOnlyCity || !gameClient) return;
+  void gameClient.reportEmergencyResponding(emergencyId, playerId);
+};
+carManager.onEmergencyResolved = (emergencyId) => {
+  if (isReadOnlyCity || !gameClient) return;
+  void gameClient.reportEmergencyResolved(emergencyId, playerId);
+};
+
 // --- Game speed wiring ---
 resourceBar.onGameSpeedChange = (speed) => {
   if (isReadOnlyCity) return;

@@ -9,6 +9,7 @@ import { createRoadSurface, indexRoads } from './RoadSurface.js';
 import { createServiceModel, hasServiceModel } from './ServiceModels.js';
 import { StreetFurniture } from './StreetFurniture.js';
 import { UtilityOverlay } from './UtilityOverlay.js';
+import { EmergencyEffects } from './EmergencyEffects.js';
 import { ObstacleMap, STEP_HEIGHT, type Obstacle } from './explore/ObstacleMap.js';
 
 const NIGHT_FADE_SECONDS = 1.2;
@@ -25,6 +26,7 @@ export class CityRenderer {
   private buildings = new CityBuildings();
   private furniture = new StreetFurniture();
   private utilities = new UtilityOverlay();
+  private emergencies = new EmergencyEffects();
   private surface: THREE.Mesh | null = null;
   private rotors: THREE.Object3D[] = [];
   private models = new Map<string, THREE.Group>();
@@ -42,6 +44,7 @@ export class CityRenderer {
       this.furniture.group,
       this.utilities.powerLinesGroup,
       this.utilities.layerGroup,
+      this.emergencies.group,
     );
   }
 
@@ -103,6 +106,7 @@ export class CityRenderer {
     if (this.needsSync && this.state) this.rebuild(this.state);
     this.needsSync = false;
     this.buildings.update(deltaTime);
+    this.emergencies.update(deltaTime, this.state);
     for (const rotor of this.rotors) rotor.rotation.z -= deltaTime * 1.1;
 
     const target = isNight ? 1 : 0;
@@ -205,6 +209,7 @@ export class CityRenderer {
     this.buildings.clear();
     this.furniture.clear();
     this.utilities.clear();
+    this.emergencies.clear();
     this.syncModels([], CITY_STYLES[this.look.style]);
   }
 }

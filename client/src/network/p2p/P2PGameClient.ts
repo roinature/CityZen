@@ -12,6 +12,9 @@ import {
   type CityListItem,
   type CityState,
   type CityStatePayload,
+  type EmergencyOutcomePayload,
+  type EmergencyRespondingPayload,
+  type EmergencyStartedPayload,
   type MigrationEventPayload,
   type PlaceBuildingsPayload,
   type PlacedBuilding,
@@ -505,6 +508,29 @@ export class P2PGameClient implements CityConnection {
         this.persistActiveRemoteCache(false);
         break;
       }
+      case S2C.EMERGENCY_STARTED: {
+        const { emergency } = data as EmergencyStartedPayload;
+        const list = this.activeRemoteCity.emergencies ?? [];
+        if (!list.some(e => e.id === emergency.id)) {
+          this.activeRemoteCity.emergencies = [...list, clone(emergency)];
+        }
+        this.persistActiveRemoteCache(false);
+        break;
+      }
+      case S2C.EMERGENCY_RESPONDING: {
+        const { emergencyId, respondingAtTick } = data as EmergencyRespondingPayload;
+        const em = this.activeRemoteCity.emergencies?.find(e => e.id === emergencyId);
+        if (em) em.respondingAtTick = respondingAtTick;
+        break;
+      }
+      case S2C.EMERGENCY_OUTCOME: {
+        const { outcome, resources } = data as EmergencyOutcomePayload;
+        this.activeRemoteCity.emergencies = (this.activeRemoteCity.emergencies ?? [])
+          .filter(e => e.id !== outcome.emergency.id);
+        this.activeRemoteCity.resources = clone(resources);
+        this.persistActiveRemoteCache(false);
+        break;
+      }
     }
   }
 
@@ -643,6 +669,15 @@ export class P2PGameClient implements CityConnection {
         break;
       case S2C.MIGRATION_EVENT:
         cb.onMigrationEvent?.(data as MigrationEventPayload);
+        break;
+      case S2C.EMERGENCY_STARTED:
+        cb.onEmergencyStarted?.(data as EmergencyStartedPayload);
+        break;
+      case S2C.EMERGENCY_RESPONDING:
+        cb.onEmergencyResponding?.(data as EmergencyRespondingPayload);
+        break;
+      case S2C.EMERGENCY_OUTCOME:
+        cb.onEmergencyOutcome?.(data as EmergencyOutcomePayload);
         break;
     }
   }
@@ -855,6 +890,16 @@ export class P2PGameClient implements CityConnection {
     if (!result.success && result.error && result.code !== 'NO_ROOM') {
       this.callbacks.onError({ message: result.error, code: result.code || 'SPEED_FAILED' });
     }
+  }
+
+  async reportEmergencyResponding(emergencyId: string, playerId = this.playerId): Promise<void> {
+    if (this.activeVisit?.mode === 'remote-readonly') return;
+    await this.sendCityCommand('emergencyRespond', { emergencyId }, playerId);
+  }
+
+  async reportEmergencyResolved(emergencyId: string, playerId = this.playerId): Promise<void> {
+    if (this.activeVisit?.mode === 'remote-readonly') return;
+    await this.sendCityCommand('emergencyResolve', { emergencyId }, playerId);
   }
 
   async leave(playerId = this.playerId): Promise<void> {

@@ -453,6 +453,16 @@ export class LocalCityHost {
         if (res.success) this.markDirty();
         return res;
       }
+      case 'emergencyRespond': {
+        const res = room.markEmergencyResponding(String(args.emergencyId || ''));
+        if (res.success) this.markDirty();
+        return res;
+      }
+      case 'emergencyResolve': {
+        const res = room.resolveEmergency(String(args.emergencyId || ''));
+        if (res.success) this.markDirty();
+        return res;
+      }
       case 'unlimited': {
         if (isOwner) room.setUnlimitedMoney(args.enabled === true);
         return { success: true };

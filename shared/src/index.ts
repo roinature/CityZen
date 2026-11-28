@@ -16,6 +16,7 @@ export type {
 } from './types/building.js';
 export type { ResourceState, DemandState, PopulationSummary, ZonePopulationEntry, Loan, UtilitySummary } from './types/resources.js';
 export type { CityState } from './types/city.js';
+export type { CityEmergency, CityEmergencyKind, CityEmergencyOutcome } from './types/emergencies.js';
 export type { Player, PlayerProfile } from './types/player.js';
 export type { GameClock } from './types/time.js';
 export type { WorldState, WorldCityEntry, WorldPosition, EdgeDirection, EdgeConnection } from './types/world.js';
@@ -58,6 +59,9 @@ export {
   type PopulationUpdatePayload,
   type MigrationEventPayload,
   type WorldTickPayload,
+  type EmergencyStartedPayload,
+  type EmergencyRespondingPayload,
+  type EmergencyOutcomePayload,
 } from './types/events.js';
 
 // Constants
@@ -127,6 +131,20 @@ export type {
   BuildingUtilityStatus, PowerCableSpan, PowerSubgridInfo, UtilityGridReport, UtilityResourceProfile,
 } from './logic/utilities.js';
 export { createStarterLayout, getStarterEntranceX, isStarterEntranceRoad } from './logic/starterLayout.js';
+export {
+  MAX_ACTIVE_EMERGENCIES,
+  EMERGENCY_SPAWN_COOLDOWN_TICKS,
+  EMERGENCY_MIN_DEVELOPED_ZONES,
+  EMERGENCY_DEADLINE_TICKS,
+  EMERGENCY_AUTO_RESPONSE_TICKS,
+  EMERGENCY_LABELS,
+  hasRoadFrontage,
+  hasOperationalResponder,
+  maybeSpawnEmergency,
+  createEmergency,
+  failEmergency,
+  resolveEmergencyOutcome,
+} from './logic/emergencies.js';
 export {
   planTown, normalizeTownSettings, TOWN_CHARACTERS, TOWN_CHARACTER_KNOBS, DEFAULT_TOWN,
 } from './logic/townPlan.js';

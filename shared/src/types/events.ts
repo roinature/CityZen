@@ -6,6 +6,7 @@ import type { PlacedBuilding } from './building.js';
 import type { Player } from './player.js';
 import type { GameClock } from './time.js';
 import type { WorldState } from './world.js';
+import type { CityEmergency, CityEmergencyOutcome } from './emergencies.js';
 
 // Client -> Server event names
 export const C2S = {
@@ -20,6 +21,8 @@ export const C2S = {
   SET_TAX_RATE: 'city:taxRate',
   SET_UNLIMITED_MONEY: 'city:unlimitedMoney',
   SET_GAME_SPEED: 'city:gameSpeed',
+  EMERGENCY_RESPOND: 'city:emergencyRespond',
+  EMERGENCY_RESOLVE: 'city:emergencyResolve',
 } as const;
 
 // Server -> Client event names
@@ -39,6 +42,9 @@ export const S2C = {
   POPULATION_UPDATE: 'city:population',
   MIGRATION_EVENT: 'world:migration',
   WORLD_TICK: 'world:tick',
+  EMERGENCY_STARTED: 'city:emergencyStarted',
+  EMERGENCY_RESPONDING: 'city:emergencyResponding',
+  EMERGENCY_OUTCOME: 'city:emergencyOutcome',
 } as const;
 
 // Client -> Server payloads
@@ -168,4 +174,18 @@ export interface WorldTickPayload {
   clock: GameClock;
   totalPopulation: number;
   citySummaries: Array<{ cityId: string; population: number; happiness: number }>;
+}
+
+export interface EmergencyStartedPayload {
+  emergency: CityEmergency;
+}
+
+export interface EmergencyRespondingPayload {
+  emergencyId: string;
+  respondingAtTick: number;
+}
+
+export interface EmergencyOutcomePayload {
+  outcome: CityEmergencyOutcome;
+  resources: ResourceState;
 }

@@ -313,6 +313,28 @@ export class SoundManager {
         osc2.stop(now + 0.35);
     }
 
+    /** Play an emergency two-tone siren alert when an incident starts. */
+    triggerEmergencyAlert(): void {
+        if (!this.ctx || !this._enabled) return;
+
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(660, now);
+        osc.frequency.setValueAtTime(880, now + 0.18);
+        osc.frequency.setValueAtTime(660, now + 0.36);
+
+        const gain = this.ctx.createGain();
+        gain.gain.setValueAtTime(0.22, now);
+        gain.gain.setValueAtTime(0.22, now + 0.45);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.58);
+
+        osc.connect(gain);
+        gain.connect(this.sfxGain);
+        osc.start(now);
+        osc.stop(now + 0.58);
+    }
+
     /** Play a construction placement sound (quick tap). */
     triggerConstruction(): void {
         if (!this.ctx || !this._enabled) return;

@@ -25,6 +25,15 @@ import { applySiteTerrain } from '../terrain/sites.js';
 import { simulateCityTick } from '../logic/simulation.js';
 import { validateLoanRequest, createLoan } from '../logic/loans.js';
 import { evaluateCityUtilities } from '../logic/utilities.js';
+import {
+  EMERGENCY_AUTO_RESPONSE_TICKS,
+  failEmergency,
+  hasOperationalResponder,
+  maybeSpawnEmergency,
+  resolveEmergencyOutcome,
+} from '../logic/emergencies.js';
+import type { CityEmergency, CityEmergencyKind } from '../types/emergencies.js';
+import type { PopulationManager } from './PopulationManager.js';
 
 function createInitialClock(): GameClock {
   return {
@@ -59,6 +68,7 @@ export class CityRoom {
   unlimitedMoney = false;
   ownerName = 'Unknown';
   protected messageManager: CityMessageSink | null = null;
+  private lastEmergencySpawnTick = 0;
 
   constructor(id: string, name: string, ownerId: string, ownerName: string, existingState?: CityState, siteId?: string) {
     this.id = id;
@@ -85,7 +95,12 @@ export class CityRoom {
   }
 
   /** Called by WorldTickEngine each world tick with the shared clock. */
-  worldTick(worldClock: GameClock, populationSummary?: PopulationSummary, zonePopulations?: ZonePopulationEntry[]): void {
+  worldTick(
+    worldClock: GameClock,
+    populationSummary?: PopulationSummary,
+    zonePopulations?: ZonePopulationEntry[],
+    populationManager?: PopulationManager,
+  ): void {
     // Copy world clock to city state
     this.state.clock = { ...worldClock };
 
@@ -106,8 +121,18 @@ export class CityRoom {
 
     this.state = simulateCityTick(this.state);
 
-    // Attach zone populations for client rendering
-    if (zonePopulations) {
+    // Process active city emergencies & spawn new ones when unpaused
+    if (worldClock.speed > 0) {
+      this.tickEmergencies(populationManager);
+    }
+
+    // Refresh population summary if an emergency caused casualties
+    if (populationManager) {
+      const latestSummary = populationManager.getCityPopulationSummary(this.id);
+      this.state.resources.population = latestSummary.total;
+      this.state.resources.populationSummary = latestSummary;
+      this.state.resources.zonePopulations = populationManager.getZonePopulations(this.id, this.state.buildings);
+    } else if (zonePopulations) {
       this.state.resources.zonePopulations = zonePopulations;
     }
 
@@ -123,26 +148,148 @@ export class CityRoom {
       clock: this.state.clock,
     });
 
-    // Detect zone growth and broadcast
-    const grownBuildings: Array<{ id: string; developmentLevel: number; developedAt: number }> = [];
+    // Detect zone growth (or downgrade/razing from disasters) and broadcast
+    const changedZones: Array<{ id: string; developmentLevel: number; developedAt: number }> = [];
     for (const b of this.state.buildings) {
       if (isZone(b.type)) {
         const prevLevel = prevLevels.get(b.id) ?? 0;
         const currLevel = b.developmentLevel ?? 0;
-        if (currLevel > prevLevel) {
-          grownBuildings.push({
+        if (currLevel !== prevLevel) {
+          changedZones.push({
             id: b.id,
             developmentLevel: currLevel,
-            developedAt: b.developedAt!,
+            developedAt: b.developedAt ?? this.state.tick,
           });
         }
       }
     }
 
-    if (grownBuildings.length > 0) {
-      this.broadcast(S2C.ZONE_GROWTH, { buildings: grownBuildings });
+    if (changedZones.length > 0) {
+      this.broadcast(S2C.ZONE_GROWTH, { buildings: changedZones });
       this.onMutated();
     }
+  }
+
+  /** Advance active emergencies, fail expired ones, and occasionally trigger a new incident. */
+  protected tickEmergencies(populationManager?: PopulationManager): void {
+    const active = this.state.emergencies ? [...this.state.emergencies] : [];
+    const remaining: CityEmergency[] = [];
+    let mutated = false;
+    const utilities = active.length > 0 ? evaluateCityUtilities(this.state) : undefined;
+
+    for (const em of active) {
+      // If the target building was manually bulldozed, drop the incident quietly
+      const targetBuilding = this.state.buildings.find(b => b.id === em.buildingId);
+      if (!targetBuilding) {
+        mutated = true;
+        continue;
+      }
+
+      // Headless fallback: if no visual client is connected to drive 3D cars, let an operational
+      // responder building resolve the incident before the deadline.
+      if (
+        this.players.size === 0 &&
+        !em.respondingAtTick &&
+        this.state.tick - em.startedAtTick >= EMERGENCY_AUTO_RESPONSE_TICKS &&
+        hasOperationalResponder(this.state, em.kind, utilities)
+      ) {
+        const outcome = resolveEmergencyOutcome(em);
+        this.broadcast(S2C.EMERGENCY_OUTCOME, { outcome, resources: this.state.resources });
+        mutated = true;
+        continue;
+      }
+
+      // A responder already on scene holds off the deadline while working; safety-cap at +12 ticks
+      const effectiveDeadline = em.respondingAtTick ? em.respondingAtTick + 12 : em.deadlineTick;
+      if (this.state.tick >= effectiveDeadline) {
+        if (em.respondingAtTick) {
+          const outcome = resolveEmergencyOutcome(em);
+          this.broadcast(S2C.EMERGENCY_OUTCOME, { outcome, resources: this.state.resources });
+        } else {
+          const prevPos = { ...targetBuilding.position };
+          const outcome = failEmergency(this.state, em, populationManager);
+          if (outcome.destroyedBuildingId) {
+            this.state.resources.utilities = evaluateCityUtilities(this.state).summary;
+            this.broadcast(S2C.BUILDING_DEMOLISHED, {
+              position: prevPos,
+              buildingId: outcome.destroyedBuildingId,
+              resources: this.state.resources,
+            });
+          }
+          this.broadcast(S2C.EMERGENCY_OUTCOME, { outcome, resources: this.state.resources });
+        }
+        mutated = true;
+        continue;
+      }
+
+      remaining.push(em);
+    }
+
+    this.state.emergencies = remaining;
+
+    const spawned = maybeSpawnEmergency(this.state, this.lastEmergencySpawnTick);
+    if (spawned) {
+      this.lastEmergencySpawnTick = this.state.tick;
+      this.state.emergencies = [...remaining, spawned];
+      this.broadcast(S2C.EMERGENCY_STARTED, { emergency: spawned });
+      mutated = true;
+    }
+
+    if (mutated) {
+      this.state.updatedAt = Date.now();
+      this.onMutated();
+    }
+  }
+
+  /** Manually spawn an emergency (used by tests and debug tools). */
+  spawnEmergency(kind: CityEmergencyKind, buildingId: string): CityEmergency | null {
+    const b = this.state.buildings.find(item => item.id === buildingId);
+    if (!b) return null;
+    const em: CityEmergency = {
+      id: newId(),
+      kind,
+      buildingId: b.id,
+      position: { ...b.position },
+      startedAtTick: this.state.tick,
+      deadlineTick: this.state.tick + 24,
+    };
+    this.state.emergencies = [...(this.state.emergencies ?? []), em];
+    this.lastEmergencySpawnTick = this.state.tick;
+    this.broadcast(S2C.EMERGENCY_STARTED, { emergency: em });
+    this.onMutated();
+    return em;
+  }
+
+  /** Called when a service vehicle arrives on scene and begins handling the incident. */
+  markEmergencyResponding(emergencyId: string): { success: boolean } {
+    const list = this.state.emergencies;
+    if (!list) return { success: false };
+    const em = list.find(e => e.id === emergencyId);
+    if (!em) return { success: false };
+    if (!em.respondingAtTick) {
+      em.respondingAtTick = this.state.tick;
+      this.state.updatedAt = Date.now();
+      this.broadcast(S2C.EMERGENCY_RESPONDING, {
+        emergencyId: em.id,
+        respondingAtTick: em.respondingAtTick,
+      });
+      this.onMutated();
+    }
+    return { success: true };
+  }
+
+  /** Called when a service vehicle finishes working at the scene and resolves the incident. */
+  resolveEmergency(emergencyId: string): { success: boolean } {
+    const list = this.state.emergencies;
+    if (!list) return { success: false };
+    const em = list.find(e => e.id === emergencyId);
+    if (!em) return { success: false };
+    this.state.emergencies = list.filter(e => e.id !== emergencyId);
+    this.state.updatedAt = Date.now();
+    const outcome = resolveEmergencyOutcome(em);
+    this.broadcast(S2C.EMERGENCY_OUTCOME, { outcome, resources: this.state.resources });
+    this.onMutated();
+    return { success: true };
   }
 
   addPlayer(playerId: string, playerName: string): Player {
@@ -386,12 +533,14 @@ export class CityRoom {
   }
 
   restart(): void {
+    this.lastEmergencySpawnTick = 0;
     this.state = {
       ...this.state,
       ...createStarterLayout(this.id, this.state.ownerId, this.state.siteId),
       resources: { ...INITIAL_RESOURCES },
       clock: createInitialClock(),
       tick: 0,
+      emergencies: [],
       updatedAt: Date.now(),
     };
 
@@ -406,6 +555,7 @@ export class CityRoom {
 
   /** Replace the city with a planned town. */
   generateTown(settings: TownSettings): void {
+    this.lastEmergencySpawnTick = 0;
     const terrain = createEmptyGrid();
     applySiteTerrain(terrain, this.state.siteId);
     this.state = {
@@ -414,6 +564,7 @@ export class CityRoom {
       resources: { ...INITIAL_RESOURCES, money: PLANNED_TOWN_MONEY },
       clock: createInitialClock(),
       tick: 0,
+      emergencies: [],
       updatedAt: Date.now(),
     };
     this.state.resources.utilities = evaluateCityUtilities(this.state).summary;
