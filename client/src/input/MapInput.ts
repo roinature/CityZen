@@ -86,8 +86,10 @@ export class MapInput {
     this.orbiting = event.pointerType !== 'touch'
       && (event.button !== 0 || event.shiftKey || event.altKey || event.ctrlKey);
     this.drawing = !this.orbiting && event.button === 0 && this.build.canDraw();
-    if (this.drawing) this.build.startDraw(event.clientX, event.clientY);
-    else if (event.button === 0) this.build.hover(event.clientX, event.clientY);
+    if (this.drawing) {
+      // No cell under the pointer: fall back to normal handling instead of a dead drag.
+      this.drawing = this.build.startDraw(event.clientX, event.clientY);
+    } else if (event.button === 0) this.build.hover(event.clientX, event.clientY);
   };
 
   private onMove = (event: PointerEvent): void => {
@@ -120,8 +122,8 @@ export class MapInput {
     }
 
     if (this.drawing) {
-      if (this.isOnMap(event)) this.build.hover(event.clientX, event.clientY);
-      else this.build.clearHover();
+      // Keep tracking even over UI/off-canvas (grid position is clamped while dragging).
+      this.build.hover(event.clientX, event.clientY);
       return;
     }
 
@@ -149,7 +151,8 @@ export class MapInput {
     if (!this.pointers.delete(event.pointerId)) return;
     if (this.pointers.size > 0) return;
     const onMap = this.isOnMap(event);
-    if (onMap && this.drawing) {
+    if (this.drawing) {
+      // Commit even if released over a panel or past the map edge.
       this.build.finishDraw(event.clientX, event.clientY);
     } else if (onMap && !this.cameraOnly && !this.moved && !this.exceedsTapSlop(event)) {
       if (event.button === 0 && this.onTap) this.onTap(event.clientX, event.clientY);

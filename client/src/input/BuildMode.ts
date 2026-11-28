@@ -829,7 +829,9 @@ export class BuildMode {
         }
       }
     }
-    this.currentHoverPos = this.raycaster.getGridPosition(x, y, cam, this.isDragging);
+    const pos = this.raycaster.getGridPosition(x, y, cam, this.isDragging);
+    // While drawing, a missed raycast must not wipe the stroke's endpoint: keep the last good cell.
+    if (pos || !this.isDragging) this.currentHoverPos = pos;
   }
 
   clearHover(): void {
@@ -842,9 +844,10 @@ export class BuildMode {
     this.onDragCostUpdate?.(null);
   }
 
-  startDraw(x: number, y: number): void {
+  /** Returns false when no stroke could start (no cell under the pointer). */
+  startDraw(x: number, y: number): boolean {
     this.hover(x, y);
-    if (!this.currentHoverPos || !this.selectedType) return;
+    if (!this.currentHoverPos || !this.selectedType) return false;
     this.isDragging = true;
     this.dragStartWorld = this.currentHoverWorld ? { ...this.currentHoverWorld } : null;
     if (isRectDragType(this.selectedType)) {
@@ -852,6 +855,7 @@ export class BuildMode {
     } else {
       this.lineDragStart = this.currentHoverPos;
     }
+    return true;
   }
 
   finishDraw(x: number, y: number): void {
