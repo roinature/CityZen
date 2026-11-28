@@ -1,49 +1,75 @@
+import { TOOL_ICONS } from './ToolbarIcons.js';
+
 export type ToolMode = 'pointer' | 'bulldoze' | 'build';
 
 export class BuildTools {
   private pointer: HTMLButtonElement;
   private bulldoze: HTMLButtonElement;
   private brush: HTMLDivElement;
+  private brushButtons: HTMLButtonElement[] = [];
+  private brushSize = 1;
 
   constructor(
     parent: HTMLElement,
     onToolChange: (mode: ToolMode) => void,
     onBrushSizeChange: (size: number) => void,
   ) {
-    this.pointer = this.createButton('Pointer', () => onToolChange('pointer'));
-    this.bulldoze = this.createButton('Bulldoze', () => onToolChange('bulldoze'));
+    this.pointer = this.createIconButton('Pointer', 'Select & inspect', TOOL_ICONS.pointer, () => onToolChange('pointer'));
+
+    const bulldozeRow = document.createElement('div');
+    bulldozeRow.className = 'build-tool-anchor';
+
+    this.bulldoze = this.createIconButton('Bulldoze', 'Demolish tiles', TOOL_ICONS.bulldoze, () => onToolChange('bulldoze'));
 
     this.brush = document.createElement('div');
     this.brush.className = 'brush-size-control';
     this.brush.setAttribute('role', 'group');
     this.brush.setAttribute('aria-label', 'Bulldoze brush size');
 
-    const sizeLabel = document.createElement('span');
-    sizeLabel.className = 'brush-size-value';
-    sizeLabel.textContent = '1';
+    for (const size of [1, 2, 3]) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'tool-round-btn tool-round-btn-sm';
+      btn.textContent = `${size}×`;
+      btn.setAttribute('aria-label', `Bulldoze brush ${size}×${size}`);
+      btn.setAttribute('aria-pressed', String(size === this.brushSize));
+      btn.dataset.tooltipTitle = `Brush ${size}×${size}`;
+      btn.dataset.tooltipSub = size === 1 ? 'Single tile' : `${size * size} tiles`;
+      btn.addEventListener('click', () => {
+        this.brushSize = size;
+        this.syncBrushButtons();
+        onBrushSizeChange(size);
+      });
+      this.brush.appendChild(btn);
+      this.brushButtons.push(btn);
+    }
 
-    let size = 1;
-    const changeSize = (delta: number): void => {
-      size = Math.max(1, Math.min(3, size + delta));
-      sizeLabel.textContent = String(size);
-      onBrushSizeChange(size);
-    };
-    const minus = this.createButton('−', () => changeSize(-1));
-    minus.setAttribute('aria-label', 'Decrease brush size');
-    const plus = this.createButton('+', () => changeSize(1));
-    plus.setAttribute('aria-label', 'Increase brush size');
-
-    this.brush.append(minus, sizeLabel, plus);
-    parent.append(this.pointer, this.bulldoze, this.brush);
+    bulldozeRow.append(this.bulldoze, this.brush);
+    parent.append(this.pointer, bulldozeRow);
     this.setActiveMode('pointer');
   }
 
-  private createButton(label: string, onClick: () => void): HTMLButtonElement {
+  private createIconButton(
+    label: string,
+    sub: string,
+    iconSvg: string,
+    onClick: () => void,
+  ): HTMLButtonElement {
     const btn = document.createElement('button');
-    btn.className = 'hud-button';
-    btn.textContent = label;
+    btn.type = 'button';
+    btn.className = 'tool-round-btn';
+    btn.innerHTML = iconSvg;
+    btn.setAttribute('aria-label', label);
+    btn.dataset.tooltipTitle = label;
+    btn.dataset.tooltipSub = sub;
     btn.addEventListener('click', onClick);
     return btn;
+  }
+
+  private syncBrushButtons(): void {
+    for (let i = 0; i < this.brushButtons.length; i++) {
+      this.brushButtons[i].setAttribute('aria-pressed', String(i + 1 === this.brushSize));
+    }
   }
 
   setActiveMode(mode: ToolMode): void {
