@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { BuildingType, CELL_SIZE, ZoneDensity, isRoad, type PlacedBuilding } from '@cityzen/shared';
 import type { CityStyle } from './CityStyle.js';
 import { SIDES, SIDEWALK, WALK_Y, isPaved, type RoadMap } from './RoadSurface.js';
+import { findDepotDriveway, isFleetBuilding, isPointInDriveway, type DepotDriveway } from './DepotDriveway.js';
 
 interface Tree {
   x: number;
@@ -65,7 +66,16 @@ export class StreetFurniture {
   ): void {
     this.clear();
     const lots = new Map<string, PlacedBuilding>();
-    for (const b of buildings) if (!isRoad(b.type)) lots.set(`${b.position.x},${b.position.z}`, b);
+    const driveways: DepotDriveway[] = [];
+    for (const b of buildings) {
+      if (!isRoad(b.type)) {
+        lots.set(`${b.position.x},${b.position.z}`, b);
+        if (isFleetBuilding(b.type)) {
+          const dw = findDepotDriveway(b, roads);
+          if (dw.hasRoad) driveways.push(dw);
+        }
+      }
+    }
 
     const trees: Tree[] = [];
     const lamps: Array<{ x: number; z: number; dx: number; dz: number }> = [];
@@ -109,15 +119,23 @@ export class StreetFurniture {
         const phase = (along + (d > 1 ? 1 : 0)) % 3;
         const lot = lots.get(`${lx},${lz}`)?.type;
         const facing = { fx: -dx, fz: -dz };
-        if (phase === 0) trees.push({ ...at(SIDEWALK * 0.7, 0), scale: 0.62 + roll(x, z, d) * 0.2, roll: roll(x, z, d + 7), pit: true });
+        const clear = (pt: { x: number; z: number }) => !isPointInDriveway(pt.x, pt.z, driveways);
+        if (phase === 0) {
+          const pt = at(SIDEWALK * 0.7, 0);
+          if (clear(pt)) trees.push({ ...pt, scale: 0.62 + roll(x, z, d) * 0.2, roll: roll(x, z, d + 7), pit: true });
+        }
         if (phase === 2) {
-          lamps.push({ ...at(0.05, 0), dx: -dx, dz: -dz });
-          if (roll(x, z, d + 30) < 0.3) hydrants.push({ ...at(0.05, 0.3), ...facing });
+          const lp = at(0.05, 0);
+          if (clear(lp)) lamps.push({ ...lp, dx: -dx, dz: -dz });
+          const hp = at(0.05, 0.3);
+          if (roll(x, z, d + 30) < 0.3 && clear(hp)) hydrants.push({ ...hp, ...facing });
         }
         if (phase === 1) {
           const shops = lot === BuildingType.ZONE_COMMERCIAL;
-          if ((shops || lot === BuildingType.PARK) && roll(x, z, d + 40) < 0.55) benches.push({ ...at(SIDEWALK * 0.62, 0.05), ...facing });
-          if ((shops || lot === BuildingType.ZONE_RESIDENTIAL) && roll(x, z, d + 50) < (shops ? 0.6 : 0.2)) bins.push({ ...at(0.06, -0.26), ...facing });
+          const bp = at(SIDEWALK * 0.62, 0.05);
+          if ((shops || lot === BuildingType.PARK) && roll(x, z, d + 40) < 0.55 && clear(bp)) benches.push({ ...bp, ...facing });
+          const binp = at(0.06, -0.26);
+          if ((shops || lot === BuildingType.ZONE_RESIDENTIAL) && roll(x, z, d + 50) < (shops ? 0.6 : 0.2) && clear(binp)) bins.push({ ...binp, ...facing });
         }
       }
     }

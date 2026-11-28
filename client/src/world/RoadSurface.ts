@@ -5,6 +5,12 @@ import {
 } from '@cityzen/shared';
 import type { CityStyle } from './CityStyle.js';
 import { MeshBuilder, arc, type Point } from './MeshBuilder.js';
+import {
+  DRIVEWAY_CUT_HALF,
+  findDepotDriveway,
+  isFleetBuilding,
+  type DepotDriveway,
+} from './DepotDriveway.js';
 
 /** Width of the sidewalk, taken from the lots along a street. */
 export const SIDEWALK = 0.26;
@@ -116,13 +122,18 @@ class RoadSurfaceBuilder {
   }
 
   build(buildings: readonly PlacedBuilding[]): void {
+    const driveways: DepotDriveway[] = [];
     for (const building of buildings) {
-      if (!isRoad(building.type)) continue;
-      if (building.type === BuildingType.ROAD_ROUNDABOUT) this.roundabout(building);
-      else if (isWide(building.type)) this.wideRoad(building);
-      else this.street(this.at(building.position.x, building.position.z)!);
+      if (isRoad(building.type)) {
+        if (building.type === BuildingType.ROAD_ROUNDABOUT) this.roundabout(building);
+        else if (isWide(building.type)) this.wideRoad(building);
+        else this.street(this.at(building.position.x, building.position.z)!);
+      } else if (isFleetBuilding(building.type)) {
+        const dw = findDepotDriveway(building, this.roads);
+        if (dw.hasRoad) driveways.push(dw);
+      }
     }
-    this.sidewalks();
+    this.sidewalks(driveways);
   }
 
   // ── Carriageways ──────────────────────────────────────────
@@ -384,7 +395,7 @@ class RoadSurfaceBuilder {
 
   // ── Sidewalks ─────────────────────────────────────────────
 
-  private sidewalks(): void {
+  private sidewalks(driveways: readonly DepotDriveway[]): void {
     const { style } = this.o;
     const cells = new Set<string>();
     for (const { x, z, type } of this.roads.values()) {
@@ -400,25 +411,69 @@ class RoadSurfaceBuilder {
     }
     const W = SIDEWALK;
 
+    /** Returns the driveway curb-cut interval [c0, c1] in cell-edge `across` coords, or null. */
+    const cutOnSide = (cx: number, cz: number, d: number): [number, number] | null => {
+      const [dx, dz] = SIDES[d];
+      const [rx, rz] = SIDES[(d + 1) & 3];
+      for (const dw of driveways) {
+        if (((dw.side + 2) & 3) !== d) continue;
+        const along = (dw.mouthX - cx) * dx + (dw.mouthZ - cz) * dz;
+        if (Math.abs(along - 0.5) > 0.05) continue;
+        const across = (dw.mouthX - cx) * rx + (dw.mouthZ - cz) * rz;
+        const c0 = across - DRIVEWAY_CUT_HALF;
+        const c1 = across + DRIVEWAY_CUT_HALF;
+        if (c1 > -0.5 + 1e-3 && c0 < 0.5 - 1e-3) return [c0, c1];
+      }
+      return null;
+    };
+
+    const subtractCut = (u0: number, u1: number, cut: [number, number] | null): [number, number][] => {
+      if (!cut || cut[1] <= u0 + 1e-4 || cut[0] >= u1 - 1e-4) return [[u0, u1]];
+      const out: [number, number][] = [];
+      if (cut[0] > u0 + 1e-4) out.push([u0, Math.min(u1, cut[0])]);
+      if (cut[1] < u1 - 1e-4) out.push([Math.max(u0, cut[1]), u1]);
+      return out;
+    };
+
     for (const key of cells) {
       const [x, z] = key.split(',').map(Number);
       if (x < 0 || z < 0 || x >= this.gridSize || z >= this.gridSize || this.roads.has(key) || this.o.isWater?.(x, z)) continue;
       // Bends bring their own sidewalk; a lot only ever touches the outside of one.
       const side = SIDES.map(([dx, dz]) => paved(x + dx, z + dz) && !bends.has(`${x + dx},${z + dz}`));
+      const cuts = [0, 1, 2, 3].map(d => (side[d] ? cutOnSide(x + 0.5, z + 0.5, d) : null));
       const cx = x + 0.5, cz = z + 0.5;
       const top = WALK_Y;
 
       for (let d = 0; d < 4; d++) {
         if (!side[d]) continue;
-        // Strip along this side; corners are added below.
         const axis = this.axis(cx, cz, d);
-        this.mesh.polygon([axis.point(0.5 - W, -0.5 + W), axis.point(0.5, -0.5 + W), axis.point(0.5, 0.5 - W), axis.point(0.5 - W, 0.5 - W)], top, style.walk);
-        this.mesh.wall(axis.point(0.5, -0.5 + W), axis.point(0.5, 0.5 - W), 0, top, style.kerb);
-        this.mesh.wall(axis.point(0.5 - W, -0.5 + W), axis.point(0.5 - W, 0.5 - W), 0, top, style.walk);
-        // A lighter kerb stone along the edge, and the joints between paving slabs.
-        this.mesh.polygon([axis.point(0.5 - 0.03, -0.5 + W), axis.point(0.5, -0.5 + W), axis.point(0.5, 0.5 - W), axis.point(0.5 - 0.03, 0.5 - W)], WALK_DETAIL_Y, shade(style.kerb, 1.12));
-        for (let j = -0.5 + W + 0.12; j < 0.5 - W - 0.02; j += 0.12) {
-          this.mesh.polygon([axis.point(0.5 - W, j - 0.004), axis.point(0.5 - 0.03, j - 0.004), axis.point(0.5 - 0.03, j + 0.004), axis.point(0.5 - W, j + 0.004)], WALK_DETAIL_Y, shade(style.walk, 0.86));
+        const cut = cuts[d];
+        if (cut) {
+          // Flush asphalt apron across the curb cut so vehicles enter the driveway smoothly.
+          const a0 = Math.max(-0.5, cut[0]);
+          const a1 = Math.min(0.5, cut[1]);
+          this.mesh.polygon(
+            [axis.point(0.5 - W, a0), axis.point(0.5, a0), axis.point(0.5, a1), axis.point(0.5 - W, a1)],
+            ROAD_Y + 0.002, style.asphalt,
+          );
+          if (cut[0] > -0.5 + 1e-4 && cut[0] < 0.5 - 1e-4) {
+            this.mesh.wall(axis.point(0.5 - W, cut[0]), axis.point(0.5, cut[0]), 0, top, style.kerb);
+          }
+          if (cut[1] > -0.5 + 1e-4 && cut[1] < 0.5 - 1e-4) {
+            this.mesh.wall(axis.point(0.5 - W, cut[1]), axis.point(0.5, cut[1]), 0, top, style.kerb);
+          }
+        }
+        // Strip along this side (split around any driveway curb cut); corners are added below.
+        for (const [u0, u1] of subtractCut(-0.5 + W, 0.5 - W, cut)) {
+          this.mesh.polygon([axis.point(0.5 - W, u0), axis.point(0.5, u0), axis.point(0.5, u1), axis.point(0.5 - W, u1)], top, style.walk);
+          this.mesh.wall(axis.point(0.5, u0), axis.point(0.5, u1), 0, top, style.kerb);
+          this.mesh.wall(axis.point(0.5 - W, u0), axis.point(0.5 - W, u1), 0, top, style.walk);
+          // A lighter kerb stone along the edge, and the joints between paving slabs.
+          this.mesh.polygon([axis.point(0.5 - 0.03, u0), axis.point(0.5, u0), axis.point(0.5, u1), axis.point(0.5 - 0.03, u1)], WALK_DETAIL_Y, shade(style.kerb, 1.12));
+          for (let j = -0.5 + W + 0.12; j < 0.5 - W - 0.02; j += 0.12) {
+            if (j - 0.004 < u0 || j + 0.004 > u1) continue;
+            this.mesh.polygon([axis.point(0.5 - W, j - 0.004), axis.point(0.5 - 0.03, j - 0.004), axis.point(0.5 - 0.03, j + 0.004), axis.point(0.5 - W, j + 0.004)], WALK_DETAIL_Y, shade(style.walk, 0.86));
+          }
         }
       }
 
@@ -437,6 +492,17 @@ class RoadSurfaceBuilder {
           this.mesh.polygon([[ix, iz], ...kerb], top, style.walk);
           this.mesh.walls(kerb, 0, top, style.kerb);
           this.mesh.polygon([axis.point(0.5 - W, 0.5 - W), axis.point(0.5, 0.5 - W), axis.point(0.5, 0.5), axis.point(0.5 - W, 0.5)], ROAD_Y, style.asphalt);
+        } else if (side[d] && !side[e] && cuts[d]) {
+          for (const [u0, u1] of subtractCut(0.5 - W, 0.5, cuts[d])) {
+            this.mesh.polygon([axis.point(0.5 - W, u0), axis.point(0.5, u0), axis.point(0.5, u1), axis.point(0.5 - W, u1)], top, style.walk);
+            this.mesh.wall(axis.point(0.5, u0), axis.point(0.5, u1), 0, top, style.kerb);
+          }
+        } else if (!side[d] && side[e] && cuts[e]) {
+          const eAxis = this.axis(cx, cz, e);
+          for (const [u0, u1] of subtractCut(-0.5, -0.5 + W, cuts[e])) {
+            this.mesh.polygon([eAxis.point(0.5 - W, u0), eAxis.point(0.5, u0), eAxis.point(0.5, u1), eAxis.point(0.5 - W, u1)], top, style.walk);
+            eAxis && this.mesh.wall(eAxis.point(0.5, u0), eAxis.point(0.5, u1), 0, top, style.kerb);
+          }
         } else {
           this.mesh.polygon([axis.point(0.5 - W, 0.5 - W), axis.point(0.5, 0.5 - W), axis.point(0.5, 0.5), axis.point(0.5 - W, 0.5)], top, style.walk);
           if (side[d]) this.mesh.wall(axis.point(0.5, 0.5 - W), axis.point(0.5, 0.5), 0, top, style.kerb);

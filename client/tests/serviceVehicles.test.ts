@@ -7,6 +7,7 @@ import {
   CityRoom,
   PopulationManager,
   S2C,
+  SERVICE_BUILDING_FLEETS,
   createEmptyGrid,
   type CityEmergencyOutcome,
   type PlacedBuilding,
@@ -36,6 +37,10 @@ registerHooks({
 
 const { CarManager } = await import('../src/world/CarManager.ts');
 const { EmergencyEffects } = await import('../src/world/EmergencyEffects.ts');
+const { BuildingFactory } = await import('../src/world/BuildingFactory.ts');
+const { CITY_STYLES } = await import('../src/world/CityStyle.ts');
+const { indexRoads } = await import('../src/world/RoadSurface.ts');
+const { findDepotDriveway } = await import('../src/world/DepotDriveway.ts');
 
 let nextId = 1;
 const place = (type: BuildingType, x: number, z: number): PlacedBuilding => ({
@@ -90,7 +95,9 @@ for (const [service, kind] of [
       if (v.service!.dwell > 0) dwelled = true;
       if (v.leaving >= 0) {
         assert.ok(v.service!.returning, 'only leaves once back at base');
-        // Pulls into the depot lot, not somewhere out on the road.
+        // Pulls into the depot's enclosed garage bay without shrinking away.
+        assert.equal((v as unknown as { mesh: THREE.Group }).mesh.scale.x, 1, 'vehicle must not shrink when entering driveway bay');
+        assert.equal((v as unknown as { mesh: THREE.Group }).mesh.visible, false, 'vehicle hides once inside the enclosed garage bay');
         assert.ok(Math.abs(v.x - home.x) < 1.6 && Math.abs(v.z - home.z) < 1.6, `back near depot (${v.x}, ${v.z})`);
         returned = true;
       }
@@ -264,5 +271,36 @@ test('unanswered emergencies expire with building destruction and citizen deaths
     assert.ok(outcomeEvt.data.outcome.moneyLost > 0, `${kind} caused treasury loss`);
     const updatedTarget = room.state.buildings.find(b => b.id === target.id)!;
     assert.ok((updatedTarget.developmentLevel ?? 0) < levelBefore, `${kind} damaged building development level`);
+  }
+});
+
+test('all fleet-producing buildings include driveways and align to adjacent roads on every side', () => {
+  const factory = new BuildingFactory();
+  const fleetTypes = Object.keys(SERVICE_BUILDING_FLEETS) as BuildingType[];
+  assert.ok(fleetTypes.length >= 10, 'expected all fleet buildings');
+
+  for (const type of fleetTypes) {
+    const preview = factory.createPreview(type, true, CITY_STYLES.classic);
+    let meshCount = 0;
+    preview.traverse((c) => { if (c instanceof THREE.Mesh) meshCount++; });
+    assert.ok(meshCount >= 12, `expected ${type} preview to include driveway & garage bay meshes, got ${meshCount}`);
+  }
+
+  // Verify road-side detection aligns the driveway to N, S, E, and W streets
+  const cases: Array<{ road: [number, number][]; expectedFacing: 'N' | 'S' | 'E' | 'W' }> = [
+    { road: [[10, 9], [11, 9]], expectedFacing: 'N' },
+    { road: [[10, 12], [11, 12]], expectedFacing: 'S' },
+    { road: [[9, 10], [9, 11]], expectedFacing: 'W' },
+    { road: [[12, 10], [12, 11]], expectedFacing: 'E' },
+  ];
+  for (const { road, expectedFacing } of cases) {
+    const depot = place(BuildingType.FIRE_STATION, 10, 10);
+    const buildings = [depot, ...road.map(([x, z]) => place(BuildingType.ROAD_STREET, x, z))];
+    const dw = findDepotDriveway(depot, indexRoads(buildings));
+    assert.equal(dw.hasRoad, true);
+    assert.equal(dw.facing, expectedFacing, `expected driveway to face ${expectedFacing}`);
+    // Bay interior must lie strictly inside the 2x2 building footprint [10..12, 10..12]
+    assert.ok(dw.bayX > 10.2 && dw.bayX < 11.8, `bayX ${dw.bayX} inside depot`);
+    assert.ok(dw.bayZ > 10.2 && dw.bayZ < 11.8, `bayZ ${dw.bayZ} inside depot`);
   }
 });

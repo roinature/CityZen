@@ -7,6 +7,12 @@ import {
 import type { CityStyle } from './CityStyle.js';
 import { SIDES, SIDEWALK, WALK_Y, isPaved, type RoadMap } from './RoadSurface.js';
 import { hasServiceModel } from './ServiceModels.js';
+import {
+  buildCivicGarageBayMesh,
+  findDepotDriveway,
+  isFleetBuilding,
+  type DrivewayFacing,
+} from './DepotDriveway.js';
 import type { Obstacle } from './explore/ObstacleMap.js';
 
 /** Values of the `kind` attribute the facade shader switches on. */
@@ -328,10 +334,15 @@ export class CityBuildings {
   }
 
   /** Builds a standalone 3D model for a civic service building centered at (0, 0, 0). */
-  static createServiceModelMesh(type: BuildingType, style: CityStyle, orientation?: RoadOrientation): THREE.Group {
+  static createServiceModelMesh(
+    type: BuildingType,
+    style: CityStyle,
+    orientation?: RoadOrientation,
+    drivewayFacing: DrivewayFacing = 'S',
+  ): THREE.Group {
     const { w, d } = getEffectiveSize(type, orientation);
     const builder = new CityBuildings();
-    const units = CityBuildings.layoutServiceUnits(type, -w / 2, -d / 2, 'preview', orientation);
+    const units = CityBuildings.layoutServiceUnits(type, -w / 2, -d / 2, 'preview', orientation, drivewayFacing);
     const group = new THREE.Group();
     const plaza = new THREE.Mesh(
       new THREE.BoxGeometry(w * CELL_SIZE, 0.028 * CELL_SIZE, d * CELL_SIZE),
@@ -340,6 +351,9 @@ export class CityBuildings {
     plaza.position.y = 0.014 * CELL_SIZE;
     group.add(plaza);
     builder.addUnits(units, style, group, false);
+    if (isFleetBuilding(type)) {
+      group.add(buildCivicGarageBayMesh(type, style, drivewayFacing, orientation));
+    }
     return group;
   }
 
@@ -380,7 +394,8 @@ export class CityBuildings {
     for (const b of buildings) {
       if (isRoad(b.type) || isZone(b.type) || isUtilityConduit(b.type) || hasServiceModel(b.type)
         || b.type === BuildingType.PARK || b.type === BuildingType.PARKING) continue;
-      units.push(...CityBuildings.layoutServiceUnits(b.type, b.position.x, b.position.z, b.id, b.orientation));
+      const facing = isFleetBuilding(b.type) ? findDepotDriveway(b, roads).facing : 'S';
+      units.push(...CityBuildings.layoutServiceUnits(b.type, b.position.x, b.position.z, b.id, b.orientation, facing));
     }
     return units;
   }
@@ -388,6 +403,7 @@ export class CityBuildings {
   /** Distinct architectural massing for public & civic buildings, with lit windows and coloured roofs. */
   private static layoutServiceUnits(
     type: BuildingType, x: number, z: number, id: string, orientation?: RoadOrientation,
+    drivewayFacing: DrivewayFacing = 'S',
   ): Unit[] {
     const def = BUILDING_DEFS[type];
     const { w, d } = getEffectiveSize(type, orientation);
@@ -399,6 +415,8 @@ export class CityBuildings {
     const bw = w - 2 * pad;
     const bd = d - 2 * pad;
     const defaultWall = color.clone().lerp(new THREE.Color(0xf1ece2), 0.78).getHex();
+    const cx = x + w / 2;
+    const cz = z + d / 2;
 
     const box = (
       partId: string, u0: number, v0: number, u1: number, v1: number, height: number,
@@ -406,16 +424,31 @@ export class CityBuildings {
     ): Unit => {
       const x0 = pad + u0 * bw, x1 = pad + u1 * bw;
       const z0 = pad + v0 * bd, z1 = pad + v1 * bd;
+      let rx = (x0 + x1) / 2 - w / 2;
+      let rz = (z0 + z1) / 2 - d / 2;
+      let rw = x1 - x0;
+      let rd = z1 - z0;
+      if (w === d && drivewayFacing !== 'S') {
+        if (drivewayFacing === 'N') {
+          rx = -rx; rz = -rz;
+        } else if (drivewayFacing === 'E') {
+          const ox = rx; rx = rz; rz = -ox;
+          const ow = rw; rw = rd; rd = ow;
+        } else {
+          const ox = rx; rx = -rz; rz = ox;
+          const ow = rw; rw = rd; rd = ow;
+        }
+      }
       return {
         key: `${id}:${partId}`,
         kind: opts?.kind ?? SHOP,
         wall: opts?.wall ?? defaultWall,
         seed: (seed + (opts?.seedOffset ?? 0)) % 1,
         accent,
-        x: x + (x0 + x1) / 2,
-        z: z + (z0 + z1) / 2,
-        w: x1 - x0,
-        d: z1 - z0,
+        x: cx + rx,
+        z: cz + rz,
+        w: rw,
+        d: rd,
         h: height,
       };
     };
@@ -427,7 +460,16 @@ export class CityBuildings {
           box('portico', 0.2, 0.76, 0.8, 0.98, h * 0.56, { wall: 0xf2e8d8 }),
         ];
 
-      case BuildingType.POLICE_HQ:
+      case BuildingType.POLICE_HQ: {
+        const wall = color.clone().lerp(new THREE.Color(0xe6ecf2), 0.58).getHex();
+        // Central HQ tower behind the sally-port garage bay (v <= 0.44), with flanking east/west wings
+        return [
+          box('tower', 0.2, 0.02, 0.8, 0.44, h * 1.38, { kind: TOWER, wall }),
+          box('west', 0.0, 0.14, 0.32, 0.86, h * 0.72, { kind: TOWER, wall, seedOffset: 0.13 }),
+          box('east', 0.68, 0.14, 1.0, 0.86, h * 0.72, { kind: TOWER, wall, seedOffset: 0.27 }),
+        ];
+      }
+
       case BuildingType.HEALTH_RESEARCH_CENTER: {
         const wall = color.clone().lerp(new THREE.Color(0xe6ecf2), 0.58).getHex();
         return [
@@ -438,7 +480,16 @@ export class CityBuildings {
         ];
       }
 
-      case BuildingType.POLICE_STATION:
+      case BuildingType.POLICE_STATION: {
+        const wall = color.clone().lerp(new THREE.Color(0xe6ecf2), 0.65).getHex();
+        // Precinct hall along rear + west/east wings cleanly framing the central cruiser garage bay
+        return [
+          box('precinct', -0.06, -0.08, 1.06, 0.14, h * 1.08, { kind: TOWER, wall }),
+          box('west-wing', -0.06, 0.14, 0.24, 0.82, h * 0.78, { kind: SHOP, wall, seedOffset: 0.19 }),
+          box('east-wing', 0.76, 0.14, 1.06, 0.82, h * 0.62, { kind: SHOP, wall }),
+        ];
+      }
+
       case BuildingType.POLICE_ACADEMY: {
         const wall = color.clone().lerp(new THREE.Color(0xe6ecf2), 0.65).getHex();
         return [
@@ -459,8 +510,28 @@ export class CityBuildings {
         ];
       }
 
-      case BuildingType.FIRE_STATION:
-      case BuildingType.FIRE_HQ:
+      case BuildingType.FIRE_STATION: {
+        const wall = color.clone().lerp(new THREE.Color(0xf0dfd8), 0.56).getHex();
+        // Firehouse rear + drill tower + flanking apparatus wings framing the central engine bay
+        return [
+          box('house', -0.06, -0.08, 0.74, 0.14, h * 0.98, { kind: TOWER, wall }),
+          box('drill-tower', 0.76, -0.08, 1.06, 0.26, h * 1.52, { kind: TOWER, wall, seedOffset: 0.21 }),
+          box('west-bay', -0.06, 0.14, 0.24, 0.82, h * 0.64, { kind: SHOP, wall }),
+          box('east-bay', 0.76, 0.26, 1.06, 0.82, h * 0.64, { kind: SHOP, wall, seedOffset: 0.12 }),
+        ];
+      }
+
+      case BuildingType.FIRE_HQ: {
+        const wall = color.clone().lerp(new THREE.Color(0xf0dfd8), 0.56).getHex();
+        // Large Fire HQ main house behind the apparatus bay, drill tower on corner, flanking bay wings
+        return [
+          box('house', 0.02, 0.02, 0.72, 0.44, h * 1.02, { kind: TOWER, wall }),
+          box('drill-tower', 0.72, 0.02, 0.98, 0.34, h * 1.54, { kind: TOWER, wall, seedOffset: 0.21 }),
+          box('west-wing', 0.02, 0.44, 0.32, 0.86, h * 0.64, { kind: SHOP, wall }),
+          box('east-wing', 0.68, 0.34, 0.98, 0.86, h * 0.64, { kind: SHOP, wall, seedOffset: 0.14 }),
+        ];
+      }
+
       case BuildingType.FIRE_TRAINING: {
         const wall = color.clone().lerp(new THREE.Color(0xf0dfd8), 0.56).getHex();
         return [
@@ -470,14 +541,21 @@ export class CityBuildings {
         ];
       }
 
-      case BuildingType.HEALTH_HOSPITAL:
       case BuildingType.HEALTH_CLINIC: {
         const wall = 0xf0f4f5;
         return [
-          box('spine', 0.28, 0.08, 0.72, 0.8, h * 1.2, { kind: TOWER, wall }),
-          box('west-ward', 0.0, 0.18, 0.28, 0.7, h * 0.82, { kind: TOWER, wall, seedOffset: 0.11 }),
-          box('east-ward', 0.72, 0.18, 1.0, 0.7, h * 0.82, { kind: TOWER, wall, seedOffset: 0.23 }),
-          box('er', 0.3, 0.8, 0.7, 0.98, h * 0.4, { kind: SHOP, wall }),
+          box('spine', -0.06, -0.08, 1.06, 0.14, h * 1.15, { kind: TOWER, wall }),
+          box('west-ward', -0.06, 0.14, 0.24, 0.82, h * 0.78, { kind: SHOP, wall, seedOffset: 0.11 }),
+          box('east-ward', 0.76, 0.14, 1.06, 0.82, h * 0.78, { kind: SHOP, wall, seedOffset: 0.23 }),
+        ];
+      }
+
+      case BuildingType.HEALTH_HOSPITAL: {
+        const wall = 0xf0f4f5;
+        return [
+          box('spine', 0.22, 0.02, 0.78, 0.44, h * 1.24, { kind: TOWER, wall }),
+          box('west-ward', 0.0, 0.14, 0.32, 0.86, h * 0.82, { kind: TOWER, wall, seedOffset: 0.11 }),
+          box('east-ward', 0.68, 0.14, 1.0, 0.86, h * 0.82, { kind: TOWER, wall, seedOffset: 0.23 }),
         ];
       }
 

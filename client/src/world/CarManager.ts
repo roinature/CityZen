@@ -31,6 +31,7 @@ import {
   createServiceVehicleMesh,
   type ServiceKind,
 } from './ServiceVehicles.js';
+import { computeDepotDriveway } from './DepotDriveway.js';
 
 const CAR_COLORS = [0xe53935, 0x1e88e5, 0xfdd835, 0x43a047, 0xff8f00, 0x8e24aa, 0xeceff1, 0x37474f];
 const CARS_PER_ROAD = 0.15; // one car per ~7 road tiles
@@ -96,6 +97,8 @@ interface ServiceTrip {
   home: string;
   stopsLeft: number;
   returning: boolean;
+  /** True once the vehicle has driven completely inside its depot's garage bay. */
+  parkedInBay?: boolean;
   /** Seconds left parked at the current stop (≤ 0 when driving). */
   dwell: number;
   flashers: THREE.MeshStandardMaterial[];
@@ -103,7 +106,7 @@ interface ServiceTrip {
   emergencyId?: string;
 }
 
-/** A service building and the road cell its vehicles pull out onto. */
+/** A service building and the road cell / driveway its vehicles pull out onto. */
 interface Depot {
   id: string;
   kind: ServiceKind;
@@ -111,6 +114,15 @@ interface Depot {
   tile: Tile;
   /** Heading from the road cell into the building. */
   side: number;
+  /** Driveway mouth on the building's road-facing lot edge. */
+  mouthX: number;
+  mouthZ: number;
+  /** Garage portal threshold where the vehicle enters under cover. */
+  portalX: number;
+  portalZ: number;
+  /** Deep interior point inside the enclosed garage bay. */
+  bayX: number;
+  bayZ: number;
   /** Earliest time the next vehicle may leave. */
   next: number;
 }
@@ -583,19 +595,28 @@ export class CarManager {
 
   // ── Service vehicles ──────────────────────────────────────
 
-  /** Finds every service building and the road cell its vehicles use. */
+  /** Finds every service building and the road cell / driveway its vehicles use. */
   private refreshDepots(net: RoadNetwork, buildings: readonly PlacedBuilding[]): void {
+    const isUsableRoad = (x: number, z: number): boolean => {
+      const t = net.tileAt(x, z);
+      return Boolean(t && !t.roundabout && !t.junction && t.links);
+    };
     const next = new Map<string, Depot>();
     for (const b of buildings) {
       const cfg = SERVICE_FLEETS[b.type];
       if (!cfg) continue;
-      const access = this.findAccess(net, b);
-      if (!access) continue;
+      const dw = computeDepotDriveway(b, isUsableRoad);
+      if (!dw.hasRoad) continue;
+      const tile = net.tileAt(dw.roadX, dw.roadZ);
+      if (!tile) continue;
       const old = this.depots.get(b.id);
       const fleet = getEffectiveFleetSize(b);
       next.set(b.id, {
         id: b.id, kind: cfg.kind, fleet,
-        tile: access.tile, side: access.side,
+        tile, side: dw.side,
+        mouthX: dw.mouthX, mouthZ: dw.mouthZ,
+        portalX: dw.portalX, portalZ: dw.portalZ,
+        bayX: dw.bayX, bayZ: dw.bayZ,
         next: old?.next ?? this.time + 1 + Math.random() * 6,
       });
     }
@@ -736,7 +757,7 @@ export class CarManager {
     if (Math.hypot(trip.path.xs[0] - car.x, trip.path.zs[0] - car.z) > 1e-3) {
       prependPoints(trip.path, [[car.x, car.z]], Math.min(TURN_SPEED, trip.path.speed[0]));
     }
-    appendPoints(trip.path, this.driveway(depot, true, trip.steps[trip.steps.length - 1].dir), DRIVEWAY_SPEED);
+    this.appendDriveway(trip.path, depot, trip.steps[trip.steps.length - 1].dir, DRIVEWAY_SPEED);
     const prevEv = car.path.events[car.ev];
     prevEv?.junction?.waiting.delete(car);
     sv.returning = true;
@@ -771,18 +792,69 @@ export class CarManager {
     return best;
   }
 
-  /** Short drive between the road lane and the inside of the depot. */
-  private driveway(depot: Depot, inbound: boolean, travelDir: number): [number, number][] {
-    const { tile, side } = depot;
-    const cx = tile.x + 0.5, cz = tile.z + 0.5;
-    // Angle the drive towards the direction of travel so it reads as a turn.
-    const lead = inbound ? 0.18 : -0.18;
-    const edge: [number, number] = [
-      cx + DX[side] * 0.5 + DX[travelDir] * lead,
-      cz + DZ[side] * 0.5 + DZ[travelDir] * lead,
-    ];
-    const inside: [number, number] = [cx + DX[side] * 0.95, cz + DZ[side] * 0.95];
-    return inbound ? [edge, inside] : [inside, edge];
+  /** Drive between the road lane, across the driveway apron, and deep into the depot's garage bay. */
+  private driveway(depot: Depot, inbound: boolean, _travelDir: number): [number, number][] {
+    const mouth: [number, number] = [depot.mouthX, depot.mouthZ];
+    const portal: [number, number] = [depot.portalX, depot.portalZ];
+    const bay: [number, number] = [depot.bayX, depot.bayZ];
+    return inbound ? [mouth, portal, bay] : [bay, portal, mouth];
+  }
+
+  /**
+   * Trims any slight backtrack at the start of an outbound road path when the driveway mouth
+   * sits slightly ahead of `depot.tile` (e.g. centered on a 2x2 building), then prepends the driveway.
+   */
+  private prependDriveway(path: Path, depot: Depot, travelDir: number, speed: number): void {
+    const dx = DX[travelDir];
+    const dz = DZ[travelDir];
+    if (path.xs.length >= 2) {
+      const s0 = (path.xs[0] - depot.mouthX) * dx + (path.zs[0] - depot.mouthZ) * dz;
+      const s1 = (path.xs[1] - depot.mouthX) * dx + (path.zs[1] - depot.mouthZ) * dz;
+      const targetS = 0.22;
+      if (s0 < targetS && s1 > targetS + 0.05 && (path.events.length === 0 || path.events[0].sEntry > path.ss[1])) {
+        const t = (targetS - s0) / (s1 - s0);
+        const nx = path.xs[0] + (path.xs[1] - path.xs[0]) * t;
+        const nz = path.zs[0] + (path.zs[1] - path.zs[0]) * t;
+        const removed = Math.hypot(nx - path.xs[0], nz - path.zs[0]);
+        path.xs[0] = nx;
+        path.zs[0] = nz;
+        for (let i = 1; i < path.ss.length; i++) path.ss[i] = Math.max(0, path.ss[i] - removed);
+        for (let i = 1; i < path.stepS.length; i++) path.stepS[i] = Math.max(0, path.stepS[i] - removed);
+        path.length = Math.max(0, path.length - removed);
+        for (const e of path.events) {
+          e.sEntry = Math.max(0, e.sEntry - removed);
+          e.sExit = Math.max(0, e.sExit - removed);
+        }
+      }
+    }
+    prependPoints(path, this.driveway(depot, false, travelDir), speed);
+  }
+
+  /**
+   * Trims any slight overshoot at the end of an inbound road path past the driveway mouth,
+   * then appends the straight drive through the portal deep into the garage bay.
+   */
+  private appendDriveway(path: Path, depot: Depot, travelDir: number, speed: number): void {
+    const dx = DX[travelDir];
+    const dz = DZ[travelDir];
+    const last = path.xs.length - 1;
+    if (last >= 1) {
+      const sPrev = (path.xs[last - 1] - depot.mouthX) * dx + (path.zs[last - 1] - depot.mouthZ) * dz;
+      const sEnd = (path.xs[last] - depot.mouthX) * dx + (path.zs[last] - depot.mouthZ) * dz;
+      const targetS = -0.22;
+      const lastEventExit = path.events.length ? path.events[path.events.length - 1].sExit : -1;
+      if (sEnd > targetS && sPrev < targetS - 0.05 && path.ss[last - 1] > lastEventExit) {
+        const t = (targetS - sPrev) / (sEnd - sPrev);
+        const nx = path.xs[last - 1] + (path.xs[last] - path.xs[last - 1]) * t;
+        const nz = path.zs[last - 1] + (path.zs[last] - path.zs[last - 1]) * t;
+        const segLen = Math.hypot(nx - path.xs[last - 1], nz - path.zs[last - 1]);
+        path.xs[last] = nx;
+        path.zs[last] = nz;
+        path.ss[last] = path.ss[last - 1] + segLen;
+        path.length = path.ss[last];
+      }
+    }
+    appendPoints(path, this.driveway(depot, true, travelDir), speed);
   }
 
   private pickStop(net: RoadNetwork, from: Tile): Tile | null {
@@ -901,9 +973,13 @@ export class CarManager {
       path = trip.path;
     }
 
-    if (this.isOccupied(path.xs[0], path.zs[0], SPAWN_CLEARANCE * 0.65)) return null;
+    if (
+      this.isOccupied(path.xs[0], path.zs[0], SPAWN_CLEARANCE * 0.65)
+      || this.isOccupied(depot.mouthX, depot.mouthZ, SPAWN_CLEARANCE * 0.65)
+      || this.isOccupied(depot.bayX, depot.bayZ, SPAWN_CLEARANCE * 0.65)
+    ) return null;
     for (let k = 0; k < path.speed.length; k++) path.speed[k] *= emergencyBoost;
-    prependPoints(path, this.driveway(depot, false, steps[0].dir), DRIVEWAY_SPEED * 1.25);
+    this.prependDriveway(path, depot, steps[0].dir, DRIVEWAY_SPEED * 1.25);
 
     const { group, flashers } = createServiceVehicleMesh(depot.kind);
     this.scene.add(group);
@@ -1050,9 +1126,13 @@ export class CarManager {
     const trip = this.planTrip(net, depot.tile, [0, 1, 2, 3], goal);
     if (!trip) return null;
     const { steps, path } = trip;
-    if (this.isOccupied(path.xs[0], path.zs[0], SPAWN_CLEARANCE)) return null;
+    if (
+      this.isOccupied(path.xs[0], path.zs[0], SPAWN_CLEARANCE)
+      || this.isOccupied(depot.mouthX, depot.mouthZ, SPAWN_CLEARANCE * 0.7)
+      || this.isOccupied(depot.bayX, depot.bayZ, SPAWN_CLEARANCE * 0.7)
+    ) return null;
     for (let k = 0; k < path.speed.length; k++) path.speed[k] *= profile.speed;
-    prependPoints(path, this.driveway(depot, false, steps[0].dir), DRIVEWAY_SPEED);
+    this.prependDriveway(path, depot, steps[0].dir, DRIVEWAY_SPEED);
 
     const { group, flashers } = createServiceVehicleMesh(depot.kind);
     this.scene.add(group);
@@ -1140,7 +1220,7 @@ export class CarManager {
     if (Math.hypot(path.xs[0] - car.x, path.zs[0] - car.z) > 1e-3) {
       prependPoints(path, [[car.x, car.z]], Math.min(TURN_SPEED, path.speed[0]));
     }
-    if (depot) appendPoints(path, this.driveway(depot, true, steps[steps.length - 1].dir), DRIVEWAY_SPEED);
+    if (depot) this.appendDriveway(path, depot, steps[steps.length - 1].dir, DRIVEWAY_SPEED);
     this.setPath(car, path, steps.map(st => st.tile), steps.map(st => st.dir));
     return true;
   }
@@ -1424,9 +1504,10 @@ export class CarManager {
       if (car.exiting) return false;
       if (sv && car.leaving < 0) {
         if (sv.returning) {
-          // Back inside: rest before the next call-out.
+          // Back inside the garage bay: rest before the next call-out.
           const depot = this.depots.get(sv.home);
           if (depot) depot.next = Math.max(depot.next, this.time + rand(SERVICE_PROFILES[sv.kind].rest));
+          sv.parkedInBay = true;
           car.leaving = 0;
         } else {
           if (sv.emergencyId) {
@@ -1442,8 +1523,15 @@ export class CarManager {
 
     if (car.leaving >= 0) {
       car.leaving += dt;
-      if (car.leaving >= FADE) return false;
-      car.mesh.scale.setScalar(1 - car.leaving / FADE);
+      if (sv?.parkedInBay) {
+        // Vehicle has driven completely into the enclosed garage bay: hide inside without shrinking.
+        car.mesh.scale.setScalar(1);
+        car.mesh.visible = false;
+        if (car.leaving >= 0.05) return false;
+      } else {
+        if (car.leaving >= FADE) return false;
+        car.mesh.scale.setScalar(1 - car.leaving / FADE);
+      }
     } else if (!car.entering && car.age < FADE) {
       car.mesh.scale.setScalar(0.3 + 0.7 * (car.age / FADE));
     } else {

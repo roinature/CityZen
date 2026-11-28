@@ -4,6 +4,14 @@ import {
   type Grid, type PlacedBuilding, type RoadOrientation, type WaterfrontFacing,
 } from '@cityzen/shared';
 import type { CityStyle } from './CityStyle.js';
+import type { RoadMap } from './RoadSurface.js';
+import {
+  addGarageBayToGroup,
+  drivewayFacingToYaw,
+  findDepotDriveway,
+  isFleetBuilding,
+  type DrivewayFacing,
+} from './DepotDriveway.js';
 
 type Build = (kit: Kit, w: number, d: number) => void;
 
@@ -152,15 +160,44 @@ const MODELS: Partial<Record<BuildingType, Build>> = {
   },
   [BuildingType.WATER_TREATMENT]: makeBasins(0x4f8fa8),
   [BuildingType.SEWAGE_PUMP_STATION]: (kit, w, d) => {
-    // Compact circular clarifier tank + lift pump house + green-brown pipe manifold
-    kit.cylinder(w * 0.24, w * 0.25, 0.22, kit.style.concrete, -w * 0.2, 0.03, -d * 0.14);
-    kit.cylinder(w * 0.21, w * 0.21, 0.02, 0x5d6b4d, -w * 0.2, 0.24, -d * 0.14);
-    kit.box(w * 0.42, 0.03, 0.045, METAL, -w * 0.2, 0.26, -d * 0.14);
-    kit.box(w * 0.38, 0.46, d * 0.52, kit.style.industry[0], w * 0.22, 0.03, 0.08 * d);
-    kit.box(w * 0.4, 0.05, d * 0.54, kit.accent, w * 0.22, 0.49, 0.08 * d);
-    kit.add(new THREE.CapsuleGeometry(0.11, w * 0.22, 6, 12).rotateZ(Math.PI / 2), 0x26a69a, -w * 0.16, 0.16, d * 0.26);
+    // Circular clarifier tank & lift pump house behind a sanitation truck garage bay + driveway (+z)
+    kit.cylinder(w * 0.2, w * 0.21, 0.22, kit.style.concrete, -w * 0.27, 0.03, -d * 0.25);
+    kit.cylinder(w * 0.17, w * 0.17, 0.02, 0x5d6b4d, -w * 0.27, 0.24, -d * 0.25);
+    kit.box(w * 0.34, 0.03, 0.04, METAL, -w * 0.27, 0.26, -d * 0.25);
+    kit.box(w * 0.36, 0.48, d * 0.34, kit.style.industry[0], w * 0.26, 0.03, -d * 0.26);
+    kit.box(w * 0.38, 0.05, d * 0.36, kit.accent, w * 0.26, 0.51, -d * 0.26);
+    kit.add(new THREE.CapsuleGeometry(0.09, w * 0.16, 6, 12).rotateZ(Math.PI / 2), 0x26a69a, -w * 0.34, 0.14, d * 0.14);
+    addGarageBayToGroup(kit.group, {
+      axisDepth: d,
+      wallColor: kit.style.industry[0],
+      accentColor: kit.accent,
+      style: kit.style,
+      bayHeight: 0.56,
+      bayWidth: 0.74,
+      hazardStripe: true,
+    });
   },
-  [BuildingType.WATER_SEWAGE_PLANT]: makeBasins(0x6b6a45),
+  [BuildingType.WATER_SEWAGE_PLANT]: (kit, w, d) => {
+    // Three circular treatment basins around a central sanitation truck garage bay + driveway (+z)
+    const r = Math.min(w, d) * 0.175;
+    for (const [bx, bz] of [[-0.28, -0.27], [0.28, -0.27], [-0.32, 0.18]] as const) {
+      kit.cylinder(r, r, 0.16, kit.style.concrete, bx * w, 0.03, bz * d);
+      kit.cylinder(r * 0.86, r * 0.86, 0.02, 0x6b6a45, bx * w, 0.18, bz * d);
+      kit.box(r * 1.7, 0.03, 0.05, METAL, bx * w, 0.2, bz * d);
+    }
+    // Operations hall on the right flank behind the bay
+    kit.box(w * 0.28, 0.54, d * 0.38, kit.style.apartments[0], w * 0.32, 0.03, d * 0.14);
+    kit.box(w * 0.3, 0.06, d * 0.4, kit.accent, w * 0.32, 0.57, d * 0.14);
+    addGarageBayToGroup(kit.group, {
+      axisDepth: d,
+      wallColor: kit.style.industry[0],
+      accentColor: kit.accent,
+      style: kit.style,
+      bayHeight: 0.60,
+      bayWidth: 0.82,
+      hazardStripe: true,
+    });
+  },
   [BuildingType.FIRE_HELICOPTER]: (kit, w, d) => {
     // Raised helipad deck with yellow circle/corner markings and white 'H'
     kit.box(w * 0.56, 0.08, d * 0.56, kit.style.asphalt, -w * 0.14, 0.03, -d * 0.08);
@@ -237,34 +274,57 @@ const MODELS: Partial<Record<BuildingType, Build>> = {
     kit.add(new THREE.SphereGeometry(0.12, 12, 8), 0xc6cdd2, w * 0.2, 0.16, d * 0.2);
   },
   [BuildingType.TRANS_BUS_DEPOT]: (kit, w, d) => {
-    kit.box(w * 0.88, 0.02, d * 0.88, kit.style.asphalt, 0, 0.03, 0);
-    // Dispatch office
-    kit.box(w * 0.82, 0.42, d * 0.24, kit.style.apartments[0], 0, 0.04, -d * 0.28);
-    kit.box(w * 0.84, 0.05, d * 0.26, kit.accent, 0, 0.46, -d * 0.28);
-    // Shelter canopy + columns + parked buses
-    kit.box(w * 0.82, 0.04, d * 0.44, WHITE, 0, 0.36, d * 0.14);
-    for (const x of [-0.36, 0, 0.36]) kit.cylinder(0.025, 0.025, 0.33, METAL, x * w, 0.04, d * 0.14);
-    for (const x of [-0.24, 0.04, 0.28]) {
-      kit.box(0.16, 0.15, 0.46, kit.accent, x * w, 0.05, d * 0.16);
-      kit.box(0.165, 0.05, 0.42, 0x263238, x * w, 0.14, d * 0.16);
+    kit.box(w * 0.92, 0.016, d * 0.92, kit.style.asphalt, 0, 0.024, 0);
+    // Dispatch office along the rear
+    kit.box(w * 0.88, 0.48, d * 0.2, kit.style.apartments[0], 0, 0.03, -d * 0.38);
+    kit.box(w * 0.9, 0.05, d * 0.22, kit.accent, 0, 0.51, -d * 0.38);
+    // Side boarding shelters + parked buses flanking the central bus driveway bay
+    for (const side of [-1, 1]) {
+      const sx = side * w * 0.35;
+      kit.box(w * 0.24, 0.04, d * 0.52, WHITE, sx, 0.36, d * 0.08);
+      for (const z of [-0.12, 0.28]) kit.cylinder(0.022, 0.022, 0.33, METAL, sx + side * 0.06, 0.03, z * d);
+      kit.box(0.16, 0.15, 0.44, kit.accent, sx, 0.04, d * 0.1);
+      kit.box(0.165, 0.05, 0.4, 0x263238, sx, 0.13, d * 0.1);
     }
+    // Central recessed bus bay & driveway opening onto +z
+    addGarageBayToGroup(kit.group, {
+      axisDepth: d,
+      wallColor: kit.style.apartments[0],
+      accentColor: kit.accent,
+      style: kit.style,
+      bayHeight: 0.56,
+      bayWidth: 0.74,
+      hazardStripe: false,
+    });
   },
   [BuildingType.TRANS_TRAIN_STATION]: (kit, w, d) => {
-    // Trackbed, twin rails, island platform canopy & passenger train
-    kit.box(w * 0.96, 0.025, d * 0.38, 0x6e6a63, 0, 0.03, -d * 0.26);
-    for (const z of [-0.36, -0.31, -0.21, -0.16]) kit.box(w * 0.96, 0.015, 0.018, METAL, 0, 0.055, z * d);
-    kit.box(w * 0.9, 0.06, d * 0.16, kit.style.walk, 0, 0.03, -d * 0.02);
-    kit.box(w * 0.86, 0.04, d * 0.2, kit.accent, 0, 0.38, -d * 0.02);
-    for (const x of [-0.34, 0, 0.34]) kit.cylinder(0.022, 0.022, 0.32, METAL, x * w, 0.08, -d * 0.02);
+    // Trackbed, twin rails, island platform canopy & passenger train along -z
+    kit.box(w * 0.96, 0.025, d * 0.34, 0x6e6a63, 0, 0.03, -d * 0.3);
+    for (const z of [-0.38, -0.33, -0.25, -0.20]) kit.box(w * 0.96, 0.015, 0.018, METAL, 0, 0.055, z * d);
+    kit.box(w * 0.9, 0.06, d * 0.12, kit.style.walk, 0, 0.03, -d * 0.08);
+    kit.box(w * 0.86, 0.04, d * 0.16, kit.accent, 0, 0.38, -d * 0.08);
+    for (const x of [-0.34, 0, 0.34]) kit.cylinder(0.022, 0.022, 0.32, METAL, x * w, 0.08, -d * 0.08);
     for (const x of [-0.27, 0, 0.27]) {
-      kit.box(w * 0.24, 0.15, 0.16, WHITE, x * w, 0.07, -d * 0.26);
-      kit.box(w * 0.242, 0.04, 0.165, kit.accent, x * w, 0.13, -d * 0.26);
+      kit.box(w * 0.24, 0.15, 0.16, WHITE, x * w, 0.07, -d * 0.3);
+      kit.box(w * 0.242, 0.04, 0.165, kit.accent, x * w, 0.13, -d * 0.3);
     }
-    // Concourse station hall & clock tower
-    kit.box(w * 0.72, 0.56, d * 0.32, kit.style.downtown[0], 0, 0.03, d * 0.24);
-    kit.box(w * 0.74, 0.06, d * 0.34, kit.accent, 0, 0.59, d * 0.24);
-    kit.box(0.28, 0.42, 0.28, kit.style.downtown[0], 0, 0.65, d * 0.24);
-    kit.add(new THREE.ConeGeometry(0.22, 0.2, 4).rotateY(Math.PI / 4), kit.accent, 0, 1.17, d * 0.24);
+    // Concourse station wings flanking the shuttle bus bay (+z) & clock tower
+    for (const side of [-1, 1]) {
+      kit.box(w * 0.28, 0.56, d * 0.38, kit.style.downtown[0], side * w * 0.3, 0.03, d * 0.22);
+      kit.box(w * 0.3, 0.06, d * 0.4, kit.accent, side * w * 0.3, 0.59, d * 0.22);
+    }
+    kit.box(0.28, 0.42, 0.28, kit.style.downtown[0], -w * 0.3, 0.65, d * 0.22);
+    kit.add(new THREE.ConeGeometry(0.22, 0.2, 4).rotateY(Math.PI / 4), kit.accent, -w * 0.3, 1.17, d * 0.22);
+    // Shuttle bus bay & driveway opening onto +z
+    addGarageBayToGroup(kit.group, {
+      axisDepth: d,
+      wallColor: kit.style.downtown[0],
+      accentColor: kit.accent,
+      style: kit.style,
+      bayHeight: 0.58,
+      bayWidth: 0.78,
+      hazardStripe: false,
+    });
   },
   [BuildingType.TRANS_AIRPORT]: (kit, w, d) => {
     kit.box(w * 0.92, 0.02, d * 0.2, kit.style.asphalt, 0, 0.04, -d * 0.28);
@@ -429,6 +489,7 @@ export function buildServiceModelMesh(
   style: CityStyle,
   orientation?: RoadOrientation,
   facing?: WaterfrontFacing,
+  drivewayFacing?: DrivewayFacing,
 ): THREE.Group {
   const waterfront = isWaterfront(type);
   const resolvedFacing: WaterfrontFacing | undefined = facing
@@ -440,20 +501,59 @@ export function buildServiceModelMesh(
   if (!waterfront) {
     kit.box(w, 0.03, d, GREEN.has(type) ? style.lawn : style.concrete);
   }
-  MODELS[type]?.(kit, w, d);
-  if (resolvedFacing) {
-    kit.group.rotation.y = facingToYaw(resolvedFacing);
+  if (type === BuildingType.TRANS_TRAIN_STATION && (drivewayFacing === 'E' || drivewayFacing === 'W')) {
+    // Rectangular 3x2 train station with road on its short E/W end: keep 3x2 footprint and place bus bay on that end.
+    kit.box(w * 0.96, 0.025, d * 0.32, 0x6e6a63, 0, 0.03, -d * 0.31);
+    for (const z of [-0.39, -0.34, -0.26, -0.21]) kit.box(w * 0.96, 0.015, 0.018, METAL, 0, 0.055, z * d);
+    kit.box(w * 0.86, 0.06, d * 0.12, kit.style.walk, 0, 0.03, -d * 0.1);
+    for (const x of [-0.27, 0, 0.27]) {
+      kit.box(w * 0.24, 0.15, 0.16, WHITE, x * w, 0.07, -d * 0.31);
+      kit.box(w * 0.242, 0.04, 0.165, kit.accent, x * w, 0.13, -d * 0.31);
+    }
+    const hallSign = drivewayFacing === 'E' ? -1 : 1;
+    kit.box(w * 0.36, 0.56, d * 0.42, kit.style.downtown[0], hallSign * w * 0.28, 0.03, d * 0.2);
+    kit.box(w * 0.38, 0.06, d * 0.44, kit.accent, hallSign * w * 0.28, 0.59, d * 0.2);
+    kit.box(0.28, 0.42, 0.28, kit.style.downtown[0], hallSign * w * 0.28, 0.65, d * 0.2);
+    kit.add(new THREE.ConeGeometry(0.22, 0.2, 4).rotateY(Math.PI / 4), kit.accent, hallSign * w * 0.28, 1.17, d * 0.2);
+
+    const bayGroup = new THREE.Group();
+    addGarageBayToGroup(bayGroup, {
+      axisDepth: w,
+      wallColor: kit.style.downtown[0],
+      accentColor: kit.accent,
+      style: kit.style,
+      bayHeight: 0.58,
+      bayWidth: 0.78,
+    });
+    bayGroup.rotation.y = drivewayFacingToYaw(drivewayFacing);
+    kit.group.add(bayGroup);
+  } else {
+    MODELS[type]?.(kit, w, d);
+    if (resolvedFacing) {
+      kit.group.rotation.y = facingToYaw(resolvedFacing);
+    } else if (drivewayFacing && isFleetBuilding(type)) {
+      // Square fleet buildings rotate freely; 3x2 train station rotates 0 or PI for S/N.
+      kit.group.rotation.y = drivewayFacingToYaw(drivewayFacing);
+    }
   }
   kit.group.scale.setScalar(CELL_SIZE);
   return kit.group;
 }
 
-export function createServiceModel(building: PlacedBuilding, style: CityStyle, grid?: Grid): THREE.Group {
+export function createServiceModel(
+  building: PlacedBuilding,
+  style: CityStyle,
+  grid?: Grid,
+  roads?: RoadMap,
+): THREE.Group {
   const { w, d } = getEffectiveSize(building.type, building.orientation);
   const facing = grid && (isWaterfront(building.type) || building.type === BuildingType.TRANS_HARBOR)
     ? getWaterfrontFacing(grid, building.position, building.type, building.orientation, true) ?? undefined
     : undefined;
-  const group = buildServiceModelMesh(building.type, style, building.orientation, facing);
+  const drivewayFacing = roads && isFleetBuilding(building.type)
+    ? findDepotDriveway(building, roads).facing
+    : undefined;
+  const group = buildServiceModelMesh(building.type, style, building.orientation, facing, drivewayFacing);
   group.position.set((building.position.x + w / 2) * CELL_SIZE, 0, (building.position.z + d / 2) * CELL_SIZE);
   return group;
 }

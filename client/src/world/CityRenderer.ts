@@ -5,8 +5,9 @@ import {
 } from '@cityzen/shared';
 import { CityBuildings, type GridRect } from './CityBuildings.js';
 import { CITY_STYLES, type CityStyle, type CityStyleId } from './CityStyle.js';
-import { createRoadSurface, indexRoads } from './RoadSurface.js';
+import { createRoadSurface, indexRoads, type RoadMap } from './RoadSurface.js';
 import { createServiceModel, hasServiceModel } from './ServiceModels.js';
+import { buildCivicGarageBayMesh, findDepotDriveway, isFleetBuilding } from './DepotDriveway.js';
 import { StreetFurniture } from './StreetFurniture.js';
 import { UtilityOverlay } from './UtilityOverlay.js';
 import { EmergencyEffects } from './EmergencyEffects.js';
@@ -29,7 +30,7 @@ export class CityRenderer {
   private emergencies = new EmergencyEffects();
   private surface: THREE.Mesh | null = null;
   private rotors: THREE.Object3D[] = [];
-  private models = new Map<string, THREE.Group>();
+  private models = new Map<string, { group: THREE.Group; variant: string }>();
   private state: CityState | null = null;
   private needsSync = false;
   private surfaceKey = '';
@@ -69,7 +70,7 @@ export class CityRenderer {
 
   private applyModelsOpacity(opacity: number): void {
     const translucent = opacity < 0.99;
-    for (const model of this.models.values()) {
+    for (const { group: model } of this.models.values()) {
       model.traverse(child => {
         if (!(child instanceof THREE.Mesh)) return;
         const mats = Array.isArray(child.material) ? child.material : [child.material];
@@ -199,7 +200,7 @@ export class CityRenderer {
     if (this.obstacles) return this.obstacles;
     const boxes: Obstacle[] = [...this.buildings.getFootprints()];
     const box = new THREE.Box3();
-    for (const model of this.models.values()) {
+    for (const { group: model } of this.models.values()) {
       model.updateMatrixWorld(true);
       model.traverse(child => {
         if (!(child instanceof THREE.Mesh) || child.name === 'wake') return;
@@ -238,7 +239,7 @@ export class CityRenderer {
       this.furniture.rebuild(state.buildings, roads, state.grid.length, style, look.trees, isWater);
     }
     this.buildings.rebuild(state.buildings, roads, { style, skyline: look.skyline });
-    this.syncModels(state.buildings, style, state.grid);
+    this.syncModels(state.buildings, style, state.grid, roads);
     if (this.activeLayer !== 'surface') {
       const opacity = this.activeLayer === 'water' || this.activeLayer === 'sewage' ? 0.24 : 0.65;
       this.applyModelsOpacity(opacity);
@@ -249,23 +250,44 @@ export class CityRenderer {
     }
   }
 
-  private syncModels(buildings: readonly PlacedBuilding[], style: CityStyle, grid?: Grid): void {
+  private syncModels(buildings: readonly PlacedBuilding[], style: CityStyle, grid?: Grid, roads?: RoadMap): void {
     const current = new Set<string>();
     for (const building of buildings) {
-      if (!hasServiceModel(building.type)) continue;
+      const custom = hasServiceModel(building.type);
+      const civicBay = !custom && isFleetBuilding(building.type);
+      if (!custom && !civicBay) continue;
       current.add(building.id);
-      if (this.models.has(building.id)) continue;
-      const model = createServiceModel(building, style, grid);
-      this.models.set(building.id, model);
+
+      const drivewayFacing = roads && isFleetBuilding(building.type)
+        ? findDepotDriveway(building, roads).facing
+        : 'S';
+      const variant = `${building.type}:${building.orientation ?? ''}:${drivewayFacing}`;
+      const existing = this.models.get(building.id);
+      if (existing && existing.variant === variant) continue;
+      if (existing) {
+        this.scene.remove(existing.group);
+        disposeModel(existing.group);
+        this.models.delete(building.id);
+      }
+
+      let model: THREE.Group;
+      if (custom) {
+        model = createServiceModel(building, style, grid, roads);
+      } else {
+        const { w, d } = getEffectiveSize(building.type, building.orientation);
+        model = buildCivicGarageBayMesh(building.type, style, drivewayFacing, building.orientation);
+        model.position.set((building.position.x + w / 2) * CELL_SIZE, 0, (building.position.z + d / 2) * CELL_SIZE);
+      }
+      this.models.set(building.id, { group: model, variant });
       this.scene.add(model);
     }
-    for (const [id, model] of this.models) {
+    for (const [id, { group: model }] of this.models) {
       if (current.has(id)) continue;
       this.scene.remove(model);
       disposeModel(model);
       this.models.delete(id);
     }
-    this.rotors = [...this.models.values()].flatMap(model => model.getObjectByName('rotor') ?? []);
+    this.rotors = [...this.models.values()].flatMap(({ group: model }) => model.getObjectByName('rotor') ?? []);
   }
 
   private clearSurface(): void {
