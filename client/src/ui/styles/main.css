@@ -990,68 +990,204 @@ body.in-city {
   opacity: 0.5;
 }
 
-.worldmap-claim-dialog {
-  margin-top: 16px;
+.worldmap-claim-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
   display: flex;
-  gap: 8px;
   align-items: center;
   justify-content: center;
+  padding: 20px;
+  background: rgba(5, 10, 18, 0.72);
+  backdrop-filter: blur(8px);
+  animation: worldmap-modal-fade 0.18s ease-out;
 }
 
-.worldmap-claim-dialog[hidden] {
+.worldmap-claim-modal[hidden] {
   display: none;
 }
 
-.worldmap-city-name {
-  padding: 8px 12px;
-  border-radius: 6px;
-  border: 1px solid #333;
-  background: #16213e;
-  color: white;
-  font-size: 14px;
-  width: 200px;
+.worldmap-claim-dialog {
+  position: relative;
+  width: min(440px, 100%);
+  padding: 24px;
+  border-radius: 16px;
+  border: 1px solid rgba(148, 208, 147, 0.45);
+  background: linear-gradient(160deg, #1b3138 0%, #111d29 100%);
+  box-shadow:
+    0 24px 64px rgba(0, 0, 0, 0.65),
+    0 0 0 1px rgba(148, 208, 147, 0.12),
+    0 0 36px rgba(76, 175, 80, 0.18);
+  color: #f2f7f4;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  animation: worldmap-claim-pop 0.28s cubic-bezier(0.22, 1.28, 0.36, 1);
+}
+
+@keyframes worldmap-modal-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes worldmap-claim-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.9) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.worldmap-claim-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: #c8d6cf;
+  font-size: 20px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.worldmap-claim-close:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+}
+
+.worldmap-claim-site {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 38px 12px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(148, 208, 147, 0.22);
+}
+
+.worldmap-claim-preview {
+  width: 68px;
+  height: 68px;
+  flex: none;
+  border-radius: 8px;
+  image-rendering: pixelated;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+
+.worldmap-claim-site-info {
   min-width: 0;
+}
+
+.worldmap-claim-eyebrow {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #9be39a;
+  margin-bottom: 2px;
+}
+
+.worldmap-claim-site-name {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 700;
+  color: #ffffff;
+  line-height: 1.2;
+}
+
+.worldmap-claim-site-meta {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #b7c8c0;
+}
+
+.worldmap-claim-label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #dfece6;
+}
+
+.worldmap-city-name {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1.5px solid rgba(148, 208, 147, 0.32);
+  background: rgba(9, 17, 26, 0.78);
+  color: white;
+  font-size: 16px;
+  min-width: 0;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.worldmap-city-name::placeholder {
+  color: rgba(200, 214, 207, 0.45);
 }
 
 .worldmap-city-name:focus {
   outline: none;
-  border-color: #4caf50;
+  border-color: #7cd67b;
+  box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.25);
 }
 
 .worldmap-claim-buttons {
   display: flex;
-  gap: 6px;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 2px;
 }
 
 .worldmap-claim-btn {
-  padding: 8px 16px;
-  border-radius: 6px;
+  padding: 11px 22px;
+  border-radius: 10px;
   border: none;
-  background: #4caf50;
+  background: linear-gradient(135deg, #56c25b 0%, #389e41 100%);
   color: white;
-  font-size: 13px;
+  font-size: 14px;
   cursor: pointer;
-  font-weight: bold;
-  transition: background 0.15s;
+  font-weight: 700;
+  box-shadow: 0 6px 18px rgba(76, 175, 80, 0.35);
+  transition: transform 0.12s, box-shadow 0.15s, filter 0.15s;
 }
 
 .worldmap-claim-btn:hover {
-  background: #43a047;
+  filter: brightness(1.07);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 22px rgba(76, 175, 80, 0.45);
+}
+
+.worldmap-claim-btn:active {
+  transform: translateY(0);
 }
 
 .worldmap-cancel-btn {
-  padding: 8px 16px;
-  border-radius: 6px;
-  border: none;
-  background: rgba(255, 255, 255, 0.1);
-  color: white;
+  padding: 11px 16px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06);
+  color: #d3dfd9;
   font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
   transition: background 0.15s;
 }
 
 .worldmap-cancel-btn:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.14);
 }
 
 /* Road connection indicators on world map cells */
@@ -2344,7 +2480,8 @@ body:not(.in-city) .density-picker {
   :is(.lobby-panel, .worldmap-panel, .menu-panel, .options-panel, .finance-panel, .maslow-panel) { padding: 16px; }
   .worldmap-panel:not(.earth-panel) { width: min(100%, 512px); }
   .worldmap-subtitle { margin-bottom: 12px; }
-  .worldmap-claim-dialog { flex-wrap: wrap; }
+  .worldmap-claim-dialog { padding: 20px; }
+  .worldmap-claim-buttons { flex-wrap: wrap; }
   .worldmap-city-name { min-height: 44px; }
   :is(.worldmap-city-name, .lobby-panel input, .build-service-select) { font-size: 16px; }
 }
@@ -2423,7 +2560,6 @@ body:not(.in-city) .density-picker {
 .earth-suggestions b { display: none; }
 .earth-side .earth-sites { max-height: 330px; overflow-y: auto; padding-right: 2px; }
 .earth-side .earth-sites span span { font-size: 12px; color: #c3cec9; }
-.earth-side .worldmap-claim-dialog { margin-top: 10px; }
 @media (max-width: 760px) {
   .earth-layout { grid-template-columns: 1fr; gap: 14px; }
   .earth-globe { aspect-ratio: auto; height: min(42dvh, 340px); }

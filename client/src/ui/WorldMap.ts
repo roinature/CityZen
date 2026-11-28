@@ -45,6 +45,10 @@ export class WorldMap {
   private selected?: SiteId;
   private sites: HTMLElement;
   private suggestions: HTMLElement;
+  private claimModal: HTMLElement;
+  private claimPreview: HTMLCanvasElement;
+  private claimSiteName: HTMLElement;
+  private claimSiteMeta: HTMLElement;
   private form: HTMLFormElement;
   private cityName: HTMLInputElement;
   private continent: HTMLSelectElement;
@@ -82,16 +86,33 @@ export class WorldMap {
               <label>Country<select class="country"></select></label>
             </div>
             <div class="earth-sites"></div>
-            <form class="worldmap-claim-dialog" hidden>
-              <input class="worldmap-city-name" aria-label="City name" placeholder="City name" maxlength="80" required />
-              <button class="worldmap-claim-btn">Found city</button>
-            </form>
             <div class="earth-legacy"></div>
           </div>
         </div>
         <small>${EARTH_SITES.length} sites · 3.2 km per side · Green: buildable · Blue: sea · Ochre: steep slope<br>
         Elevation: USGS and NOAA via <a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noreferrer">Mapzen Terrain Tiles</a></small>
-      </section>`;
+      </section>
+      <div class="worldmap-claim-modal" role="dialog" aria-modal="true" aria-labelledby="worldmap-claim-title" hidden>
+        <form class="worldmap-claim-dialog">
+          <button type="button" class="worldmap-claim-close" aria-label="Close">&times;</button>
+          <div class="worldmap-claim-site">
+            <canvas class="worldmap-claim-preview" width="78" height="78"></canvas>
+            <div class="worldmap-claim-site-info">
+              <span class="worldmap-claim-eyebrow">Selected Site</span>
+              <h3 id="worldmap-claim-title" class="worldmap-claim-site-name"></h3>
+              <p class="worldmap-claim-site-meta"></p>
+            </div>
+          </div>
+          <label class="worldmap-claim-label">
+            <span>Name your new city</span>
+            <input class="worldmap-city-name" aria-label="City name" placeholder="e.g. New Horizon" maxlength="80" required />
+          </label>
+          <div class="worldmap-claim-buttons">
+            <button type="button" class="worldmap-cancel-btn">Choose another site</button>
+            <button type="submit" class="worldmap-claim-btn">Found City</button>
+          </div>
+        </form>
+      </div>`;
     parent.append(this.overlay);
     const inviteBtn = this.overlay.querySelector('.worldmap-invite-btn') as HTMLButtonElement;
     if (callbacks.onInvite) {
@@ -103,7 +124,11 @@ export class WorldMap {
     this.suggestions = this.overlay.querySelector('.earth-suggestions')!;
     this.locationNote = this.overlay.querySelector('.earth-location-note')!;
     this.locateBtn = this.overlay.querySelector('.earth-locate-btn')!;
-    this.form = this.overlay.querySelector('form')!;
+    this.claimModal = this.overlay.querySelector('.worldmap-claim-modal')!;
+    this.claimPreview = this.claimModal.querySelector('.worldmap-claim-preview')!;
+    this.claimSiteName = this.claimModal.querySelector('.worldmap-claim-site-name')!;
+    this.claimSiteMeta = this.claimModal.querySelector('.worldmap-claim-site-meta')!;
+    this.form = this.claimModal.querySelector('form')!;
     this.cityName = this.form.querySelector('input')!;
     this.continent = this.overlay.querySelector('.continent')!;
     this.country = this.overlay.querySelector('.country')!;
@@ -126,6 +151,17 @@ export class WorldMap {
       event.preventDefault();
       if (this.selected && this.cityName.value.trim()) this.callbacks.onClaimPlot(this.selected, this.cityName.value.trim());
     };
+    (this.claimModal.querySelector('.worldmap-claim-close') as HTMLButtonElement).onclick = () => this.closeClaimModal();
+    (this.claimModal.querySelector('.worldmap-cancel-btn') as HTMLButtonElement).onclick = () => this.closeClaimModal();
+    this.claimModal.onclick = event => {
+      if (event.target === this.claimModal) this.closeClaimModal();
+    };
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && this.isVisible() && !this.claimModal.hidden) {
+        event.preventDefault();
+        this.closeClaimModal();
+      }
+    });
     this.resetFiltersToLocation();
   }
 
@@ -293,7 +329,7 @@ export class WorldMap {
       const isOfflineCached = city.online === false && city.hasCachedSnapshot;
       action.textContent = isOfflineCached ? `Tour ${city.name} (Read-only)` : `Enter ${city.name}`;
     } else {
-      action.textContent = this.selected === site.id ? 'Name your city below' : 'Available';
+      action.textContent = this.selected === site.id ? 'Selected' : 'Available';
     }
     info.append(title, place, terrain, action);
     if (city) {
@@ -330,11 +366,32 @@ export class WorldMap {
       : 'Closest open sites to your time zone. Tap ◎ Near me for a precise match.';
   }
 
+  private closeClaimModal() {
+    this.selected = undefined;
+    this.cityName.value = '';
+    this.render();
+  }
+
+  private renderClaimModal() {
+    const site = this.selected ? EARTH_SITES.find(s => s.id === this.selected) : undefined;
+    if (!site) {
+      this.claimModal.hidden = true;
+      return;
+    }
+    const { canvas: source, min, max, buildable } = siteStats(site.id);
+    this.claimPreview.width = source.width;
+    this.claimPreview.height = source.height;
+    this.claimPreview.getContext('2d')!.drawImage(source, 0, 0);
+    this.claimSiteName.textContent = site.name;
+    this.claimSiteMeta.textContent = `${site.country} · ${buildable}% buildable · ${min}–${max} m${site.coast ? ' · Coastal' : ''}`;
+    this.claimModal.hidden = false;
+  }
+
   private render(scrollTo?: string) {
     this.renderSuggestions();
     this.sites.replaceChildren();
     for (const { site, km } of this.sitesByDistance(this.filteredSites())) this.sites.append(this.siteCard(site, km));
-    this.form.hidden = !this.selected;
+    this.renderClaimModal();
     const legacy = this.overlay.querySelector('.earth-legacy')!;
     legacy.replaceChildren();
     for (const city of this.world?.cities.filter(city => !city.siteId) ?? []) {

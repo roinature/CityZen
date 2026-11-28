@@ -500,6 +500,8 @@ export class BoatManager {
   private scene: THREE.Scene;
   private boats: Boat[] = [];
   private riding: Boat | null = null;
+  /** Earliest time to try again after failing to find the ridden boat somewhere to cruise to. */
+  private cruiseRetry = 0;
   private network: WaterNetwork | null = null;
   private occupiedBerths = new Set<string>();
   private sig = '';
@@ -803,6 +805,8 @@ export class BoatManager {
     for (const other of this.boats) {
       if (other === boat || other.leaving >= 0) continue;
       if (boat.phase === 'docking' && other.phase === 'docked' && other.targetBerth !== boat.targetBerth) continue;
+      // Oncoming boats would each wait on the other forever; they slip past instead.
+      if (Math.cos(other.yaw) * hx - Math.sin(other.yaw) * hz < -0.5 && other.phase !== 'docked') continue;
       const dx = other.x - boat.x, dz = other.z - boat.z;
       const ahead = dx * hx + dz * hz;
       if (ahead <= 0 || ahead > look) continue;
@@ -870,6 +874,26 @@ export class BoatManager {
     boat.leaving = 0;
   }
 
+  /** Sends a boat to open water elsewhere inside the map; false if there is nowhere to go. */
+  private cruiseOn(boat: Boat, net: WaterNetwork): boolean {
+    const cx = Math.max(0, Math.min(net.size - 1, Math.floor(boat.x)));
+    const cz = Math.max(0, Math.min(net.size - 1, Math.floor(boat.z)));
+    if (!net.isNavigable(cx, cz)) return false;
+    const comp = net.component[cx * net.size + cz];
+    const spots = net.openWaypoints.filter(w => w.comp === comp && Math.hypot(w.x - cx, w.z - cz) >= 6);
+    for (let attempt = 0; attempt < 4 && spots.length; attempt++) {
+      const goal = pick(spots);
+      const pts = net.findWaterPath(cx, cz, goal.x, goal.z);
+      if (!pts || pts.length < 2) continue;
+      boat.phase = 'cruising';
+      boat.path = buildPolyPath([[boat.x, boat.z], ...pts.slice(1)]);
+      boat.s = 0;
+      boat.seg = 0;
+      return true;
+    }
+    return false;
+  }
+
   private stepBoat(boat: Boat, net: WaterNetwork, dt: number): boolean {
     boat.age += dt;
 
@@ -896,6 +920,11 @@ export class BoatManager {
       }
       this.applyTransform(boat, dt);
       return true;
+    }
+
+    // A ridden boat never heads off the map: it wanders the water (and calls at ports) instead.
+    if (boat === this.riding && boat.phase === 'departing' && this.time >= this.cruiseRetry) {
+      if (!this.cruiseOn(boat, net)) this.cruiseRetry = this.time + 2;
     }
 
     const path = boat.path;

@@ -1,5 +1,8 @@
 import type { CityState } from '../types/city.js';
-import { calculateNetIncome, calculatePopulationGrowth, calculateHappiness, clamp } from './resources.js';
+import {
+  calculateNetIncome, calculatePopulationGrowth, calculateHappiness,
+  evaluateMilestones, clamp,
+} from './resources.js';
 import { calculateDemand, processZoneGrowth } from './demand.js';
 import { MAX_DEBT } from '../constants/economy.js';
 import { applyLoanPayments } from './loans.js';
@@ -50,11 +53,19 @@ export function simulateCityTick(state: CityState): CityState {
   // Calculate resource changes based on updated state
   const netIncome = calculateNetIncome(working);
   const popGrowth = calculatePopulationGrowth(working);
+  const nextPopulation = Math.max(0, working.resources.population + popGrowth);
   const happiness = calculateHappiness(working);
+
+  // Award one-time municipal charter grants when crossing population milestones
+  const prevMilestones = working.resources.claimedMilestones ?? [];
+  const milestoneEval = evaluateMilestones(nextPopulation, prevMilestones);
+  const claimedMilestones = milestoneEval.newlyClaimed.length > 0
+    ? [...prevMilestones, ...milestoneEval.newlyClaimed.map(m => m.id)]
+    : prevMilestones;
 
   // Loan instalments come out after the regular budget. They can't push the
   // treasury past the debt floor; whatever can't be paid stays on the loan.
-  const moneyAfterBudget = working.resources.money + netIncome;
+  const moneyAfterBudget = working.resources.money + netIncome + milestoneEval.totalGrant;
   const { loans, paid: loanPayments } = applyLoanPayments(
     working.resources.loans ?? [],
     moneyAfterBudget + MAX_DEBT,
@@ -67,9 +78,10 @@ export function simulateCityTick(state: CityState): CityState {
     resources: {
       ...working.resources,
       // Allow limited debt so a running deficit has consequences (see calculateBudgetPenalty)
-      money: Math.max(-MAX_DEBT, moneyAfterBudget - loanPayments),
+      money: Math.max(-MAX_DEBT, Math.round((moneyAfterBudget - loanPayments) * 100) / 100),
       loans,
-      population: Math.max(0, working.resources.population + popGrowth),
+      claimedMilestones,
+      population: nextPopulation,
       happiness: clamp(happiness, 0, 100),
       utilities: utilitySummary,
     },

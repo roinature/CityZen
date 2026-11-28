@@ -1,7 +1,7 @@
 import type { BuildingType, RoadOrientation, ZoneDensity } from './building.js';
 import type { Position, UtilityLayer } from './grid.js';
 import type { CityState } from './city.js';
-import type { ResourceState, PopulationSummary } from './resources.js';
+import type { ResourceState, PopulationSummary, TaxRates } from './resources.js';
 import type { PlacedBuilding } from './building.js';
 import type { Player } from './player.js';
 import type { GameClock } from './time.js';
@@ -97,7 +97,8 @@ export interface RepayLoanPayload {
 }
 
 export interface SetTaxRatePayload {
-  taxRate: number;
+  taxRate?: number;
+  taxRates?: Partial<TaxRates>;
 }
 
 export interface SetUnlimitedMoneyPayload {

@@ -61,11 +61,31 @@ export interface UtilitySummary {
   backedUpBuildings: number;
 }
 
+export interface TaxRates {
+  residential: number;
+  commercial: number;
+  industrial: number;
+}
+
+export type CreditRating = 'AAA' | 'AA' | 'A' | 'BBB' | 'BB' | 'B';
+
+export interface CityMilestone {
+  id: string;
+  label: string;
+  population: number;
+  grant: number;
+}
+
 export interface ResourceState {
   money: number;
   population: number;
   happiness: number;
+  /** Average / legacy unified tax rate (1-25). Kept in sync with taxRates. */
   taxRate: number;
+  /** Per-sector tax rates (1-25 each). Optional for backward compatibility with older saves. */
+  taxRates?: TaxRates;
+  /** IDs of population milestones whose one-time charter grants have been awarded. */
+  claimedMilestones?: string[];
   demand: DemandState;
   populationSummary?: PopulationSummary;
   zonePopulations?: ZonePopulationEntry[];

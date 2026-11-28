@@ -3,7 +3,7 @@ import type { CityState } from '../types/city.js';
 import type { Player } from '../types/player.js';
 import type { Position, UtilityLayer } from '../types/grid.js';
 import type { GameClock } from '../types/time.js';
-import type { PopulationSummary, ZonePopulationEntry } from '../types/resources.js';
+import type { PopulationSummary, TaxRates, ZonePopulationEntry } from '../types/resources.js';
 import { type PlacedBuilding, type RoadOrientation, BuildingType, SERVICE_BUILDING_FLEETS, ZoneDensity, isRoad, isWaterfront, isZone } from '../types/building.js';
 import { type PlaceBuildingsPayload, S2C } from '../types/events.js';
 import { INITIAL_RESOURCES, MIN_TAX_RATE, MAX_TAX_RATE, DEFAULT_GAME_SPEED } from '../constants/simulation.js';
@@ -24,6 +24,12 @@ import { planTown, type TownSettings } from '../logic/townPlan.js';
 import { applySiteTerrain } from '../terrain/sites.js';
 import { simulateCityTick } from '../logic/simulation.js';
 import { validateLoanRequest, createLoan } from '../logic/loans.js';
+import {
+  calculatePlannedTownMoney,
+  getAverageTaxRate,
+  getEffectiveTaxRates,
+} from '../logic/resources.js';
+import { CITY_MILESTONES } from '../constants/economy.js';
 import { evaluateCityUtilities } from '../logic/utilities.js';
 import {
   EMERGENCY_AUTO_RESPONSE_TICKS,
@@ -44,8 +50,15 @@ function createInitialClock(): GameClock {
   };
 }
 
-/** A whole town has upkeep from the first tick, before anyone has moved in. */
-const PLANNED_TOWN_MONEY = 50_000;
+function createInitialResources(moneyOverride?: number) {
+  return {
+    ...INITIAL_RESOURCES,
+    ...(moneyOverride !== undefined ? { money: moneyOverride } : {}),
+    taxRates: { ...INITIAL_RESOURCES.taxRates },
+    claimedMilestones: [] as string[],
+    demand: { ...INITIAL_RESOURCES.demand },
+  };
+}
 
 /** The parts of the message system a city room talks to. */
 export interface CityMessageSink {
@@ -79,7 +92,7 @@ export class CityRoom {
       ownerId,
       siteId,
       ...createStarterLayout(id, ownerId, siteId),
-      resources: { ...INITIAL_RESOURCES },
+      resources: createInitialResources(),
       clock: createInitialClock(),
       tick: 0,
       createdAt: Date.now(),
@@ -119,7 +132,29 @@ export class CityRoom {
       this.state.resources.populationSummary = populationSummary;
     }
 
+    const prevMilestones = new Set(this.state.resources.claimedMilestones ?? []);
     this.state = simulateCityTick(this.state);
+
+    // Notify players when a new population milestone charter grant is awarded
+    if (this.messageManager) {
+      for (const id of this.state.resources.claimedMilestones ?? []) {
+        if (!prevMilestones.has(id)) {
+          const m = CITY_MILESTONES.find(item => item.id === id);
+          if (m) {
+            this.messageManager.createCustomMessage(
+              'milestone',
+              'achievement',
+              'high',
+              `${m.label} Reached!`,
+              `${this.state.name} reached ${m.population.toLocaleString()} citizens and received a $${m.grant.toLocaleString()} municipal grant!`,
+              this.id,
+              undefined,
+              'banner',
+            );
+          }
+        }
+      }
+    }
 
     // Process active city emergencies & spawn new ones when unpaused
     if (worldClock.speed > 0) {
@@ -486,11 +521,25 @@ export class CityRoom {
   }
 
   setTaxRate(rate: number): { success: boolean; error?: string } {
-    if (rate < MIN_TAX_RATE || rate > MAX_TAX_RATE || !Number.isInteger(rate)) {
-      return { success: false, error: 'Invalid tax rate' };
+    return this.setTaxRates({ residential: rate, commercial: rate, industrial: rate });
+  }
+
+  setTaxRates(partial: Partial<TaxRates>): { success: boolean; error?: string } {
+    const current = getEffectiveTaxRates(this.state.resources);
+    const next: TaxRates = {
+      residential: partial.residential ?? current.residential,
+      commercial: partial.commercial ?? current.commercial,
+      industrial: partial.industrial ?? current.industrial,
+    };
+
+    for (const rate of [next.residential, next.commercial, next.industrial]) {
+      if (rate < MIN_TAX_RATE || rate > MAX_TAX_RATE || !Number.isInteger(rate)) {
+        return { success: false, error: 'Invalid tax rate' };
+      }
     }
 
-    this.state.resources.taxRate = rate;
+    this.state.resources.taxRates = next;
+    this.state.resources.taxRate = getAverageTaxRate(next);
     this.state.updatedAt = Date.now();
 
     this.broadcast(S2C.RESOURCES_UPDATE, {
@@ -510,7 +559,7 @@ export class CityRoom {
       return { success: false, error: check.reason };
     }
 
-    const loan = createLoan(newId(), amount, termDays, this.state.tick);
+    const loan = createLoan(newId(), amount, termDays, this.state.tick, this.state);
     this.state.resources.loans = [...(this.state.resources.loans ?? []), loan];
     this.state.resources.money += amount;
     this.state.updatedAt = Date.now();
@@ -564,7 +613,7 @@ export class CityRoom {
     this.state = {
       ...this.state,
       ...createStarterLayout(this.id, this.state.ownerId, this.state.siteId),
-      resources: { ...INITIAL_RESOURCES },
+      resources: createInitialResources(),
       clock: createInitialClock(),
       tick: 0,
       emergencies: [],
@@ -585,10 +634,11 @@ export class CityRoom {
     this.lastEmergencySpawnTick = 0;
     const terrain = createEmptyGrid();
     applySiteTerrain(terrain, this.state.siteId);
+    const plan = planTown(terrain, settings, newId(), this.state.ownerId);
     this.state = {
       ...this.state,
-      ...planTown(terrain, settings, newId(), this.state.ownerId),
-      resources: { ...INITIAL_RESOURCES, money: PLANNED_TOWN_MONEY },
+      ...plan,
+      resources: createInitialResources(calculatePlannedTownMoney(plan.buildings)),
       clock: createInitialClock(),
       tick: 0,
       emergencies: [],

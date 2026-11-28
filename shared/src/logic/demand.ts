@@ -8,7 +8,7 @@ import {
   COMMERCIAL_JOBS_PER_WORKER, INDUSTRIAL_JOBS_PER_WORKER, MIN_JOBS_WANTED,
   HOUSING_BUFFER_RATIO, HOUSING_BUFFER_MIN,
 } from '../constants/simulation.js';
-import { clamp } from './resources.js';
+import { clamp, getEffectiveTaxRates, calculateTaxDemandEffect } from './resources.js';
 import { calculateLaborStats } from './labor.js';
 import { evaluateCityUtilities, getCellUtilityCoverage } from './utilities.js';
 
@@ -52,11 +52,27 @@ export function calculateDemandTargets(state: CityState): DemandState {
   const moodPenalty = Math.max(0, (DEMAND_UNHAPPY_BELOW - state.resources.happiness) / DEMAND_UNHAPPY_BELOW);
 
   const wanted = jobTargets(workers);
+  const rates = getEffectiveTaxRates(state.resources);
+
+  // Apply sector tax elasticity:
+  // - Tax incentives (> 0) boost positive demand without creating phantom demand when budget <= 0.
+  // - High tax drag (< 0) suppresses demand and can turn it negative at punitive rates.
+  const applyTax = (base: number, rate: number): number => {
+    const effect = calculateTaxDemandEffect(rate);
+    if (effect > 0) {
+      return base > 0 ? clamp(base + effect, -1, 1) : base;
+    }
+    return clamp(base + effect, -1, 1);
+  };
+
+  const baseRes = clamp(Math.min(jobPull, housingPull) - moodPenalty, -1, 1);
+  const baseCom = clamp(1 - commercialJobs / wanted.commercial, -1, 1);
+  const baseInd = clamp(1 - industrialJobs / wanted.industrial, -1, 1);
 
   return {
-    residential: clamp(Math.min(jobPull, housingPull) - moodPenalty, -1, 1),
-    commercial: clamp(1 - commercialJobs / wanted.commercial, -1, 1),
-    industrial: clamp(1 - industrialJobs / wanted.industrial, -1, 1),
+    residential: applyTax(baseRes, rates.residential),
+    commercial: applyTax(baseCom, rates.commercial),
+    industrial: applyTax(baseInd, rates.industrial),
   };
 }
 

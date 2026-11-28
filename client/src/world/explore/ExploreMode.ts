@@ -280,6 +280,8 @@ export class ExploreMode {
     this.scene.remove(old.object);
     old.dispose();
     this.world.traffic.setPlayer(null);
+    // Step out facing the way the car was going.
+    if (next instanceof WalkTraveller) next.yaw = handoff.yaw;
     this.mount(next);
     this.snapCamera = false;
     this.onChange?.(next.kind);

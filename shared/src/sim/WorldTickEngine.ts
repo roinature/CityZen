@@ -127,7 +127,7 @@ export class WorldTickEngine {
         // Tax penalty: rates above the comfort rate make everyone less satisfied
         const budgetMultiplier =
           calculateBudgetPenalty(room.state.resources.money) *
-          calculateTaxPenalty(room.state.resources.taxRate);
+          calculateTaxPenalty(room.state.resources);
         if (budgetMultiplier < 1.0) {
           for (const need of Object.keys(baseTargets) as Array<keyof typeof baseTargets>) {
             baseTargets[need] *= budgetMultiplier;

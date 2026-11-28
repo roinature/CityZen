@@ -1,12 +1,20 @@
+import { INITIAL_CITY_MONEY, DEFAULT_TAX_RATE } from './economy.js';
+
 export const TICK_INTERVAL_MS = 2000;
 
 export const INITIAL_RESOURCES = {
-  money: 5000,
+  money: INITIAL_CITY_MONEY,
   population: 0,
   happiness: 50,
-  taxRate: 10,
+  taxRate: DEFAULT_TAX_RATE,
+  taxRates: {
+    residential: DEFAULT_TAX_RATE,
+    commercial: DEFAULT_TAX_RATE,
+    industrial: DEFAULT_TAX_RATE,
+  },
+  claimedMilestones: [] as string[],
   demand: { residential: 0.5, commercial: 0, industrial: 0.3 },
-} as const;
+};
 
 export const MIN_TAX_RATE = 1;
 export const MAX_TAX_RATE = 25;

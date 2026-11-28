@@ -508,7 +508,9 @@ function toggleExplore(kind: ExploreKind): void {
   }
   if (!cityState) return;
   if (!exploreMode.canStart(kind, cityState)) {
-    footerIndicator.toast(kind === 'drive' ? 'Build a road first, then take it for a drive' : 'This city has no water to sail on');
+    footerIndicator.toast(kind === 'drive' ? 'Build a road first, then take it for a drive'
+      : kind === 'ride' ? 'No cars or boats about yet. Build roads and zones to bring in traffic'
+        : 'This city has no water to sail on');
     return;
   }
   toolbar.close();

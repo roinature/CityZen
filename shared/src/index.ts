@@ -16,7 +16,10 @@ export type {
   ServiceFleetKind, ServiceFleetConfig,
   ZoneType, RoadType, UtilityConduitType, WaterfrontType, RoadOrientation, InfraCategory,
 } from './types/building.js';
-export type { ResourceState, DemandState, PopulationSummary, ZonePopulationEntry, Loan, UtilitySummary } from './types/resources.js';
+export type {
+  ResourceState, DemandState, PopulationSummary, ZonePopulationEntry,
+  Loan, UtilitySummary, TaxRates, CreditRating, CityMilestone,
+} from './types/resources.js';
 export type { CityState } from './types/city.js';
 export type { CityEmergency, CityEmergencyKind, CityEmergencyOutcome } from './types/emergencies.js';
 export type { Player, PlayerProfile } from './types/player.js';
@@ -91,23 +94,31 @@ export {
 } from './constants/simulation.js';
 export { WORLD_MAP_SIZE, DEFAULT_WORLD_NAME } from './constants/world.js';
 export {
+  INITIAL_CITY_MONEY, PLANNED_TOWN_MIN_MONEY, PLANNED_TOWN_MAX_MONEY, PLANNED_TOWN_RUNWAY_TICKS,
+  DEFAULT_TAX_RATE, CITY_MILESTONES,
+  SMALL_TOWN_SUBSIDY_MAX, SMALL_TOWN_SUBSIDY_FULL_POP, SMALL_TOWN_SUBSIDY_FADE_POP,
   TAX_PER_PERSON, DEFICIT_MASLOW_PENALTY_RATE, MIN_BUDGET_MULTIPLIER,
-  MAX_DEBT, TAX_COMFORT_RATE, TAX_MASLOW_PENALTY_PER_POINT,
+  MAX_DEBT, TAX_COMFORT_RATE, TAX_MASLOW_PENALTY_PER_POINT, TAX_MASLOW_BONUS_PER_POINT, MAX_TAX_MASLOW_BONUS,
   TAX_PER_PERSON_FALLBACK, WORKFORCE_PARTICIPATION, WORKFORCE_SHARE_FALLBACK,
-  COMMUTER_JOBS, UNEMPLOYED_INCOME_SHARE, BUSINESS_INCOME_PER_JOB,
+  COMMUTER_JOBS, UNEMPLOYED_INCOME_SHARE,
+  COMMERCIAL_INCOME_PER_JOB, INDUSTRIAL_INCOME_PER_JOB, BUSINESS_INCOME_PER_JOB,
+  ZONE_LEVEL_TAX_MULTIPLIER, ZONE_DENSITY_TAX_MULTIPLIER,
+  TAX_LAFFER_THRESHOLD, TAX_LAFFER_DECAY, MIN_TAX_COMPLIANCE,
+  TAX_DEMAND_BOOST_PER_POINT, TAX_DEMAND_DRAG_PER_POINT,
+  CREDIT_RATING_RATE_MULT,
 } from './constants/economy.js';
 export { calculateImmigrationCount, calculateEmigrationCount } from './logic/immigration.js';
 export { calculateLaborStats } from './logic/labor.js';
 export type { LaborStats } from './logic/labor.js';
 export {
   LOAN_TERMS, LOAN_MIN_AMOUNT, LOAN_AMOUNT_STEP, LOAN_BASE_CREDIT_LIMIT,
-  LOAN_CREDIT_PER_CITIZEN, MAX_ACTIVE_LOANS,
+  LOAN_CREDIT_PER_CITIZEN, LOAN_CREDIT_REVENUE_MULT, MAX_ACTIVE_LOANS,
 } from './constants/economy.js';
 export {
-  getCreditLimit, getOutstandingDebt, getAvailableCredit, calculateLoanPayments,
+  calculateCreditRating, getCreditLimit, getOutstandingDebt, getAvailableCredit, calculateLoanPayments,
   quoteLoan, validateLoanRequest, createLoan, applyLoanPayments,
 } from './logic/loans.js';
-export type { LoanQuote } from './logic/loans.js';
+export type { LoanQuote, CreditAssessment } from './logic/loans.js';
 export { BUILDING_DEFS, ZONE_LEVELS, ZONE_DENSITY_COSTS, ROAD_GRADING_COST, ROAD_GRADING_MARGIN, getZoneLevelDef } from './constants/buildings.js';
 export type { ZoneLevelDef } from './constants/buildings.js';
 
@@ -153,8 +164,16 @@ export {
   planTown, normalizeTownSettings, TOWN_CHARACTERS, TOWN_CHARACTER_KNOBS, DEFAULT_TOWN,
 } from './logic/townPlan.js';
 export type { TownSettings, TownCharacter, TownPlan } from './logic/townPlan.js';
-export type { TaxBreakdown } from './logic/resources.js';
-export { getBuildingMaintenance, calculateTaxBreakdown, calculateTaxRevenue, calculateMaintenance, calculateNetIncome, calculatePopulationGrowth, calculateHappiness, calculateHousingCapacity, calculateBudgetPenalty, calculateTaxPenalty, clamp, calculateCityScore } from './logic/resources.js';
+export type { TaxBreakdown, ExpenseBreakdown, MilestoneEvaluation } from './logic/resources.js';
+export {
+  getBuildingMaintenance, getEffectiveTaxRates, getAverageTaxRate,
+  calculateTaxCompliance, calculateTaxDemandEffect, calculateSmallTownSubsidy,
+  getZoneTaxValueMultiplier, evaluateMilestones, calculatePlannedTownMoney,
+  calculateTaxBreakdown, calculateTaxRevenue, calculateExpenseBreakdown,
+  calculateMaintenance, calculateNetIncome, calculatePopulationGrowth,
+  calculateHappiness, calculateHousingCapacity, calculateBudgetPenalty,
+  calculateTaxPenalty, clamp, calculateCityScore,
+} from './logic/resources.js';
 export { simulateTick, simulateCityTick, advanceClock } from './logic/simulation.js';
 export { calculateDemand, calculateDemandTargets, calculateGrowthBudget, getZoneGrowthChance, getZoneLevelHappinessRequirement, processZoneGrowth } from './logic/demand.js';
 export { calculateBirthCount } from './logic/birth.js';

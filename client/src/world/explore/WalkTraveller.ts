@@ -88,7 +88,10 @@ export class WalkTraveller implements Traveller {
     // Spiral out from the spot to the nearest place a person can stand, preferring sidewalks.
     let best: [number, number] | null = null;
     let bestScore = Infinity;
-    for (let r = 0; r <= limit && !best; r++) {
+    // Look one ring past the first standable spot, so a sidewalk beside the road wins over the road itself.
+    let stopAt = limit;
+    for (let r = 0; r <= stopAt; r++) {
+      if (best) stopAt = Math.min(stopAt, r);
       for (let dx = -r; dx <= r; dx++) {
         for (let dz = -r; dz <= r; dz++) {
           if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;

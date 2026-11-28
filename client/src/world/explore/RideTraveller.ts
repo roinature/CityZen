@@ -136,7 +136,7 @@ export class RideTraveller implements Traveller {
       // In the passenger seat (or on deck), looking where you like.
       const hx = Math.cos(this.yaw), hz = -Math.sin(this.yaw);
       const sx = Math.cos(this.yaw + this.lookYaw), sz = -Math.sin(this.yaw + this.lookYaw);
-      const ahead = this.vessel ? -this.length * 0.15 : this.length * 0.05;
+      const ahead = this.length * (this.vessel ? 0.3 : 0.05);
       const eye = this.vessel ? Math.min(this.top * 0.6, 0.14 + this.length * 0.12) : this.top * 0.74;
       out.position.set(cx + hx * ahead, eye, cz + hz * ahead);
       out.look.set(out.position.x + sx * 3, eye - 0.12 + this.lookPitch * 3, out.position.z + sz * 3);
