@@ -2,6 +2,10 @@ import type { CityState } from '../types/city.js';
 import type { CityMilestone, ResourceState, TaxRates } from '../types/resources.js';
 import { BUILDING_DEFS, getZoneLevelDef } from '../constants/buildings.js';
 import {
+  getUpgradeHappinessBonus,
+  getUpgradeUpkeepMultiplier,
+} from '../constants/upgrades.js';
+import {
   BuildingType, SERVICE_BUILDING_FLEETS, UTILITY_PUMP_LEVELS, ZoneDensity,
   getEffectiveFleetSize, getEffectivePumpLevel, isRoad, isUtilityConduit, isZone,
   INFRA_ENERGY_TYPES, INFRA_WATER_TYPES, INFRA_SEWAGE_TYPES,
@@ -280,6 +284,11 @@ export function getBuildingMaintenance(b: PlacedBuilding): number {
     maint += levelDef.maintenance;
   }
 
+  const upgradeUpkeepMult = getUpgradeUpkeepMultiplier(b);
+  if (upgradeUpkeepMult !== 1) {
+    maint = Math.round(maint * upgradeUpkeepMult * 10) / 10;
+  }
+
   const fleetCfg = SERVICE_BUILDING_FLEETS[b.type];
   if (fleetCfg) {
     const effective = getEffectiveFleetSize(b);
@@ -389,7 +398,7 @@ export function calculateHappiness(state: CityState): number {
 
   for (const b of state.buildings) {
     const def = BUILDING_DEFS[b.type];
-    buildingEffect += def?.effects?.happiness ?? 0;
+    buildingEffect += (def?.effects?.happiness ?? 0) + getUpgradeHappinessBonus(b);
     capacity += def?.effects?.populationCapacity ?? 0;
 
     if (isZone(b.type) && b.developmentLevel && b.developmentLevel > 0) {

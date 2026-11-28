@@ -223,6 +223,13 @@ export function isUtilityConduit(type: BuildingType): type is UtilityConduitType
   return (UTILITY_CONDUIT_TYPES as readonly BuildingType[]).includes(type);
 }
 
+export const MAX_BUILDING_UPGRADE_LEVEL = 3;
+
+/** Whether a building supports player-purchased facility upgrades (excludes zones, roads, and utility conduits). */
+export function isUpgradableBuilding(type: BuildingType): boolean {
+  return !isZone(type) && !isRoad(type) && !isUtilityConduit(type);
+}
+
 export function getBuildingUtilityLayer(type: BuildingType): UtilityLayer {
   if ((INFRA_ENERGY_TYPES as readonly BuildingType[]).includes(type)) return 'power';
   if ((INFRA_WATER_TYPES as readonly BuildingType[]).includes(type)) return 'water';
@@ -425,4 +432,6 @@ export interface PlacedBuilding {
   fleetSize?: number;
   /** Player-configured pump power level (1..maxLevel) for water & sewage facilities. */
   pumpLevel?: number;
+  /** Player-purchased facility upgrade tier (1..3; omitted when 0). */
+  upgradeLevel?: number;
 }

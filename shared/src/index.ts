@@ -1,7 +1,8 @@
 // Types
 export type { Position, GridCell, Grid, UtilityLayer } from './types/grid.js';
 export {
-  BuildingType, ZoneDensity, isZone, isRoad, isUtilityConduit, getBuildingUtilityLayer, isWaterfront, canDockBoats,
+  BuildingType, ZoneDensity, isZone, isRoad, isUtilityConduit, isUpgradableBuilding, MAX_BUILDING_UPGRADE_LEVEL,
+  getBuildingUtilityLayer, isWaterfront, canDockBoats,
   SERVICE_BUILDING_FLEETS, getEffectiveFleetSize,
   UTILITY_PUMP_LEVELS, getEffectivePumpLevel, getPumpCapacityMultiplier, getPumpPowerMultiplier,
   ZONE_TYPES, ROAD_TYPES, UTILITY_CONDUIT_TYPES,
@@ -65,6 +66,7 @@ export {
   type SetGameSpeedPayload,
   type SetBuildingFleetPayload,
   type SetBuildingPumpLevelPayload,
+  type UpgradeBuildingPayload,
   type PopulationUpdatePayload,
   type MigrationEventPayload,
   type WorldTickPayload,
@@ -123,6 +125,22 @@ export {
 export type { LoanQuote, CreditAssessment } from './logic/loans.js';
 export { BUILDING_DEFS, ZONE_LEVELS, ZONE_DENSITY_COSTS, ROAD_GRADING_COST, ROAD_GRADING_MARGIN, getZoneLevelDef } from './constants/buildings.js';
 export type { ZoneLevelDef } from './constants/buildings.js';
+export {
+  BUILDING_UPGRADES,
+  getBuildingUpgradeTiers,
+  getEffectiveUpgradeLevel,
+  getActiveUpgradeTier,
+  getNextUpgradeTier,
+  getUpgradeTierCost,
+  getUpgradeOutputMultiplier,
+  getUpgradeQualityMultiplier,
+  getUpgradeUpkeepMultiplier,
+  getUpgradeDemandMultiplier,
+  getUpgradeHappinessBonus,
+  getSubstationUpgradeRadiusBonus,
+  getBuildingTotalInvestedCost,
+} from './constants/upgrades.js';
+export type { BuildingUpgradeTier } from './constants/upgrades.js';
 
 // Logic
 export {

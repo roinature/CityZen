@@ -3,7 +3,9 @@ import {
   BuildingType,
   EMERGENCY_LABELS,
   INFRA_CATEGORIES,
+  MAX_BUILDING_UPGRADE_LEVEL,
   MaslowNeed,
+  POWER_SUBSTATION_RADIUS,
   SERVICE_BUILDING_FLEETS,
   UTILITY_PUMP_LEVELS,
   ZONE_DENSITY_COSTS,
@@ -12,20 +14,32 @@ import {
   canDockBoats,
   evaluateCityUtilities,
   getBuildingMaintenance,
+  getBuildingTotalInvestedCost,
+  getBuildingUpgradeTiers,
   getEffectiveFleetSize,
   getEffectivePumpLevel,
   getEffectiveSize,
+  getEffectiveUpgradeLevel,
+  getNextUpgradeTier,
   getPumpCapacityMultiplier,
   getPumpPowerMultiplier,
+  getSubstationUpgradeRadiusBonus,
+  getUpgradeHappinessBonus,
+  getUpgradeOutputMultiplier,
+  getUpgradeQualityMultiplier,
+  getUpgradeTierCost,
+  getUpgradeUpkeepMultiplier,
   getZoneLevelDef,
   getZoneLevelHappinessRequirement,
   hasOperationalResponder,
   hasRoadFrontage,
   isGeneratorBuilding,
   isSewageFacilityBuilding,
+  isUpgradableBuilding,
   isUtilityConduit,
   isWaterFacilityBuilding,
   isZone,
+  type BuildingUpgradeTier,
   type CityState,
   type PlacedBuilding,
   type UtilityGridReport,
@@ -41,6 +55,7 @@ export interface BuildingCardCallbacks {
   getMaritimeStatus: (buildingId: string) => BuildingMaritimeStatus;
   onSetFleetSize: (buildingId: string, fleetSize: number) => Promise<{ success: boolean; error?: string }>;
   onSetPumpLevel: (buildingId: string, pumpLevel: number) => Promise<{ success: boolean; error?: string }>;
+  onUpgradeBuilding: (buildingId: string) => Promise<{ success: boolean; error?: string }>;
   onDispatchVehicle: (buildingId: string) => boolean;
   onRecallVehicles: (buildingId: string) => number;
   onDispatchVessel: (buildingId: string) => boolean;
@@ -176,18 +191,21 @@ export function computeBuildingServiceReach(
   const targetPumpMult = (isWaterFacilityBuilding(targetBuilding.type) || isSewageFacilityBuilding(targetBuilding.type))
     ? getPumpCapacityMultiplier(targetBuilding)
     : 1;
+  const targetUpgradeCapMult = getUpgradeOutputMultiplier(targetBuilding);
+  const targetUpgradeQualityMult = getUpgradeQualityMultiplier(targetBuilding);
   const population = Math.max(0, state.resources.population);
 
   return contributions.map(mc => {
-    const scaledRawCap = Math.round(mc.capacityServed * targetPumpMult);
+    const scaledRawCap = Math.round(mc.capacityServed * targetPumpMult * targetUpgradeCapMult);
     const effectiveCapacity = Math.round(scaledRawCap * targetFactor);
+    const scaledQuality = mc.value * targetUpgradeQualityMult;
     if (effectiveCapacity <= 0 || population <= 0) {
       return {
         need: mc.need,
         served: 0,
         effectiveCapacity,
         rawCapacity: scaledRawCap,
-        quality: mc.value,
+        quality: scaledQuality,
         factor: targetFactor,
       };
     }
@@ -203,8 +221,10 @@ export function computeBuildingServiceReach(
       const pMult = (isWaterFacilityBuilding(b.type) || isSewageFacilityBuilding(b.type))
         ? getPumpCapacityMultiplier(b)
         : 1;
-      const cap = Math.round(match.capacityServed * pMult * f);
-      if (cap > 0) providers.push({ id: b.id, value: match.value, cap });
+      const uCapMult = getUpgradeOutputMultiplier(b);
+      const uQualMult = getUpgradeQualityMultiplier(b);
+      const cap = Math.round(match.capacityServed * pMult * uCapMult * f);
+      if (cap > 0) providers.push({ id: b.id, value: match.value * uQualMult, cap });
     }
     providers.sort((a, b) => b.value - a.value);
 
@@ -225,7 +245,7 @@ export function computeBuildingServiceReach(
       served: servedByTarget,
       effectiveCapacity,
       rawCapacity: scaledRawCap,
-      quality: mc.value,
+      quality: scaledQuality,
       factor: targetFactor,
     };
   });
@@ -243,6 +263,7 @@ export class BuildingCard {
   private readonly statusBadgeEl: HTMLSpanElement;
   private readonly alertEl: HTMLDivElement;
   private readonly cardDataEl: HTMLDivElement;
+  private readonly upgradesEl: HTMLDivElement;
   private readonly fleetEl: HTMLDivElement;
   private readonly occupancyEl: HTMLDivElement;
   private readonly usageEl: HTMLDivElement;
@@ -254,6 +275,7 @@ export class BuildingCard {
   private readOnly = false;
   private busyFleet = false;
   private busyPump = false;
+  private busyUpgrade = false;
   private confirmDemolish = false;
   private confirmTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -306,12 +328,14 @@ export class BuildingCard {
     body.className = 'building-card-body';
 
     this.cardDataEl = this.createSection('Card Data');
+    this.upgradesEl = this.createSection('Upgrades');
     this.fleetEl = this.createSection('Fleet Management');
     this.occupancyEl = this.createSection('Occupancy');
     this.usageEl = this.createSection('Usage & Utilities');
 
     body.append(
       this.cardDataEl.parentElement!,
+      this.upgradesEl.parentElement!,
       this.fleetEl.parentElement!,
       this.occupancyEl.parentElement!,
       this.usageEl.parentElement!,
@@ -412,6 +436,7 @@ export class BuildingCard {
     this.renderHeader(building, state, utilities);
     this.renderAlert(building, state);
     this.renderCardData(building, state, utilities);
+    this.renderUpgrades(building, state);
     this.renderFleet(building, state);
     this.renderOccupancy(building, state, utilities);
     this.renderUsage(building, state, utilities);
@@ -443,6 +468,10 @@ export class BuildingCard {
       subParts.push(lvl > 0 ? `Level ${lvl}/3` : 'Empty Lot');
     } else {
       subParts.push(`${w}×${d}`);
+      const upgradeLvl = getEffectiveUpgradeLevel(building);
+      if (upgradeLvl > 0) {
+        subParts.push(`Tier ${upgradeLvl}/${MAX_BUILDING_UPGRADE_LEVEL}`);
+      }
       const pumpCfg = UTILITY_PUMP_LEVELS[building.type];
       if (pumpCfg) {
         subParts.push(`Power Lv ${getEffectivePumpLevel(building)}/${pumpCfg.maxLevel}`);
@@ -509,18 +538,17 @@ export class BuildingCard {
 
   private renderCardData(building: PlacedBuilding, state: CityState, utilities: UtilityGridReport): void {
     const def = BUILDING_DEFS[building.type];
-    const paidCost = isZone(building.type) && building.density
-      ? ZONE_DENSITY_COSTS[building.density]
-      : def.cost;
+    const paidCost = getBuildingTotalInvestedCost(building);
     const maint = getBuildingMaintenance(building);
     const baseMaint = (def.effects.maintenance ?? 0) + (
       isZone(building.type) && (building.developmentLevel ?? 0) > 0
         ? getZoneLevelDef(building.type as ZoneType, building.density, building.developmentLevel!).maintenance
         : 0
     );
-    const maintDelta = maint - baseMaint;
+    const upgradedBaseMaint = Math.round(baseMaint * getUpgradeUpkeepMultiplier(building) * 10) / 10;
+    const upgradeMaintDelta = Math.round((upgradedBaseMaint - baseMaint) * 10) / 10;
 
-    let happiness = def.effects.happiness ?? 0;
+    let happiness = (def.effects.happiness ?? 0) + getUpgradeHappinessBonus(building);
     if (isZone(building.type) && (building.developmentLevel ?? 0) > 0) {
       happiness += getZoneLevelDef(building.type as ZoneType, building.density, building.developmentLevel!).happiness;
     }
@@ -530,8 +558,9 @@ export class BuildingCard {
     const pumpMaintDelta = pumpCfg
       ? (getEffectivePumpLevel(building) - pumpCfg.defaultLevel) * pumpCfg.upkeepPerLevel
       : 0;
-    const fleetMaintDelta = maintDelta - pumpMaintDelta;
+    const fleetMaintDelta = Math.round((maint - upgradedBaseMaint - pumpMaintDelta) * 10) / 10;
     const deltaNotes: string[] = [];
+    if (upgradeMaintDelta !== 0) deltaNotes.push(`+$${upgradeMaintDelta} upgrade`);
     if (fleetMaintDelta !== 0) deltaNotes.push(`${fleetMaintDelta > 0 ? '+' : ''}$${fleetMaintDelta} fleet`);
     if (pumpMaintDelta !== 0) deltaNotes.push(`+$${pumpMaintDelta} pump`);
     const MaintNote = deltaNotes.length > 0 ? ` (${deltaNotes.join(', ')})` : '';
@@ -591,6 +620,157 @@ export class BuildingCard {
         this.cardDataEl.appendChild(tags);
       }
     }
+  }
+
+  private formatUpgradeDeltas(building: PlacedBuilding, tier: BuildingUpgradeTier, prevMult: number, prevUpkeepMult: number, prevHappinessBonus: number): string[] {
+    const def = BUILDING_DEFS[building.type];
+    const deltas: string[] = [];
+
+    if (def.effects.powerGenerationMW) {
+      const before = Math.round(def.effects.powerGenerationMW * prevMult * 10) / 10;
+      const after = Math.round(def.effects.powerGenerationMW * tier.outputMultiplier * 10) / 10;
+      const diff = Math.round((after - before) * 10) / 10;
+      if (diff > 0) deltas.push(`+${diff} MW`);
+    }
+    if (building.type === BuildingType.ENERGY_SUBSTATION) {
+      deltas.push('+2 tiles reach');
+    }
+    if (def.effects.waterSupplyM3) {
+      const pumpMult = getPumpCapacityMultiplier(building);
+      const diff = Math.round(def.effects.waterSupplyM3 * pumpMult * (tier.outputMultiplier - prevMult));
+      if (diff > 0) deltas.push(`+${diff.toLocaleString()} m³/h`);
+    }
+    if (def.effects.sewageCapacityM3) {
+      const pumpMult = getPumpCapacityMultiplier(building);
+      const diff = Math.round(def.effects.sewageCapacityM3 * pumpMult * (tier.outputMultiplier - prevMult));
+      if (diff > 0) deltas.push(`+${diff.toLocaleString()} m³/h`);
+    }
+    if (def.effects.maslowContributions && def.effects.maslowContributions.length > 0) {
+      const primary = def.effects.maslowContributions[0];
+      const pumpMult = (isWaterFacilityBuilding(building.type) || isSewageFacilityBuilding(building.type))
+        ? getPumpCapacityMultiplier(building)
+        : 1;
+      const diff = Math.round(primary.capacityServed * pumpMult * (tier.outputMultiplier - prevMult));
+      if (diff > 0) deltas.push(`+${diff.toLocaleString()} served`);
+    }
+    if (def.effects.jobs) {
+      const diff = Math.round(def.effects.jobs * tier.outputMultiplier) - Math.round(def.effects.jobs * prevMult);
+      if (diff > 0) deltas.push(`+${diff} jobs`);
+    }
+    const happyDiff = tier.happinessBonus - prevHappinessBonus;
+    if (happyDiff > 0) {
+      deltas.push(`+${happyDiff} happiness`);
+    }
+    const baseMaint = def.effects.maintenance ?? 0;
+    if (baseMaint > 0) {
+      const beforeM = Math.round(baseMaint * prevUpkeepMult * 10) / 10;
+      const afterM = Math.round(baseMaint * tier.upkeepMultiplier * 10) / 10;
+      const diffM = Math.round((afterM - beforeM) * 10) / 10;
+      if (diffM > 0) deltas.push(`+$${diffM}/tick`);
+    }
+    return deltas;
+  }
+
+  private renderUpgrades(building: PlacedBuilding, state: CityState): void {
+    const section = this.upgradesEl.parentElement!;
+    if (!isUpgradableBuilding(building.type)) {
+      section.hidden = true;
+      this.upgradesEl.replaceChildren();
+      return;
+    }
+
+    section.hidden = false;
+    this.upgradesEl.replaceChildren();
+
+    const tiers = getBuildingUpgradeTiers(building.type);
+    const currentLevel = getEffectiveUpgradeLevel(building);
+    const nextTier = getNextUpgradeTier(building);
+
+    const headerRow = document.createElement('div');
+    headerRow.className = 'building-upgrade-summary';
+    headerRow.innerHTML = `
+      <span>Facility Tier</span>
+      <strong class="${currentLevel >= MAX_BUILDING_UPGRADE_LEVEL ? 'positive' : ''}">${currentLevel} / ${MAX_BUILDING_UPGRADE_LEVEL}${currentLevel >= MAX_BUILDING_UPGRADE_LEVEL ? ' · Maxed' : ''}</strong>
+    `;
+    this.upgradesEl.appendChild(headerRow);
+
+    const list = document.createElement('div');
+    list.className = 'building-upgrade-list';
+
+    for (let i = 0; i < tiers.length; i++) {
+      const tier = tiers[i];
+      const unlocked = currentLevel >= tier.tier;
+      const isNext = nextTier?.tier === tier.tier;
+      const prevTier = i > 0 ? tiers[i - 1] : null;
+      const prevMult = prevTier?.outputMultiplier ?? 1;
+      const prevUpkeepMult = prevTier?.upkeepMultiplier ?? 1;
+      const prevHappy = prevTier?.happinessBonus ?? 0;
+      const cost = getUpgradeTierCost(building.type, tier.tier);
+      const deltas = this.formatUpgradeDeltas(building, tier, prevMult, prevUpkeepMult, prevHappy);
+
+      const item = document.createElement('div');
+      item.className = `building-upgrade-item ${unlocked ? 'unlocked' : isNext ? 'next' : 'locked'}`;
+
+      const top = document.createElement('div');
+      top.className = 'building-upgrade-top';
+
+      const nameWrap = document.createElement('div');
+      nameWrap.className = 'building-upgrade-name';
+      const badge = document.createElement('span');
+      badge.className = 'building-upgrade-tier-badge';
+      badge.textContent = unlocked ? '✓' : `T${tier.tier}`;
+      const title = document.createElement('strong');
+      title.textContent = tier.name;
+      nameWrap.append(badge, title);
+
+      const statusEl = document.createElement('span');
+      statusEl.className = 'building-upgrade-status';
+      if (unlocked) {
+        statusEl.textContent = 'Installed';
+      } else if (isNext) {
+        statusEl.textContent = `$${cost.toLocaleString()}`;
+      } else {
+        statusEl.textContent = `Tier ${tier.tier} · $${cost.toLocaleString()}`;
+      }
+      top.append(nameWrap, statusEl);
+      item.appendChild(top);
+
+      if (isNext || unlocked) {
+        const desc = document.createElement('div');
+        desc.className = 'building-upgrade-desc';
+        desc.textContent = tier.description;
+        item.appendChild(desc);
+      }
+
+      if (deltas.length > 0 && (isNext || !unlocked)) {
+        const meta = document.createElement('div');
+        meta.className = 'building-upgrade-deltas';
+        for (const d of deltas) {
+          const chip = document.createElement('span');
+          chip.className = `building-upgrade-chip ${d.startsWith('+$') ? 'cost' : 'gain'}`;
+          chip.textContent = d;
+          meta.appendChild(chip);
+        }
+        item.appendChild(meta);
+      }
+
+      if (isNext && !this.readOnly) {
+        const canAfford = state.resources.money >= cost;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = `hud-button building-upgrade-btn${canAfford ? '' : ' low-funds'}`;
+        btn.disabled = this.busyUpgrade;
+        btn.textContent = this.busyUpgrade
+          ? 'Upgrading…'
+          : `Upgrade to ${tier.name} · $${cost.toLocaleString()}`;
+        btn.addEventListener('click', () => void this.purchaseUpgrade(building.id, tier.name));
+        item.appendChild(btn);
+      }
+
+      list.appendChild(item);
+    }
+
+    this.upgradesEl.appendChild(list);
   }
 
   private renderFleet(building: PlacedBuilding, state: CityState): void {
@@ -968,13 +1148,15 @@ export class BuildingCard {
 
     // A. Power Generators & Substations
     if (isGeneratorBuilding(building.type) || building.type === BuildingType.ENERGY_SUBSTATION) {
-      const genMW = def.effects.powerGenerationMW ?? 0;
+      const baseGenMW = def.effects.powerGenerationMW ?? 0;
+      const genMW = Math.round(baseGenMW * getUpgradeOutputMultiplier(building) * 10) / 10;
       const lineState = utilities.powerLineState.get(building.id) ?? 'energized';
       const rows: Array<[string, string, string?]> = [];
       if (genMW > 0) {
         rows.push(['Power Output', `+${genMW} MW`, 'positive']);
       } else {
-        rows.push(['Distribution Radius', '9 tiles (Substation)']);
+        const radius = POWER_SUBSTATION_RADIUS + getSubstationUpgradeRadiusBonus(building);
+        rows.push(['Distribution Radius', `${radius} tiles (Substation)`]);
       }
       rows.push(
         ['City Grid Load', `${s.powerDemandMW.toFixed(1)} / ${s.powerGenerationMW.toFixed(1)} MW (${s.powerLoadPct}%)`, s.powerLoadPct > 100 ? 'negative' : undefined],
@@ -990,7 +1172,7 @@ export class BuildingCard {
 
     // B. Water Supply Facilities
     if (isWaterFacilityBuilding(building.type)) {
-      const capMult = getPumpCapacityMultiplier(building);
+      const capMult = getPumpCapacityMultiplier(building) * getUpgradeOutputMultiplier(building);
       const baseSupply = def.effects.waterSupplyM3 ?? 0;
       const supply = Math.round(baseSupply * capMult);
       const pipeState = utilities.waterPipeState.get(building.id) ?? 'pressurized';
@@ -1018,7 +1200,7 @@ export class BuildingCard {
 
     // C. Sewage Treatment Facilities
     if (isSewageFacilityBuilding(building.type)) {
-      const capMult = getPumpCapacityMultiplier(building);
+      const capMult = getPumpCapacityMultiplier(building) * getUpgradeOutputMultiplier(building);
       const baseCap = def.effects.sewageCapacityM3 ?? 0;
       const cap = Math.round(baseCap * capMult);
       const sewerState = utilities.sewagePipeState.get(building.id) ?? 'draining';
@@ -1183,8 +1365,7 @@ export class BuildingCard {
   }
 
   private renderFooter(building: PlacedBuilding): void {
-    const def = BUILDING_DEFS[building.type];
-    const paid = isZone(building.type) && building.density ? ZONE_DENSITY_COSTS[building.density] : def.cost;
+    const paid = getBuildingTotalInvestedCost(building);
     const refund = Math.floor(paid / 2);
     this.demolishBtn.hidden = this.readOnly;
     if (this.confirmDemolish) {
@@ -1255,6 +1436,25 @@ export class BuildingCard {
       this.setFeedback('Could not reach city host.', true);
     } finally {
       this.busyPump = false;
+      if (this.lastState) this.refresh(this.lastState);
+    }
+  }
+
+  private async purchaseUpgrade(buildingId: string, tierName: string): Promise<void> {
+    if (this.busyUpgrade || this.readOnly) return;
+    this.busyUpgrade = true;
+    if (this.lastState) this.refresh(this.lastState);
+    try {
+      const res = await this.callbacks.onUpgradeBuilding(buildingId);
+      if (!res.success) {
+        this.setFeedback(res.error ?? 'Could not upgrade building', true);
+      } else {
+        this.setFeedback(`Upgraded: ${tierName} installed.`);
+      }
+    } catch {
+      this.setFeedback('Could not reach city host.', true);
+    } finally {
+      this.busyUpgrade = false;
       if (this.lastState) this.refresh(this.lastState);
     }
   }

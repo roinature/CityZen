@@ -1,6 +1,7 @@
 import type { CityState } from '../types/city.js';
 import { BuildingType, isZone, type ZoneType } from '../types/building.js';
 import { BUILDING_DEFS, getZoneLevelDef } from '../constants/buildings.js';
+import { getUpgradeOutputMultiplier } from '../constants/upgrades.js';
 import {
   WORKFORCE_PARTICIPATION,
   WORKFORCE_SHARE_FALLBACK,
@@ -28,9 +29,11 @@ export function calculateLaborStats(state: CityState): LaborStats {
   let housingCapacity = 0;
 
   for (const b of state.buildings) {
-    housingCapacity += BUILDING_DEFS[b.type]?.effects?.populationCapacity ?? 0;
+    const upgradeMult = getUpgradeOutputMultiplier(b);
+    const standalonePop = BUILDING_DEFS[b.type]?.effects?.populationCapacity ?? 0;
+    if (standalonePop > 0) housingCapacity += Math.round(standalonePop * upgradeMult);
     const standaloneJobs = BUILDING_DEFS[b.type]?.effects?.jobs ?? 0;
-    if (standaloneJobs > 0) commercialJobs += standaloneJobs;
+    if (standaloneJobs > 0) commercialJobs += Math.round(standaloneJobs * upgradeMult);
     if (!isZone(b.type) || !b.developmentLevel || b.developmentLevel <= 0) continue;
 
     const levelDef = getZoneLevelDef(b.type as ZoneType, b.density, b.developmentLevel);

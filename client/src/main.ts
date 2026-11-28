@@ -40,6 +40,7 @@ import { ResourceBar } from './ui/ResourceBar.js';
 import { CityAdvisor } from './ui/CityAdvisor.js';
 import { getBlockedZoneLevel, getHappinessAdvice, needsHappinessAdvice } from './ui/happinessAdvice.js';
 import { Toolbar } from './ui/Toolbar.js';
+import { SecondaryToolbar } from './ui/SecondaryToolbar.js';
 import { Lobby } from './ui/Lobby.js';
 import { WorldMap } from './ui/WorldMap.js';
 import { GameMenu } from './ui/GameMenu.js';
@@ -344,6 +345,7 @@ const buildingCard = new BuildingCard(uiRoot, {
   getMaritimeStatus: (buildingId) => boatManager.getBuildingMaritimeStatus(buildingId, cityState),
   onSetFleetSize: (buildingId, fleetSize) => gameClient.setBuildingFleet(buildingId, fleetSize, playerId),
   onSetPumpLevel: (buildingId, pumpLevel) => gameClient.setBuildingPumpLevel(buildingId, pumpLevel, playerId),
+  onUpgradeBuilding: (buildingId) => gameClient.upgradeBuilding(buildingId, playerId),
   onDispatchVehicle: (buildingId) => carManager.dispatchDepotVehicle(buildingId, cityState),
   onRecallVehicles: (buildingId) => carManager.recallDepotVehicles(buildingId),
   onDispatchVessel: (buildingId) => boatManager.dispatchVesselToBuilding(buildingId, cityState),
@@ -456,7 +458,6 @@ function addHudAction(label: string, onClick: () => void, options: HudActionOpti
   return button;
 }
 
-addHudAction('Finance', toggleFinancePanel, { title: 'City Finances & Loans' });
 addHudAction('Needs', () => {
   if (!cityState) return;
   toolbar.close();
@@ -477,9 +478,7 @@ function setExplorePicking(kind: ExploreKind | null): void {
 
 function refreshExploreButton(): void {
   const kind = explorePicking ?? exploreMode.getKind();
-  exploreButton?.setAttribute('aria-pressed', String(!!kind));
-  exploreMenu?.querySelectorAll<HTMLButtonElement>('[data-kind]').forEach(item =>
-    item.setAttribute('aria-pressed', String(item.dataset.kind === kind)));
+  secondaryToolbar?.setExploreActive(kind);
 }
 
 function pickExploreStart(clientX: number, clientY: number): void {
@@ -498,7 +497,7 @@ function pickExploreStart(clientX: number, clientY: number): void {
 }
 
 function toggleExplore(kind: ExploreKind): void {
-  setExploreMenu(false);
+  secondaryToolbar.setExploreOpen(false);
   const current = exploreMode.getKind();
   if (current) {
     exploreMode.stop();
@@ -527,65 +526,38 @@ function stopExploring(): void {
   exploreMode.stop();
 }
 
-const exploreButton = addHudAction('Explore', () => {
-  if (exploreMode.isActive() || explorePicking) return stopExploring();
-  setExploreMenu(exploreMenu.hidden);
-}, { title: 'Drive, walk, fly or sail through the city' });
-exploreButton.setAttribute('aria-pressed', 'false');
-exploreButton.setAttribute('aria-haspopup', 'menu');
-const exploreMenu = document.createElement('div');
-exploreMenu.className = 'explore-menu';
-exploreMenu.setAttribute('role', 'menu');
-exploreMenu.hidden = true;
-for (const kind of Object.keys(EXPLORE_MODES) as ExploreKind[]) {
-  const { label, key } = EXPLORE_MODES[kind];
-  const item = document.createElement('button');
-  item.className = 'explore-menu-item';
-  item.dataset.kind = kind;
-  item.setAttribute('role', 'menuitem');
-  item.innerHTML = `<span>${label}</span><kbd>${key}</kbd>`;
-  item.addEventListener('click', () => toggleExplore(kind));
-  exploreMenu.appendChild(item);
-}
-uiRoot.appendChild(exploreMenu);
-
-function setExploreMenu(open: boolean): void {
-  exploreMenu.hidden = !open;
-  exploreButton.setAttribute('aria-expanded', String(open));
-  if (!open) return;
-  const rect = exploreButton.getBoundingClientRect();
-  exploreMenu.style.top = `${rect.bottom + 6}px`;
-  exploreMenu.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 168))}px`;
-}
-document.addEventListener('pointerdown', (e) => {
-  if (!exploreMenu.hidden && !exploreMenu.contains(e.target as Node) && !exploreButton.contains(e.target as Node)) setExploreMenu(false);
+const secondaryToolbar = new SecondaryToolbar(uiRoot, {
+  onFinance: toggleFinancePanel,
+  onExploreToggle: () => {
+    if (exploreMode.isActive() || explorePicking) {
+      stopExploring();
+      return true;
+    }
+    return false;
+  },
+  onExploreSelect: (kind) => toggleExplore(kind),
+  onPerspective: () => {
+    footerIndicator.toast(`${CAMERA_VIEWS[optionsPanel.nextCameraView()].label} view`);
+  },
+  onToggleNight: () => {
+    isNight = !isNight;
+    lighting.setNight(isNight);
+    sceneManager.setDayNight(isNight);
+    boatManager.setNight(isNight);
+    secondaryToolbar.setNight(isNight);
+  },
+  onMenu: () => {
+    if (!cityState) return;
+    toolbar.close();
+    gameMenu.show();
+  },
 });
+
 exploreMode.onExit = () => {
   mapInput.enabled = true;
   refreshExploreButton();
 };
 exploreMode.onChange = () => refreshExploreButton();
-
-addHudAction('Switch camera view', () => {
-  footerIndicator.toast(`${CAMERA_VIEWS[optionsPanel.nextCameraView()].label} view`);
-}, {
-  iconOnly: true,
-  title: 'Switch camera view (V)',
-  iconSvg: '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2 14 5.2v5.6L8 14 2 10.8V5.2L8 2Z"/><path d="M2 5.2 8 8.4l6-3.2M8 8.4V14"/></svg>',
-});
-
-const nightButton = addHudAction('Night View', () => {
-  isNight = !isNight;
-  lighting.setNight(isNight);
-  sceneManager.setDayNight(isNight);
-  boatManager.setNight(isNight);
-  nightButton.setAttribute('aria-pressed', String(isNight));
-}, {
-  iconOnly: true,
-  title: 'Toggle Day / Night View',
-  iconSvg: '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 9.8A5.8 5.8 0 0 1 6.2 2.5a5.8 5.8 0 1 0 7.3 7.3Z"/></svg>',
-});
-nightButton.setAttribute('aria-pressed', 'false');
 
 const readOnlyPill = document.createElement('span');
 readOnlyPill.className = 'hud-readonly-pill';
@@ -710,6 +682,8 @@ connect({
       cityState.buildings[idx] = payload.building;
     }
     cityState.resources = payload.resources;
+    cityRenderer.syncState(cityState);
+    utilityLayerEditor.update(cityState);
     resourceBar.update(cityState.resources, cityState);
     if (financePanel.isVisible()) financePanel.update(cityState);
     if (buildingCard.isVisible()) buildingCard.refresh(cityState, cityRenderer.getUtilityReport());
@@ -1226,15 +1200,6 @@ const townPlanner = new TownPlannerPanel(uiRoot, async (settings) => {
 
 const optionsPanel = new OptionsPanel(uiRoot, applyOptions);
 
-addHudAction('Menu', () => {
-  if (!cityState) return;
-  toolbar.close();
-  gameMenu.show();
-}, {
-  title: 'Game Menu (Esc)',
-  iconSvg: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/></svg>',
-});
-
 // --- ESC key handler ---
 window.addEventListener('keydown', (e) => {
   if (e.code !== 'Escape' || cityAdvisor.isOpen()) return;
@@ -1252,8 +1217,8 @@ window.addEventListener('keydown', (e) => {
     gameMenu.show();
   } else if (gameMenu.isVisible()) {
     gameMenu.hide();
-  } else if (!exploreMenu.hidden) {
-    setExploreMenu(false);
+  } else if (secondaryToolbar.isExploreOpen()) {
+    secondaryToolbar.setExploreOpen(false);
   } else if (exploreMode.isActive() || explorePicking) {
     stopExploring();
   } else if (buildingCard.isVisible()) {

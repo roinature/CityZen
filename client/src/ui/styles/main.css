@@ -1412,8 +1412,44 @@ body.in-city {
   z-index: 30;
 }
 
-#ui-root > .build-dock {
+#ui-root > .build-dock,
+#ui-root > .secondary-dock {
   pointer-events: none;
+}
+
+/* Secondary vertical toolbar (right side) */
+.secondary-dock {
+  position: fixed;
+  top: 50%;
+  right: max(12px, var(--ui-right));
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  z-index: 30;
+}
+
+.secondary-rail-sub {
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-width: none;
+  animation: secondary-rail-in 0.14s ease-out;
+}
+
+.secondary-rail-sub::-webkit-scrollbar {
+  display: none;
+}
+
+@keyframes secondary-rail-in {
+  from {
+    opacity: 0;
+    transform: translateX(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 .build-rail {
@@ -2172,6 +2208,7 @@ body.in-city {
 /* --- Game HUD is only shown while a city is on screen (body.in-city) --- */
 body:not(.in-city) .city-hud,
 body:not(.in-city) .build-dock,
+body:not(.in-city) .secondary-dock,
 body:not(.in-city) .density-picker {
   display: none !important;
 }
@@ -2755,6 +2792,11 @@ body:not(.in-city) .density-picker {
     gap: 6px;
   }
 
+  .secondary-dock {
+    right: var(--ui-right);
+    gap: 6px;
+  }
+
   .build-rail {
     padding: 6px 5px;
     gap: 5px;
@@ -3086,6 +3128,7 @@ body.read-only-city .toolbar {
 
 /* Drive mode */
 body.driving .build-dock,
+body.driving .secondary-dock,
 body.driving .zoom-control,
 body.driving .utility-layer-dock {
   display: none;
@@ -3675,7 +3718,7 @@ body.driving .building-card {
 .building-card {
   position: fixed;
   top: calc(max(10px, var(--ui-top)) + 64px);
-  right: max(12px, var(--ui-right));
+  right: calc(max(12px, var(--ui-right)) + 66px);
   width: min(362px, calc(100vw - 24px));
   max-height: calc(100dvh - 168px);
   display: flex;
@@ -3904,6 +3947,152 @@ body.driving .building-card {
   background: rgba(167, 223, 184, 0.12);
   color: var(--hud-text);
   border: 1px solid rgba(167, 223, 184, 0.25);
+}
+
+/* Building Upgrades */
+.building-upgrade-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11.5px;
+  color: var(--hud-muted);
+}
+
+.building-upgrade-list {
+  display: grid;
+  gap: 6px;
+}
+
+.building-upgrade-item {
+  display: grid;
+  gap: 5px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.building-upgrade-item.unlocked {
+  background: rgba(138, 245, 191, 0.07);
+  border-color: rgba(138, 245, 191, 0.24);
+}
+
+.building-upgrade-item.next {
+  background: rgba(167, 223, 184, 0.1);
+  border-color: rgba(167, 223, 184, 0.35);
+}
+
+.building-upgrade-item.locked {
+  opacity: 0.62;
+}
+
+.building-upgrade-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.building-upgrade-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.building-upgrade-name strong {
+  font-weight: 600;
+  color: var(--hud-text);
+}
+
+.building-upgrade-tier-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--hud-text);
+}
+
+.building-upgrade-item.unlocked .building-upgrade-tier-badge {
+  background: rgba(138, 245, 191, 0.22);
+  color: #8af5bf;
+}
+
+.building-upgrade-item.next .building-upgrade-tier-badge {
+  background: rgba(255, 209, 128, 0.2);
+  color: #ffd180;
+}
+
+.building-upgrade-status {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--hud-muted);
+  white-space: nowrap;
+}
+
+.building-upgrade-item.unlocked .building-upgrade-status {
+  color: #8af5bf;
+  font-weight: 600;
+}
+
+.building-upgrade-desc {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--hud-muted);
+}
+
+.building-upgrade-deltas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.building-upgrade-chip {
+  font-size: 10.5px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.building-upgrade-chip.gain {
+  background: rgba(138, 245, 191, 0.12);
+  color: #8af5bf;
+  border: 1px solid rgba(138, 245, 191, 0.22);
+}
+
+.building-upgrade-chip.cost {
+  background: rgba(255, 209, 128, 0.1);
+  color: #ffd180;
+  border: 1px solid rgba(255, 209, 128, 0.22);
+}
+
+.building-upgrade-btn {
+  margin-top: 2px;
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border-radius: 7px;
+  background: rgba(138, 245, 191, 0.18);
+  border: 1px solid rgba(138, 245, 191, 0.42);
+  color: #dffef0;
+}
+
+.building-upgrade-btn:hover:not(:disabled) {
+  background: rgba(138, 245, 191, 0.28);
+}
+
+.building-upgrade-btn.low-funds {
+  background: rgba(255, 209, 128, 0.12);
+  border-color: rgba(255, 209, 128, 0.35);
+  color: #ffd180;
 }
 
 .building-tag.covered {

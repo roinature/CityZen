@@ -855,6 +855,10 @@ export class P2PGameClient implements CityConnection {
     return this.sendCityCommand('buildingPumpLevel', { buildingId, pumpLevel }, playerId);
   }
 
+  async upgradeBuilding(buildingId: string, playerId = this.playerId): Promise<{ success: boolean; error?: string }> {
+    return this.sendCityCommand('buildingUpgrade', { buildingId }, playerId);
+  }
+
   async save(playerId = this.playerId): Promise<void> {
     if (this.activeVisit?.mode === 'owned') {
       await this.host.flushSave();

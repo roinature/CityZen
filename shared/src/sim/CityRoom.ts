@@ -4,10 +4,15 @@ import type { Player } from '../types/player.js';
 import type { Position, UtilityLayer } from '../types/grid.js';
 import type { GameClock } from '../types/time.js';
 import type { PopulationSummary, TaxRates, ZonePopulationEntry } from '../types/resources.js';
-import { type PlacedBuilding, type RoadOrientation, BuildingType, SERVICE_BUILDING_FLEETS, UTILITY_PUMP_LEVELS, ZoneDensity, isRoad, isWaterfront, isZone } from '../types/building.js';
+import { type PlacedBuilding, type RoadOrientation, BuildingType, SERVICE_BUILDING_FLEETS, UTILITY_PUMP_LEVELS, ZoneDensity, isRoad, isUpgradableBuilding, isWaterfront, isZone } from '../types/building.js';
 import { type PlaceBuildingsPayload, S2C } from '../types/events.js';
 import { INITIAL_RESOURCES, MIN_TAX_RATE, MAX_TAX_RATE, DEFAULT_GAME_SPEED } from '../constants/simulation.js';
 import { BUILDING_DEFS, ZONE_DENSITY_COSTS } from '../constants/buildings.js';
+import {
+  getBuildingTotalInvestedCost,
+  getNextUpgradeTier,
+  getUpgradeTierCost,
+} from '../constants/upgrades.js';
 import {
   canPlaceBuilding,
   clearGridBuilding,
@@ -474,10 +479,10 @@ export class CityRoom {
     // Clear grid layer slot(s)
     clearGridBuilding(this.state.grid, building);
 
-    // Remove building, refund half of what was actually paid (zones are priced by density)
+    // Remove building, refund half of what was actually paid (including any purchased upgrades)
     this.state.buildings = this.state.buildings.filter((b: PlacedBuilding) => b.id !== buildingId);
     if (!this.unlimitedMoney) {
-      const paid = isZone(building.type) && building.density ? ZONE_DENSITY_COSTS[building.density] : def.cost;
+      const paid = getBuildingTotalInvestedCost(building);
       this.state.resources.money += Math.floor(paid / 2);
     }
     this.state.resources.utilities = evaluateCityUtilities(this.state).summary;
@@ -545,6 +550,45 @@ export class CityRoom {
     });
     this.onMutated();
     return { success: true, building };
+  }
+
+  upgradeBuilding(buildingId: string): { success: boolean; building?: PlacedBuilding; error?: string } {
+    const idx = this.state.buildings.findIndex(b => b.id === buildingId);
+    if (idx === -1) {
+      return { success: false, error: 'Building not found' };
+    }
+    const building = this.state.buildings[idx];
+    if (!isUpgradableBuilding(building.type)) {
+      return { success: false, error: 'This building cannot be upgraded' };
+    }
+    const nextTier = getNextUpgradeTier(building);
+    if (!nextTier) {
+      return { success: false, error: 'Building is already at maximum upgrade level' };
+    }
+    const cost = getUpgradeTierCost(building.type, nextTier.tier);
+    if (!this.unlimitedMoney && this.state.resources.money < cost) {
+      return { success: false, error: `Insufficient funds (need $${cost.toLocaleString()})` };
+    }
+
+    if (!this.unlimitedMoney) {
+      this.state.resources.money -= cost;
+    }
+
+    // Replace object reference so persistence diffs detect the updated building row
+    const updated: PlacedBuilding = {
+      ...building,
+      upgradeLevel: nextTier.tier,
+    };
+    this.state.buildings[idx] = updated;
+    this.state.resources.utilities = evaluateCityUtilities(this.state).summary;
+    this.state.updatedAt = Date.now();
+
+    this.broadcast(S2C.BUILDING_UPDATED, {
+      building: updated,
+      resources: this.state.resources,
+    });
+    this.onMutated();
+    return { success: true, building: updated };
   }
 
   setTaxRate(rate: number): { success: boolean; error?: string } {

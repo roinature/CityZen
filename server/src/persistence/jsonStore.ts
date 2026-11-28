@@ -2,7 +2,7 @@ import prisma from './prismaClient.js';
 import type { Prisma } from '../generated/prisma/index.js';
 import { writeWorldCityEdges } from './worldStore.js';
 import type { WorldCityEntry, CityState, PlacedBuilding, RoadOrientation, Loan, TaxRates } from '@cityzen/shared';
-import { applySiteTerrain, createEmptyGrid, MaslowNeed, calculateEdgeConnections, setGridBuilding } from '@cityzen/shared';
+import { applySiteTerrain, createEmptyGrid, isZone, MaslowNeed, calculateEdgeConnections, setGridBuilding } from '@cityzen/shared';
 
 // Loans are stored in City.loans (JSONB), added by the 20261114000000_city_loans
 // migration. Until that migration has been applied the column doesn't exist, so
@@ -181,7 +181,7 @@ async function writeCityState(
         positionZ: b.position.z,
         placedBy: b.placedBy,
         placedAt: b.placedAt,
-        developmentLevel: b.developmentLevel ?? null,
+        developmentLevel: isZone(b.type) ? (b.developmentLevel ?? null) : (b.upgradeLevel ?? null),
         developedAt: b.developedAt ?? null,
         density: b.density ?? null,
         orientation: b.orientation ?? null,
@@ -246,7 +246,11 @@ async function readCityState(
     position: { x: b.positionX, z: b.positionZ },
     placedBy: b.placedBy,
     placedAt: b.placedAt,
-    ...(b.developmentLevel != null ? { developmentLevel: b.developmentLevel } : {}),
+    ...(b.developmentLevel != null
+      ? (isZone(b.type as PlacedBuilding['type'])
+          ? { developmentLevel: b.developmentLevel }
+          : { upgradeLevel: b.developmentLevel })
+      : {}),
     ...(b.developedAt != null ? { developedAt: b.developedAt } : {}),
     ...(b.density ? { density: b.density as PlacedBuilding['density'] } : {}),
     ...(b.orientation ? { orientation: b.orientation as RoadOrientation } : {}),

@@ -1,4 +1,9 @@
 import { BUILDING_DEFS } from '../constants/buildings.js';
+import {
+  getSubstationUpgradeRadiusBonus,
+  getUpgradeDemandMultiplier,
+  getUpgradeOutputMultiplier,
+} from '../constants/upgrades.js';
 import { DEFAULT_GRID_SIZE } from '../constants/grid.js';
 import {
   BuildingType,
@@ -357,18 +362,19 @@ export function getBuildingUtilityProfile(building: PlacedBuilding): UtilityReso
     };
   }
 
-  // Water & sewage facilities need electricity to run pumps/aerators, scaling with Pump Power Level
+  // Water & sewage facilities need electricity to run pumps/aerators, scaling with Pump Power Level & Upgrades
+  const upgradeDemandMult = getUpgradeDemandMultiplier(building);
   if (isWaterFacilityBuilding(type) || isSewageFacilityBuilding(type)) {
     const baseMW = BUILDING_DEFS[type]?.effects?.powerDemandMW ?? 1.5;
-    const mw = Math.round(baseMW * getPumpPowerMultiplier(building) * 10) / 10;
+    const mw = Math.round(baseMW * getPumpPowerMultiplier(building) * upgradeDemandMult * 10) / 10;
     return { powerDemandMW: mw, waterDemandM3: 0, sewageOutputM3: 0, priority: 0, countedConsumer: false };
   }
 
   if (type === BuildingType.PARK || type === BuildingType.ART_SCULPTURE_PARK || type === BuildingType.PARKING || type === BuildingType.HEALTH_CEMETERY || type === BuildingType.GOV_MONUMENT) {
     const isPark = type === BuildingType.PARK || type === BuildingType.ART_SCULPTURE_PARK;
     return {
-      powerDemandMW: 0.15,
-      waterDemandM3: isPark ? 1 : 0,
+      powerDemandMW: Math.round(0.15 * upgradeDemandMult * 100) / 100,
+      waterDemandM3: isPark ? Math.round(1 * upgradeDemandMult * 10) / 10 : 0,
       sewageOutputM3: 0,
       priority: 3,
       countedConsumer: false,
@@ -385,9 +391,13 @@ export function getBuildingUtilityProfile(building: PlacedBuilding): UtilityReso
     || type === BuildingType.POLICE_STATION
     || type === BuildingType.POLICE_HQ;
 
-  const powerDemandMW = def.effects.powerDemandMW ?? Math.round((0.35 * area + (def.cost / 2500)) * 10) / 10;
-  const waterDemandM3 = def.effects.waterDemandM3 ?? Math.max(1, Math.round((1.0 * area + (def.cost / 2000)) * 10) / 10);
-  const sewageOutputM3 = def.effects.sewageOutputM3 ?? Math.round(waterDemandM3 * 0.8 * 10) / 10;
+  const basePowerMW = def.effects.powerDemandMW ?? Math.round((0.35 * area + (def.cost / 2500)) * 10) / 10;
+  const baseWaterM3 = def.effects.waterDemandM3 ?? Math.max(1, Math.round((1.0 * area + (def.cost / 2000)) * 10) / 10);
+  const baseSewageM3 = def.effects.sewageOutputM3 ?? Math.round(baseWaterM3 * 0.8 * 10) / 10;
+
+  const powerDemandMW = Math.round(basePowerMW * upgradeDemandMult * 10) / 10;
+  const waterDemandM3 = Math.round(baseWaterM3 * upgradeDemandMult * 10) / 10;
+  const sewageOutputM3 = Math.round(baseSewageM3 * upgradeDemandMult * 10) / 10;
 
   return {
     powerDemandMW,
@@ -792,7 +802,7 @@ export function evaluateCityUtilities(state: CityState): UtilityGridReport {
   for (let ci = 0; ci < kCond; ci++) {
     const b = powerConductors[ci];
     const radius = b.type === BuildingType.ENERGY_SUBSTATION
-      ? POWER_SUBSTATION_RADIUS
+      ? POWER_SUBSTATION_RADIUS + getSubstationUpgradeRadiusBonus(b)
       : isGeneratorBuilding(b.type)
         ? POWER_GENERATOR_RADIUS
         : POWER_LINE_RADIUS;
@@ -869,7 +879,7 @@ export function evaluateCityUtilities(state: CityState): UtilityGridReport {
     const centers: Position[] = [];
     for (const bid of powerComps.compMembers[cid]) {
       const b = byId.get(bid)!;
-      const mw = BUILDING_DEFS[b.type]?.effects?.powerGenerationMW ?? 0;
+      const mw = (BUILDING_DEFS[b.type]?.effects?.powerGenerationMW ?? 0) * getUpgradeOutputMultiplier(b);
       if (mw > 0) {
         genMW += mw;
         genCount++;
@@ -890,7 +900,7 @@ export function evaluateCityUtilities(state: CityState): UtilityGridReport {
     for (const bid of powerComps.compMembers[cid]) {
       const b = byId.get(bid)!;
       const radius = b.type === BuildingType.ENERGY_SUBSTATION
-        ? POWER_SUBSTATION_RADIUS
+        ? POWER_SUBSTATION_RADIUS + getSubstationUpgradeRadiusBonus(b)
         : isGeneratorBuilding(b.type)
           ? POWER_GENERATOR_RADIUS
           : POWER_LINE_RADIUS;
@@ -1071,7 +1081,7 @@ export function evaluateCityUtilities(state: CityState): UtilityGridReport {
       if (!isWaterFacilityBuilding(b.type)) continue;
       const st = statusMap.get(b.id)!;
       const { w, d } = effectiveFootprint(b.type, b.orientation);
-      const capMult = getPumpCapacityMultiplier(b);
+      const capMult = getPumpCapacityMultiplier(b) * getUpgradeOutputMultiplier(b);
 
       let maxSourceRichness = 0;
       for (let dx = 0; dx < w; dx++) {
@@ -1255,7 +1265,9 @@ export function evaluateCityUtilities(state: CityState): UtilityGridReport {
       const b = byId.get(bid)!;
       if (!isSewageFacilityBuilding(b.type)) continue;
       const st = statusMap.get(b.id)!;
-      const rated = (BUILDING_DEFS[b.type]?.effects?.sewageCapacityM3 ?? 300) * getPumpCapacityMultiplier(b);
+      const rated = (BUILDING_DEFS[b.type]?.effects?.sewageCapacityM3 ?? 300)
+        * getPumpCapacityMultiplier(b)
+        * getUpgradeOutputMultiplier(b);
       const effPower = b.type === BuildingType.SEWAGE_PUMP_STATION
         ? Math.max(0.25, st.powerRatio)
         : Math.max(0.15, st.powerRatio);

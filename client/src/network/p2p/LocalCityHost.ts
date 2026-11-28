@@ -448,6 +448,11 @@ export class LocalCityHost {
         if (res.success) this.markDirty();
         return res;
       }
+      case 'buildingUpgrade': {
+        const res = room.upgradeBuilding(String(args.buildingId || ''));
+        if (res.success) this.markDirty();
+        return res;
+      }
       case 'tax': {
         const res = args.taxRates ? room.setTaxRates(args.taxRates) : room.setTaxRate(args.taxRate);
         if (res.success) this.markDirty();
