@@ -4,7 +4,7 @@ import type { Player } from '../types/player.js';
 import type { Position, UtilityLayer } from '../types/grid.js';
 import type { GameClock } from '../types/time.js';
 import type { PopulationSummary, ZonePopulationEntry } from '../types/resources.js';
-import { type PlacedBuilding, type RoadOrientation, BuildingType, ZoneDensity, isRoad, isWaterfront, isZone } from '../types/building.js';
+import { type PlacedBuilding, type RoadOrientation, BuildingType, SERVICE_BUILDING_FLEETS, ZoneDensity, isRoad, isWaterfront, isZone } from '../types/building.js';
 import { type PlaceBuildingsPayload, S2C } from '../types/events.js';
 import { INITIAL_RESOURCES, MIN_TAX_RATE, MAX_TAX_RATE, DEFAULT_GAME_SPEED } from '../constants/simulation.js';
 import { BUILDING_DEFS, ZONE_DENSITY_COSTS } from '../constants/buildings.js';
@@ -456,6 +456,33 @@ export class CityRoom {
 
     this.onMutated();
     return { success: true };
+  }
+
+  setBuildingFleetSize(buildingId: string, fleetSize: number): { success: boolean; building?: PlacedBuilding; error?: string } {
+    const building = this.state.buildings.find(b => b.id === buildingId);
+    if (!building) {
+      return { success: false, error: 'Building not found' };
+    }
+    const cfg = SERVICE_BUILDING_FLEETS[building.type];
+    if (!cfg) {
+      return { success: false, error: 'This building does not operate a vehicle fleet' };
+    }
+    if (!Number.isFinite(fleetSize)) {
+      return { success: false, error: 'Invalid fleet size' };
+    }
+    const clamped = Math.max(0, Math.min(cfg.maxFleet, Math.round(fleetSize)));
+    if (clamped === cfg.defaultFleet) {
+      delete building.fleetSize;
+    } else {
+      building.fleetSize = clamped;
+    }
+    this.state.updatedAt = Date.now();
+    this.broadcast(S2C.BUILDING_UPDATED, {
+      building,
+      resources: this.state.resources,
+    });
+    this.onMutated();
+    return { success: true, building };
   }
 
   setTaxRate(rate: number): { success: boolean; error?: string } {

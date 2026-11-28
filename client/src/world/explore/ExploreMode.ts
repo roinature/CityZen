@@ -10,7 +10,8 @@ import { CarTraveller } from './CarTraveller.js';
 import { WalkTraveller } from './WalkTraveller.js';
 import { FlyTraveller } from './FlyTraveller.js';
 import { BoatTraveller } from './BoatTraveller.js';
-import type { CameraShot, ExploreInput, ExploreKind, Traveller } from './types.js';
+import { RideTraveller } from './RideTraveller.js';
+import type { CameraShot, ExploreInput, ExploreKind, Handoff, Traveller } from './types.js';
 
 export type { ExploreKind } from './types.js';
 
@@ -33,7 +34,7 @@ interface ModeInfo {
   hint: string;
   exit: string;
   /** Extra touch buttons beside the arrows: [label, control]. */
-  touch: Array<[string, 'action' | 'shift']>;
+  touch: Array<[string, 'action' | 'shift' | 'use']>;
 }
 
 export const EXPLORE_MODES: Record<ExploreKind, ModeInfo & { label: string; key: string; pick: string; none: string }> = {
@@ -44,8 +45,8 @@ export const EXPLORE_MODES: Record<ExploreKind, ModeInfo & { label: string; key:
   },
   walk: {
     label: 'Walk', key: 'G', pick: 'Click anywhere on the map to start walking', none: 'Nowhere to stand there. Click somewhere else',
-    hint: 'W/S walk · A/D turn · drag to look · Shift run · Space jump · V camera · Esc exit',
-    exit: 'Stop walking', touch: [['Run', 'shift'], ['Jump', 'action']],
+    hint: 'W/S walk · A/D turn · drag to look · Shift run · Space jump · E ride a passing car · V camera · Esc exit',
+    exit: 'Stop walking', touch: [['Run', 'shift'], ['Jump', 'action'], ['Ride', 'use']],
   },
   fly: {
     label: 'Fly', key: 'H', pick: 'Click anywhere on the map to take off', none: 'Cannot take off there',
@@ -57,12 +58,17 @@ export const EXPLORE_MODES: Record<ExploreKind, ModeInfo & { label: string; key:
     hint: 'W/S throttle · A/D steer · Space stop · V camera · Esc exit',
     exit: 'Leave boat', touch: [['Stop', 'action']],
   },
+  ride: {
+    label: 'Ride along', key: 'J', pick: 'Click a car, bus, truck or boat to ride along', none: 'No vehicle there. Click right on one',
+    hint: 'Drag to look · Space jump to the next vehicle · E get out · V camera · Esc exit',
+    exit: 'Stop riding', touch: [['Jump', 'action'], ['Get out', 'use']],
+  },
 };
 
 const isTyping = (target: EventTarget | null) =>
   target instanceof Element && !!target.closest('input, select, textarea, [contenteditable="true"]');
 
-type Held = Omit<ExploreInput, 'lookX' | 'lookY'>;
+type Held = Omit<ExploreInput, 'lookX' | 'lookY' | 'use'>;
 const idle = (): Held => ({ forward: false, back: false, left: false, right: false, action: false, shift: false });
 
 /**
@@ -75,6 +81,8 @@ export class ExploreMode {
   private keys = idle();
   private touch = idle();
   private look = { x: 0, y: 0 };
+  /** E was pressed (or the touch button tapped) since the last frame. */
+  private usePending = false;
   private dragging: number | null = null;
   private dragFrom = { x: 0, y: 0 };
 
@@ -95,6 +103,8 @@ export class ExploreMode {
 
   /** Called whenever explore mode ends. */
   onExit: (() => void) | null = null;
+  /** Called when the trip changes kind mid-way (getting into or out of a vehicle). */
+  onChange: ((kind: ExploreKind) => void) | null = null;
 
   constructor(
     private scene: THREE.Scene,
@@ -168,14 +178,15 @@ export class ExploreMode {
     canvas.addEventListener('pointercancel', release);
   }
 
-  private touchButton(label: string, key: keyof Held, cls: string): HTMLButtonElement {
+  private touchButton(label: string, key: keyof Held | 'use', cls: string): HTMLButtonElement {
     const b = document.createElement('button');
     b.className = `drive-touch-button ${cls}`;
     b.textContent = label;
-    b.setAttribute('aria-label', key);
+    b.setAttribute('aria-label', key === 'use' ? label : key);
     const set = (on: boolean) => (e: PointerEvent) => {
       e.preventDefault();
-      this.touch[key] = on;
+      if (key === 'use') this.usePending ||= on;
+      else this.touch[key] = on;
       if (on) b.setPointerCapture(e.pointerId);
     };
     b.addEventListener('pointerdown', set(true));
@@ -197,6 +208,7 @@ export class ExploreMode {
   canStart(kind: ExploreKind, state: CityState): boolean {
     if (kind === 'drive') return state.buildings.some(b => isRoad(b.type));
     if (kind === 'boat') return state.grid.some(column => column.some(cell => cell.terrain === 'water'));
+    if (kind === 'ride') return this.world.traffic.getCars().length > 0 || this.world.boats.getBoats().length > 0;
     return true;
   }
 
@@ -209,9 +221,7 @@ export class ExploreMode {
     this.world.sync(state);
     this.paintCityImage(state);
 
-    const traveller = kind === 'drive' ? new CarTraveller()
-      : kind === 'walk' ? new WalkTraveller()
-        : kind === 'fly' ? new FlyTraveller() : new BoatTraveller();
+    const traveller = this.create(kind);
     const target = this.cameraController.getTarget();
     const tx = at ? at.x : target.x / CELL_SIZE;
     const tz = at ? at.z : target.z / CELL_SIZE;
@@ -219,21 +229,60 @@ export class ExploreMode {
       traveller.dispose();
       return false;
     }
+    this.mount(traveller);
+    this.releaseControls();
+    this.sceneManager.setCloseUp(true);
+    this.hud.hidden = false;
+    document.body.classList.add('driving');
+    return true;
+  }
+
+  private create(kind: ExploreKind): Traveller {
+    switch (kind) {
+      case 'drive': return new CarTraveller();
+      case 'walk': return new WalkTraveller();
+      case 'fly': return new FlyTraveller();
+      case 'boat': return new BoatTraveller();
+      case 'ride': return new RideTraveller();
+    }
+  }
+
+  private mount(traveller: Traveller): void {
     this.traveller = traveller;
     this.scene.add(traveller.object);
-    this.releaseControls();
-
-    const info = EXPLORE_MODES[kind];
+    const info = EXPLORE_MODES[traveller.kind];
     this.hintEl.textContent = info.hint;
     this.exitEl.textContent = info.exit;
     this.extraTouch.replaceChildren(...info.touch.map(([label, key], i) =>
       this.touchButton(label, key, `drive-touch-extra-${i}`)));
     this.setView(0);
-    this.sceneManager.setCloseUp(true);
-    this.hud.hidden = false;
-    this.hud.dataset.mode = kind;
-    document.body.classList.add('driving');
-    return true;
+    this.hud.dataset.mode = traveller.kind;
+  }
+
+  /** Swaps traveller mid-trip, keeping the camera where it is so the cut eases over. */
+  private switchTo(handoff: Handoff): void {
+    const old = this.traveller!;
+    old.handoff = null;
+    let next: Traveller | null = null;
+    for (const kind of [handoff.kind, handoff.fallback]) {
+      if (!kind) continue;
+      const candidate = this.create(kind);
+      const ok = candidate instanceof RideTraveller && handoff.target
+        ? (candidate.board(this.world, handoff.target, !!handoff.vessel), true)
+        : candidate.place(this.world, handoff.x, handoff.z, true);
+      if (ok) {
+        next = candidate;
+        break;
+      }
+      candidate.dispose();
+    }
+    if (!next) return;
+    this.scene.remove(old.object);
+    old.dispose();
+    this.world.traffic.setPlayer(null);
+    this.mount(next);
+    this.snapCamera = false;
+    this.onChange?.(next.kind);
   }
 
   /** Parks and hands the view back to the city camera, over where the trip ended. */
@@ -271,13 +320,23 @@ export class ExploreMode {
       right: k.right || t.right,
       action: k.action || t.action,
       shift: k.shift || t.shift,
+      use: this.usePending,
       lookX: this.look.x,
       lookY: this.look.y,
     }, this.world);
     this.look.x = this.look.y = 0;
+    this.usePending = false;
+    if (traveller.handoff) {
+      this.switchTo(traveller.handoff);
+      // A failed handoff stays put; the traveller cleared nothing, so drop the request.
+      if (this.traveller) this.traveller.handoff = null;
+    }
+    const current = this.traveller!;
+    const prompt = current.prompt?.() ?? EXPLORE_MODES[current.kind].hint;
+    if (this.hintEl.textContent !== prompt) this.hintEl.textContent = prompt;
     this.updateCamera(dt);
     this.drawMinimap();
-    const [value, unit] = traveller.gauge();
+    const [value, unit] = current.gauge();
     this.speedEl.textContent = value;
     this.unitEl.textContent = unit;
   }
@@ -306,6 +365,9 @@ export class ExploreMode {
       case 'KeyD': case 'ArrowRight': k.right = down; break;
       case 'Space': k.action = down; break;
       case 'ShiftLeft': case 'ShiftRight': k.shift = down; break;
+      case 'KeyE':
+        if (down && !e.repeat) this.usePending = true;
+        break;
       case 'KeyV':
         if (down && !e.repeat) this.cycleCamera();
         break;
@@ -319,6 +381,7 @@ export class ExploreMode {
     this.keys = idle();
     this.touch = idle();
     this.look.x = this.look.y = 0;
+    this.usePending = false;
     this.dragging = null;
   }
 

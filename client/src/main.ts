@@ -63,6 +63,7 @@ import { SoundManager } from './audio/SoundManager.js';
 import { TownPlannerPanel } from './ui/TownPlannerPanel.js';
 import { CityLoading } from './ui/CityLoading.js';
 import { UtilityLayerEditor } from './ui/UtilityLayerEditor.js';
+import { BuildingCard } from './ui/BuildingCard.js';
 
 const SERVER_URL = window.location.origin;
 const LAST_WORLD_KEY = 'cityzen_last_p2p_world';
@@ -186,6 +187,8 @@ function beginCityLoad(label: string): void {
   worldMap.hide();
   cityState = null;
   cityAdvisor.hide();
+  buildingCard.hide();
+  cityRenderer.setSelectedBuilding(null);
   buildMode.setCityState(null);
   setToolMode('pointer');
   cityRenderer.clear();
@@ -306,11 +309,16 @@ function setActiveLayer(layer: UtilityLayer): void {
   const report = cityRenderer.setActiveLayer(layer);
   utilityLayerEditor.setLayer(layer);
   utilityLayerEditor.update(cityState, report);
+  if (cityState && buildingCard.isVisible()) buildingCard.refresh(cityState, report);
   setGridEditing(gridHelper, layer !== 'surface' || buildMode.getToolMode() !== 'pointer');
 }
 
 function setToolMode(mode: ToolMode): void {
-  if (mode !== 'pointer') setExplorePicking(null);
+  if (mode !== 'pointer') {
+    setExplorePicking(null);
+    buildingCard.hide();
+    cityRenderer.setSelectedBuilding(null);
+  }
   mapInput.cancel();
   buildMode.setToolMode(mode);
   buildTools.setActiveMode(mode);
@@ -330,6 +338,28 @@ const financePanel = new FinancePanel(uiRoot, {
   onRepayLoan: (loanId) => gameClient.repayLoan(loanId, playerId),
 });
 const maslowPanel = new MaslowPanel(uiRoot);
+const buildingCard = new BuildingCard(uiRoot, {
+  getDepotStatus: (buildingId) => carManager.getDepotFleetStatus(buildingId, cityState),
+  getMaritimeStatus: (buildingId) => boatManager.getBuildingMaritimeStatus(buildingId, cityState),
+  onSetFleetSize: (buildingId, fleetSize) => gameClient.setBuildingFleet(buildingId, fleetSize, playerId),
+  onDispatchVehicle: (buildingId) => carManager.dispatchDepotVehicle(buildingId, cityState),
+  onRecallVehicles: (buildingId) => carManager.recallDepotVehicles(buildingId),
+  onDispatchVessel: (buildingId) => boatManager.dispatchVesselToBuilding(buildingId, cityState),
+  onFocusPosition: (cellX, cellZ) => {
+    if (!exploreMode.isActive()) {
+      cameraController.lookAt(cellX * CELL_SIZE, cellZ * CELL_SIZE);
+    }
+  },
+  onOpenUtilityLayer: (layer) => setActiveLayer(layer),
+  onDemolish: (building) => {
+    if (isReadOnlyCity) return;
+    cityRenderer.setSelectedBuilding(null);
+    void gameClient.demolish(building.position, playerId, 'surface');
+  },
+  onClose: () => {
+    cityRenderer.setSelectedBuilding(null);
+  },
+});
 
 const cityAdvisor = new CityAdvisor(uiRoot, action => {
   if (!cityState) return;
@@ -530,6 +560,7 @@ exploreMode.onExit = () => {
   mapInput.enabled = true;
   refreshExploreButton();
 };
+exploreMode.onChange = () => refreshExploreButton();
 
 addHudAction('Switch camera view', () => {
   footerIndicator.toast(`${CAMERA_VIEWS[optionsPanel.nextCameraView()].label} view`);
@@ -564,6 +595,7 @@ function setReadOnlyCity(readOnly: boolean, reason?: string): void {
   isReadOnlyCity = readOnly;
   document.body.classList.toggle('read-only-city', readOnly);
   readOnlyPill.hidden = !readOnly;
+  buildingCard.setReadOnly(readOnly);
   if (readOnly) {
     setToolMode('pointer');
     toolbar.close();
@@ -615,6 +647,8 @@ connect({
   onCityState: (city, players) => {
     if (cityState?.id !== city.id || (city.tick === 0 && cityState.tick > 0)) {
       exploreMode.stop();
+      buildingCard.hide();
+      cityRenderer.setSelectedBuilding(null);
       cameraController.frameCity(city);
     }
     setSite(city.siteId, city.grid);
@@ -661,7 +695,20 @@ connect({
     edgeRoadIndicator.update(cityState.buildings, worldState, cityState.id);
     resourceBar.update(cityState.resources, cityState);
     refreshCityAdvisor(cityState);
+    if (buildingCard.isVisible()) buildingCard.refresh(cityState, cityRenderer.getUtilityReport());
     soundManager.triggerConstruction();
+  },
+
+  onBuildingUpdated: (payload) => {
+    if (!cityState) return;
+    const idx = cityState.buildings.findIndex((b: PlacedBuilding) => b.id === payload.building.id);
+    if (idx >= 0) {
+      cityState.buildings[idx] = payload.building;
+    }
+    cityState.resources = payload.resources;
+    resourceBar.update(cityState.resources, cityState);
+    if (financePanel.isVisible()) financePanel.update(cityState);
+    if (buildingCard.isVisible()) buildingCard.refresh(cityState, cityRenderer.getUtilityReport());
   },
 
   onBuildingDemolished: (payload) => {
@@ -677,6 +724,12 @@ connect({
     edgeRoadIndicator.update(cityState.buildings, worldState, cityState.id);
     resourceBar.update(cityState.resources, cityState);
     refreshCityAdvisor(cityState);
+    if (buildingCard.getBuildingId() === payload.buildingId) {
+      buildingCard.hide();
+      cityRenderer.setSelectedBuilding(null);
+    } else if (buildingCard.isVisible()) {
+      buildingCard.refresh(cityState, cityRenderer.getUtilityReport());
+    }
     soundManager.triggerBulldoze();
   },
 
@@ -697,6 +750,9 @@ connect({
     }
     if (maslowPanel.isVisible() && resources.populationSummary) {
       maslowPanel.update(resources.populationSummary);
+    }
+    if (buildingCard.isVisible()) {
+      buildingCard.refresh(cityState, cityRenderer.getUtilityReport());
     }
 
     // Generate messages based on resource changes
@@ -742,6 +798,9 @@ connect({
     }
 
     cityRenderer.syncState(cityState);
+    if (buildingCard.isVisible()) {
+      buildingCard.refresh(cityState, cityRenderer.getUtilityReport());
+    }
     soundManager.triggerConstruction();
   },
 
@@ -832,12 +891,14 @@ connect({
       displayType: responderOk ? DisplayType.NOTIFICATION : DisplayType.BOTH,
     });
     soundManager.triggerEmergencyAlert();
+    if (buildingCard.isVisible()) buildingCard.refresh(cityState, cityRenderer.getUtilityReport());
   },
 
   onEmergencyResponding: ({ emergencyId, respondingAtTick }) => {
     if (!cityState?.emergencies) return;
     const em = cityState.emergencies.find(e => e.id === emergencyId);
     if (em) em.respondingAtTick = respondingAtTick;
+    if (cityState && buildingCard.isVisible()) buildingCard.refresh(cityState, cityRenderer.getUtilityReport());
   },
 
   onEmergencyOutcome: ({ outcome, resources }) => {
@@ -846,6 +907,7 @@ connect({
     cityState.resources = resources;
     resourceBar.update(resources, cityState);
     refreshCityAdvisor(cityState);
+    if (buildingCard.isVisible()) buildingCard.refresh(cityState, cityRenderer.getUtilityReport());
 
     if (outcome.resolution === 'failed') {
       messageManager.addMessage({
@@ -943,19 +1005,29 @@ buildMode.onDragCostUpdate = (cost, affordable = true, gradingCost = 0, invalidR
   }
 };
 
-// --- Edge road click: Navigate to adjacent city ---
-buildMode.onEdgeRoadClick = (direction: EdgeDirection, position: number) => {
-  if (!worldState || !cityState) return;
+// --- Building selection & Edge road click ---
+buildMode.onSelectBuilding = (building) => {
+  if (!cityState || !building) {
+    buildingCard.hide();
+    cityRenderer.setSelectedBuilding(null);
+    return;
+  }
+  cityRenderer.setSelectedBuilding(building);
+  buildingCard.show(building, cityState, cityRenderer.getUtilityReport());
+};
+
+buildMode.onEdgeRoadClick = (direction: EdgeDirection, position: number): boolean => {
+  if (!worldState || !cityState) return false;
 
   // Find current city's world position
   const currentCityEntry = worldState.cities.find(c => c.cityId === cityState!.id);
-  if (!currentCityEntry) return;
+  if (!currentCityEntry) return false;
 
   // Find adjacent city in the clicked direction
   const adjacentCity = findAdjacentCity(currentCityEntry.position, direction, worldState.cities);
   if (!adjacentCity) {
     console.log(`No city found to the ${direction}`);
-    return;
+    return false;
   }
 
   // Check if the adjacent city has a matching connection
@@ -971,9 +1043,10 @@ buildMode.onEdgeRoadClick = (direction: EdgeDirection, position: number) => {
       await gameClient.leave(playerId);
       await gameClient.joinCity(adjacentCity.cityId, currentPlayerName, playerId);
     })().catch(() => abortCityLoad('Could not reach the server'));
-  } else {
-    console.log(`Road not connected to ${adjacentCity.name}`);
+    return true;
   }
+  console.log(`Road not connected to ${adjacentCity.name}`);
+  return false;
 };
 
 // --- Earth lobby ---
@@ -1179,6 +1252,9 @@ window.addEventListener('keydown', (e) => {
     setExploreMenu(false);
   } else if (exploreMode.isActive() || explorePicking) {
     stopExploring();
+  } else if (buildingCard.isVisible()) {
+    buildingCard.hide();
+    cityRenderer.setSelectedBuilding(null);
   } else if (cityState) {
     if (buildMode.getSelectedType() || buildMode.getToolMode() === 'bulldoze') {
       setToolMode('pointer');
@@ -1198,7 +1274,7 @@ window.addEventListener('keydown', (e) => {
   if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
   if (!cityState || !gameClient || cityAdvisor.isOpen() || shareModal.isVisible() || gameMenu.isVisible() || optionsPanel.isVisible() || townPlanner.isVisible()) return;
 
-  const exploreKey = ({ KeyC: 'drive', KeyG: 'walk', KeyH: 'fly', KeyN: 'boat' } as const)[e.code as 'KeyC'];
+  const exploreKey = ({ KeyC: 'drive', KeyG: 'walk', KeyH: 'fly', KeyN: 'boat', KeyJ: 'ride' } as const)[e.code as 'KeyC'];
   if (exploreKey) {
     toggleExplore(exploreKey);
     return;
@@ -1236,6 +1312,8 @@ window.addEventListener('keydown', (e) => {
 function showWorldMap(): void {
   stopExploring();
   cityAdvisor.hide();
+  buildingCard.hide();
+  cityRenderer.setSelectedBuilding(null);
   unhappyCityId = null;
   // No city on screen any more: drop the active tool and hide the HUD
   setToolMode('pointer');
@@ -1245,6 +1323,7 @@ function showWorldMap(): void {
 
 // --- Game loop ---
 let lastTime = performance.now();
+let cardRefreshTimer = 0;
 let roadCount = 0;
 let roadCountSource: PlacedBuilding[] | null = null;
 let roadCountLength = -1;
@@ -1267,6 +1346,15 @@ function gameLoop(): void {
   if (!paused) {
     carManager.update(deltaTime, cityState);
     boatManager.update(deltaTime, cityState);
+  }
+  if (cityState && buildingCard.isVisible()) {
+    cardRefreshTimer += deltaTime;
+    if (cardRefreshTimer >= 0.4) {
+      cardRefreshTimer = 0;
+      buildingCard.refresh(cityState, cityRenderer.getUtilityReport());
+    }
+  } else {
+    cardRefreshTimer = 0;
   }
   buildMode.updatePreview(cityState);
   compassIndicator.update(cameraController.getRotationAngle());

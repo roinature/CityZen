@@ -5,6 +5,7 @@ import {
   type WorldStatePayload,
   type BuildingPlacedPayload,
   type BuildingsPlacedPayload,
+  type BuildingUpdatedPayload,
   type PlaceBuildingsPayload,
   type BuildingDemolishedPayload,
   type ResourcesUpdatePayload,
@@ -35,6 +36,7 @@ export interface GameCallbacks {
   onWorldState: (world: WorldState) => void;
   onCityState: (city: import('@cityzen/shared').CityState, players: Player[]) => void;
   onBuildingsPlaced: (payload: BuildingsPlacedPayload) => void;
+  onBuildingUpdated?: (payload: BuildingUpdatedPayload) => void;
   onBuildingDemolished: (payload: BuildingDemolishedPayload) => void;
   onResourcesUpdate: (resources: ResourceState, tick: number, clock: GameClock) => void;
   onZoneGrowth: (payload: ZoneGrowthPayload) => void;
@@ -137,6 +139,10 @@ export class GameClient implements CityConnection {
         .on('broadcast', { event: S2C.BUILDINGS_PLACED }, (msg) => {
           if (this.joinedCityChannel !== channel) return;
           this.callbacks.onBuildingsPlaced(msg.payload as BuildingsPlacedPayload);
+        })
+        .on('broadcast', { event: S2C.BUILDING_UPDATED }, (msg) => {
+          if (this.joinedCityChannel !== channel) return;
+          this.callbacks.onBuildingUpdated?.(msg.payload as BuildingUpdatedPayload);
         })
         .on('broadcast', { event: S2C.BUILDING_DEMOLISHED }, (msg) => {
           this.callbacks.onBuildingDemolished(msg.payload as BuildingDemolishedPayload);
@@ -263,6 +269,10 @@ export class GameClient implements CityConnection {
     if (!result.success) {
       this.callbacks.onError({ message: result.error || 'Demolish failed', code: 'DEMOLISH_FAILED' });
     }
+  }
+
+  async setBuildingFleet(buildingId: string, fleetSize: number, playerId?: string): Promise<{ success: boolean; error?: string }> {
+    return this.post('/api/building/fleet', { buildingId, fleetSize, playerId });
   }
 
   async save(playerId?: string): Promise<void> {

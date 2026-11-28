@@ -1,6 +1,6 @@
 import type { CityState } from '../types/city.js';
 import { BUILDING_DEFS, getZoneLevelDef } from '../constants/buildings.js';
-import { BuildingType, isZone, type ZoneType } from '../types/building.js';
+import { BuildingType, SERVICE_BUILDING_FLEETS, getEffectiveFleetSize, isZone, type PlacedBuilding, type ZoneType } from '../types/building.js';
 import {
   TAX_PER_PERSON, TAX_PER_PERSON_FALLBACK, DEFICIT_MASLOW_PENALTY_RATE, MIN_BUDGET_MULTIPLIER,
   TAX_COMFORT_RATE, TAX_MASLOW_PENALTY_PER_POINT,
@@ -79,19 +79,28 @@ export function calculateTaxPenalty(taxRate: number): number {
   return 1.0 - excess * TAX_MASLOW_PENALTY_PER_POINT;
 }
 
+export function getBuildingMaintenance(b: PlacedBuilding): number {
+  const def = BUILDING_DEFS[b.type];
+  let maint = def?.effects?.maintenance ?? 0;
+
+  if (isZone(b.type) && b.developmentLevel && b.developmentLevel > 0) {
+    const levelDef = getZoneLevelDef(b.type as ZoneType, b.density, b.developmentLevel!);
+    maint += levelDef.maintenance;
+  }
+
+  const fleetCfg = SERVICE_BUILDING_FLEETS[b.type];
+  if (fleetCfg) {
+    const effective = getEffectiveFleetSize(b);
+    const delta = (effective - fleetCfg.defaultFleet) * fleetCfg.upkeepPerUnit;
+    maint = Math.max(Math.ceil(maint * 0.4), maint + delta);
+  }
+
+  return maint;
+}
+
 export function calculateMaintenance(state: CityState): number {
   // Road upkeep is fractional per tile; the city is billed in whole dollars.
-  return Math.round(state.buildings.reduce((sum, b) => {
-    const def = BUILDING_DEFS[b.type];
-    let maint = def?.effects?.maintenance ?? 0;
-
-    if (isZone(b.type) && b.developmentLevel && b.developmentLevel > 0) {
-      const levelDef = getZoneLevelDef(b.type as ZoneType, b.density, b.developmentLevel!);
-      maint += levelDef.maintenance;
-    }
-
-    return sum + maint;
-  }, 0));
+  return Math.round(state.buildings.reduce((sum, b) => sum + getBuildingMaintenance(b), 0));
 }
 
 export function calculateNetIncome(state: CityState): number {

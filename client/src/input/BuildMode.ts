@@ -364,7 +364,8 @@ export class BuildMode {
   onPaint: ((stroke: PlaceBuildingsPayload) => void) | null = null;
   onPlace: ((pos: Position, type: BuildingType, density?: ZoneDensity, orientation?: RoadOrientation) => void) | null = null;
   onDemolish: ((pos: Position, layer: UtilityLayer) => void) | null = null;
-  onEdgeRoadClick: ((direction: EdgeDirection, position: number) => void) | null = null;
+  onEdgeRoadClick: ((direction: EdgeDirection, position: number) => boolean) | null = null;
+  onSelectBuilding: ((building: PlacedBuilding | null) => void) | null = null;
   /** Reports the cost of what is about to be placed (null = nothing), whether affordable, any terrain-leveling fee included, and optional invalid placement hint. */
   onDragCostUpdate: ((cost: number | null, affordable?: boolean, gradingCost?: number, invalidReason?: string) => void) | null = null;
   /** Footprint whose existing zoned buildings should step aside for a valid hover preview. */
@@ -884,12 +885,19 @@ export class BuildMode {
   }
 
   tap(x: number, y: number): void {
-    const pos = this.raycaster.getGridPosition(x, y, this.getCamera());
+    const cam = this.getCamera();
+    const pos = this.raycaster.getGridPosition(x, y, cam);
+    if (this.toolMode === 'pointer') {
+      if (pos && this.checkEdgeRoadClick(pos)) return;
+      const picked = this.currentCityState
+        ? this.raycaster.pickBuilding(x, y, cam, this.currentCityState)
+        : null;
+      this.onSelectBuilding?.(picked);
+      return;
+    }
     if (!pos) return;
     if (this.toolMode === 'bulldoze') {
       this.demolishArea(pos);
-    } else if (this.toolMode === 'pointer') {
-      this.checkEdgeRoadClick(pos);
     } else if (this.selectedType && !this.canDraw()) {
       const orientation = this.currentCityState
         ? this.resolveHoverOrientation(this.currentCityState, pos, this.selectedType)
@@ -916,15 +924,15 @@ export class BuildMode {
   /**
    * Check if clicked position is an edge road and emit callback for cross-city navigation.
    */
-  private checkEdgeRoadClick(pos: Position): void {
-    if (!this.currentCityState || !this.onEdgeRoadClick) return;
+  private checkEdgeRoadClick(pos: Position): boolean {
+    if (!this.currentCityState || !this.onEdgeRoadClick) return false;
 
     // Find building at this position
     const cell = this.currentCityState.grid[pos.x]?.[pos.z];
-    if (!cell?.buildingId) return;
+    if (!cell?.buildingId) return false;
 
     const building = this.currentCityState.buildings.find((b: PlacedBuilding) => b.id === cell.buildingId);
-    if (!building || !isRoad(building.type)) return;
+    if (!building || !isRoad(building.type)) return false;
 
     // Check if this road is at an edge
     const maxCoord = DEFAULT_GRID_SIZE - 1;
@@ -946,8 +954,9 @@ export class BuildMode {
     }
 
     if (direction && edgePosition !== null) {
-      this.onEdgeRoadClick(direction, edgePosition);
+      return this.onEdgeRoadClick(direction, edgePosition);
     }
+    return false;
   }
 
   private currentCityState: CityState | null = null;

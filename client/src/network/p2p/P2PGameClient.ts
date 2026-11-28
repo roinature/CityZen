@@ -8,6 +8,7 @@ import {
   type BuildingDemolishedPayload,
   type BuildingPlacedPayload,
   type BuildingsPlacedPayload,
+  type BuildingUpdatedPayload,
   type BuildingType,
   type CityListItem,
   type CityState,
@@ -477,6 +478,14 @@ export class P2PGameClient implements CityConnection {
         this.mergeCachedBuildings(buildings, resources);
         break;
       }
+      case S2C.BUILDING_UPDATED: {
+        const { building, resources } = data as BuildingUpdatedPayload;
+        const idx = this.activeRemoteCity.buildings.findIndex(b => b.id === building.id);
+        if (idx >= 0) this.activeRemoteCity.buildings[idx] = clone(building);
+        this.activeRemoteCity.resources = clone(resources);
+        this.persistActiveRemoteCache(false);
+        break;
+      }
       case S2C.BUILDING_DEMOLISHED: {
         const { buildingId, resources } = data as BuildingDemolishedPayload;
         const target = this.activeRemoteCity.buildings.find((b: PlacedBuilding) => b.id === buildingId);
@@ -646,6 +655,9 @@ export class P2PGameClient implements CityConnection {
       }
       case S2C.BUILDINGS_PLACED:
         cb.onBuildingsPlaced(data as BuildingsPlacedPayload);
+        break;
+      case S2C.BUILDING_UPDATED:
+        cb.onBuildingUpdated?.(data as BuildingUpdatedPayload);
         break;
       case S2C.BUILDING_DEMOLISHED:
         cb.onBuildingDemolished(data as BuildingDemolishedPayload);
@@ -833,6 +845,10 @@ export class P2PGameClient implements CityConnection {
     if (!result.success) {
       this.callbacks.onError({ message: result.error || 'Demolish failed', code: 'DEMOLISH_FAILED' });
     }
+  }
+
+  async setBuildingFleet(buildingId: string, fleetSize: number, playerId = this.playerId): Promise<{ success: boolean; error?: string }> {
+    return this.sendCityCommand('buildingFleet', { buildingId, fleetSize }, playerId);
   }
 
   async save(playerId = this.playerId): Promise<void> {

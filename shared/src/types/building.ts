@@ -270,6 +270,68 @@ export interface BuildingDef {
   speedMultiplier?: number;
 }
 
+export type ServiceFleetKind = 'police' | 'fire' | 'ambulance' | 'garbage' | 'bus';
+
+export interface ServiceFleetConfig {
+  kind: ServiceFleetKind;
+  defaultFleet: number;
+  maxFleet: number;
+  unitLabel: string;
+  pluralLabel: string;
+  /** Upkeep delta ($/tick) per vehicle added or removed relative to `defaultFleet`. */
+  upkeepPerUnit: number;
+}
+
+export const SERVICE_BUILDING_FLEETS: Partial<Record<BuildingType, ServiceFleetConfig>> = {
+  [BuildingType.POLICE_STATION]: {
+    kind: 'police', defaultFleet: 1, maxFleet: 4,
+    unitLabel: 'Police Cruiser', pluralLabel: 'Police Cruisers', upkeepPerUnit: 3,
+  },
+  [BuildingType.POLICE_HQ]: {
+    kind: 'police', defaultFleet: 2, maxFleet: 6,
+    unitLabel: 'Police Cruiser', pluralLabel: 'Police Cruisers', upkeepPerUnit: 3,
+  },
+  [BuildingType.FIRE_STATION]: {
+    kind: 'fire', defaultFleet: 1, maxFleet: 4,
+    unitLabel: 'Fire Engine', pluralLabel: 'Fire Engines', upkeepPerUnit: 3,
+  },
+  [BuildingType.FIRE_HQ]: {
+    kind: 'fire', defaultFleet: 2, maxFleet: 6,
+    unitLabel: 'Fire Engine', pluralLabel: 'Fire Engines', upkeepPerUnit: 3,
+  },
+  [BuildingType.HEALTH_CLINIC]: {
+    kind: 'ambulance', defaultFleet: 1, maxFleet: 4,
+    unitLabel: 'Ambulance', pluralLabel: 'Ambulances', upkeepPerUnit: 3,
+  },
+  [BuildingType.HEALTH_HOSPITAL]: {
+    kind: 'ambulance', defaultFleet: 2, maxFleet: 6,
+    unitLabel: 'Ambulance', pluralLabel: 'Ambulances', upkeepPerUnit: 3,
+  },
+  [BuildingType.WATER_SEWAGE_PLANT]: {
+    kind: 'garbage', defaultFleet: 2, maxFleet: 6,
+    unitLabel: 'Sanitation Truck', pluralLabel: 'Sanitation Trucks', upkeepPerUnit: 3,
+  },
+  [BuildingType.SEWAGE_PUMP_STATION]: {
+    kind: 'garbage', defaultFleet: 1, maxFleet: 3,
+    unitLabel: 'Sanitation Truck', pluralLabel: 'Sanitation Trucks', upkeepPerUnit: 2,
+  },
+  [BuildingType.TRANS_BUS_DEPOT]: {
+    kind: 'bus', defaultFleet: 3, maxFleet: 8,
+    unitLabel: 'Transit Bus', pluralLabel: 'Transit Buses', upkeepPerUnit: 2,
+  },
+  [BuildingType.TRANS_TRAIN_STATION]: {
+    kind: 'bus', defaultFleet: 1, maxFleet: 4,
+    unitLabel: 'Shuttle Bus', pluralLabel: 'Shuttle Buses', upkeepPerUnit: 2,
+  },
+};
+
+export function getEffectiveFleetSize(building: Pick<PlacedBuilding, 'type' | 'fleetSize'>): number {
+  const cfg = SERVICE_BUILDING_FLEETS[building.type];
+  if (!cfg) return 0;
+  const raw = building.fleetSize ?? cfg.defaultFleet;
+  return Math.max(0, Math.min(cfg.maxFleet, Math.round(raw)));
+}
+
 export interface PlacedBuilding {
   id: string;
   type: BuildingType;
@@ -280,4 +342,6 @@ export interface PlacedBuilding {
   developedAt?: number;
   density?: ZoneDensity;
   orientation?: RoadOrientation;
+  /** Player-configured vehicle fleet count for service depots (overrides defaultFleet). */
+  fleetSize?: number;
 }

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { Rideable } from './CarManager.js';
 import {
   BuildingType,
   CELL_SIZE,
@@ -60,7 +61,23 @@ interface PolyPath {
   length: number;
 }
 
-type BoatPhase = 'cruising' | 'docking' | 'docked' | 'undocking' | 'departing';
+export type BoatPhase = 'cruising' | 'docking' | 'docked' | 'undocking' | 'departing';
+
+export interface BuildingMaritimeVessel {
+  id: number;
+  kind: BoatKind;
+  phase: BoatPhase;
+  berthId: string;
+  x: number;
+  z: number;
+}
+
+export interface BuildingMaritimeStatus {
+  totalBerths: number;
+  occupiedBerths: number;
+  allowedKinds: BoatKind[];
+  vessels: BuildingMaritimeVessel[];
+}
 
 interface Boat {
   id: number;
@@ -482,6 +499,7 @@ function buildPolyPath(points: ReadonlyArray<[number, number]>): PolyPath {
 export class BoatManager {
   private scene: THREE.Scene;
   private boats: Boat[] = [];
+  private riding: Boat | null = null;
   private network: WaterNetwork | null = null;
   private occupiedBerths = new Set<string>();
   private sig = '';
@@ -514,6 +532,31 @@ export class BoatManager {
     this.nightMaterial.emissiveIntensity = isNight ? 0.9 : 0.05;
   }
 
+  /** The nearest moving boat within `radius` cells, for the player to ride along. */
+  nearestRideable(x: number, z: number, radius: number, except?: Rideable | null): Rideable | null {
+    let best: Boat | null = null;
+    let bestD = radius * radius;
+    for (const boat of this.boats) {
+      if (boat === except || boat.leaving >= 0 || boat.age < FADE_SECONDS) continue;
+      const d = (boat.x - x) ** 2 + (boat.z - z) ** 2;
+      if (d < bestD) {
+        bestD = d;
+        best = boat;
+      }
+    }
+    return best;
+  }
+
+  /** Marks the boat the player rides on: it keeps cruising instead of leaving the map. */
+  setRiding(boat: Rideable | null): void {
+    this.riding = boat && this.boats.includes(boat as Boat) ? boat as Boat : null;
+  }
+
+  /** The boat being ridden, or null once it has gone. */
+  getRiding(): Rideable | null {
+    return this.riding;
+  }
+
   getBoats(): readonly { id: number; kind: BoatKind; phase: BoatPhase; x: number; z: number; berthId: string | null }[] {
     return this.boats.map(b => ({
       id: b.id,
@@ -529,9 +572,66 @@ export class BoatManager {
     return this.network?.berths ?? [];
   }
 
+  /** Live berth & vessel status for a waterfront / harbor building. */
+  getBuildingMaritimeStatus(buildingId: string, state?: CityState | null): BuildingMaritimeStatus {
+    if (state) this.syncNetwork(state);
+    const berths = (this.network?.berths ?? []).filter(b => b.buildingId === buildingId);
+    const berthIds = new Set(berths.map(b => b.id));
+    const allowedSet = new Set<BoatKind>();
+    for (const berth of berths) {
+      for (const k of berth.allowedKinds) allowedSet.add(k);
+    }
+    const vessels: BuildingMaritimeVessel[] = [];
+    for (const b of this.boats) {
+      if (b.leaving >= 0 || !b.targetBerth || !berthIds.has(b.targetBerth.id)) continue;
+      vessels.push({
+        id: b.id,
+        kind: b.kind,
+        phase: b.phase,
+        berthId: b.targetBerth.id,
+        x: b.x,
+        z: b.z,
+      });
+    }
+    return {
+      totalBerths: berths.length,
+      occupiedBerths: berths.filter(b => this.occupiedBerths.has(b.id)).length,
+      allowedKinds: Array.from(allowedSet),
+      vessels,
+    };
+  }
+
+  /** Requests an inbound vessel for an open berth at `buildingId`. */
+  dispatchVesselToBuilding(buildingId: string, state?: CityState | null): boolean {
+    if (state) this.syncNetwork(state);
+    const net = this.network;
+    if (!net || !this.enabled) return false;
+    const freeBerths = net.berths.filter(b => b.buildingId === buildingId && !this.occupiedBerths.has(b.id));
+    if (!freeBerths.length) return false;
+    for (const berth of freeBerths) {
+      const berthComp = net.component[berth.approachCellX * net.size + berth.approachCellZ];
+      const compGates = net.edgeGates.filter(g => g.comp === berthComp);
+      const compPool = compGates.length > 0 ? compGates : net.openWaypoints.filter(w => w.comp === berthComp);
+      if (!compPool.length) continue;
+      for (let attempt = 0; attempt < 6; attempt++) {
+        const gate = pick(compPool);
+        if (Math.hypot(gate.x - berth.approachCellX, gate.z - berth.approachCellZ) < 4) continue;
+        if (this.isCrowded(gate.x + 0.5, gate.z + 0.5, 1.8)) continue;
+        const pts = net.findWaterPath(gate.x, gate.z, berth.approachCellX, berth.approachCellZ);
+        if (!pts || pts.length < 2) continue;
+        const kind = pick(berth.allowedKinds);
+        this.occupiedBerths.add(berth.id);
+        this.boats.push(this.instantiateBoat(kind, buildPolyPath(pts), berth));
+        return true;
+      }
+    }
+    return false;
+  }
+
   clear(): void {
     for (const boat of this.boats) this.removeBoatMesh(boat);
     this.boats = [];
+    this.riding = null;
     this.occupiedBerths.clear();
     this.network = null;
     this.sig = '';
@@ -551,6 +651,7 @@ export class BoatManager {
     for (let i = this.boats.length - 1; i >= 0; i--) {
       if (!this.stepBoat(this.boats[i], net, dt)) {
         const removed = this.boats[i];
+        if (removed === this.riding) this.riding = null;
         if (removed.targetBerth) this.occupiedBerths.delete(removed.targetBerth.id);
         this.removeBoatMesh(removed);
         this.boats.splice(i, 1);
@@ -601,7 +702,7 @@ export class BoatManager {
     for (const b of this.boats) if (b.leaving < 0) active++;
 
     for (let i = this.boats.length - 1; i >= 0 && active > desired; i--) {
-      if (this.boats[i].leaving < 0 && this.boats[i].phase !== 'docked') {
+      if (this.boats[i].leaving < 0 && this.boats[i].phase !== 'docked' && this.boats[i] !== this.riding) {
         this.boats[i].leaving = 0;
         active--;
       }
@@ -831,7 +932,8 @@ export class BoatManager {
         boat.yaw = boat.targetBerth.dockYaw;
         boat.v = 0;
         boat.dockTimer = 7 + Math.random() * 7;
-      } else if (boat.phase === 'undocking') {
+      } else if (boat.phase === 'undocking' || boat === this.riding) {
+        // A ridden boat sets off again rather than sailing off the map.
         this.beginDeparture(boat, net);
       } else {
         boat.leaving = 0;

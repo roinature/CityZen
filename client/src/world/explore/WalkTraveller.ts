@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { CELL_SIZE } from '@cityzen/shared';
 import { createContactShadow } from '../CarManager.js';
 import type { ExploreWorld } from './ExploreWorld.js';
-import { METRES_PER_CELL, approach, type CameraShot, type ExploreInput, type Traveller } from './types.js';
+import type { Rideable } from '../CarManager.js';
+import { METRES_PER_CELL, approach, type CameraShot, type ExploreInput, type Handoff, type Traveller } from './types.js';
 
 const WALK = 0.55;
 const RUN = 1.35;
@@ -18,6 +19,9 @@ const GRAVITY = 4.2;
 /** How high a kerb the walker steps straight up. */
 const STEP_UP = 0.06;
 const MAX_PICK_DISTANCE = 4;
+/** How close a car (or a boat, from the quay) must be to climb in. */
+const BOARD_CAR = 0.7;
+const BOARD_BOAT = 1.6;
 const SHIRTS = [0x2f6fb0, 0xc2453a, 0x3c8d5a, 0xe0a23a, 0x6b4fa0, 0x2d2f33];
 
 /** A pedestrian on foot: sidewalks, parks, plazas and crossings. Traffic stops for you. */
@@ -25,6 +29,8 @@ export class WalkTraveller implements Traveller {
   readonly kind = 'walk';
   readonly views = ['Behind', 'Eyes'] as const;
   readonly object = new THREE.Group();
+  handoff: Handoff | null = null;
+  private reach: { target: Rideable; vessel: boolean } | null = null;
   x = 0;
   z = 0;
   yaw = 0;
@@ -118,12 +124,30 @@ export class WalkTraveller implements Traveller {
     return world.obstacles.hits(x, z, RADIUS, y + STEP_UP);
   }
 
+  /** A traffic car or boat close enough to climb into. */
+  private inReach(world: ExploreWorld): { target: Rideable; vessel: boolean } | null {
+    const car = world.traffic.nearestRideable(this.x, this.z, BOARD_CAR);
+    if (car) return { target: car, vessel: false };
+    const boat = world.boats.nearestRideable(this.x, this.z, BOARD_BOAT);
+    return boat ? { target: boat, vessel: true } : null;
+  }
+
+  prompt(): string | null {
+    if (!this.reach) return null;
+    return `E: ride this ${this.reach.vessel ? 'boat' : 'car'}`;
+  }
+
   setView(view: number): void {
     this.view = view;
     this.figure.visible = view !== 1;
   }
 
   update(dt: number, input: ExploreInput, world: ExploreWorld): void {
+    this.reach = this.inReach(world);
+    if (input.use && this.reach) {
+      this.handoff = { kind: 'ride', x: this.x, z: this.z, yaw: this.yaw, ...this.reach };
+      return;
+    }
     this.yaw += (Number(input.left) - Number(input.right)) * TURN_RATE * dt - input.lookX * LOOK_RATE;
     this.pitch = THREE.MathUtils.clamp(this.pitch - input.lookY * LOOK_RATE, -1.2, 1.1);
 

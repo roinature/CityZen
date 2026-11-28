@@ -4,6 +4,8 @@ import {
   type CityState,
   type PlacedBuilding,
   CELL_SIZE,
+  SERVICE_BUILDING_FLEETS,
+  getEffectiveFleetSize,
   getEffectiveSize,
   isRoad,
 } from '@cityzen/shared';
@@ -166,6 +168,44 @@ export interface PlayerCar {
   v: number;
 }
 
+/** A traffic vehicle the player can ride along in. */
+export interface Rideable {
+  readonly id: number;
+  readonly x: number;
+  readonly z: number;
+  readonly yaw: number;
+  readonly v: number;
+  readonly mesh: THREE.Group;
+}
+
+export interface DepotVehicleStatus {
+  id: number;
+  kind: ServiceKind;
+  state: 'responding' | 'on_scene' | 'patrolling' | 'at_stop' | 'returning';
+  emergencyId?: string;
+  x: number;
+  z: number;
+  stopsLeft: number;
+}
+
+export interface DepotFleetStatus {
+  hasRoadAccess: boolean;
+  configuredFleet: number;
+  standbyCount: number;
+  nextDispatchInSec: number;
+  vehicles: DepotVehicleStatus[];
+}
+
+function fleetSignature(buildings: readonly PlacedBuilding[]): string {
+  let sig = '';
+  for (const b of buildings) {
+    if (SERVICE_BUILDING_FLEETS[b.type]) {
+      sig += `${b.id}:${getEffectiveFleetSize(b)};`;
+    }
+  }
+  return sig;
+}
+
 const pick = <T>(items: readonly T[]): T => items[Math.floor(Math.random() * items.length)];
 
 function angleDelta(a: number, b: number): number {
@@ -194,6 +234,7 @@ export class CarManager {
   private network: RoadNetwork | null = null;
   private lights: TrafficLights;
   private roadSig = '';
+  private fleetSig = '';
   private lastBuildings: readonly PlacedBuilding[] | null = null;
   private lastBuildingCount = -1;
   private endpointAge = 0;
@@ -207,6 +248,8 @@ export class CarManager {
   private nearby: Car[] = [];
   /** Stand-in for the player's car: an obstacle that is always "waiting legitimately". */
   private player: Car | null = null;
+  /** The car the player is riding in: kept on the road with a new trip whenever it arrives. */
+  private riding: Car | null = null;
   private depots = new Map<string, Depot>();
   private reportedResponding = new Set<string>();
   private reportedResolved = new Set<string>();
@@ -225,7 +268,7 @@ export class CarManager {
     this.enabled = enabled;
     if (!enabled) {
       for (let i = this.cars.length - 1; i >= 0; i--) {
-        if (!this.cars[i].service?.emergencyId) {
+        if (!this.cars[i].service?.emergencyId && this.cars[i] !== this.riding) {
           this.removeMesh(this.cars[i]);
           this.cars.splice(i, 1);
         }
@@ -248,6 +291,31 @@ export class CarManager {
     this.player.waitMemo = 1;
   }
 
+  /** The nearest car (service vehicles included) within `radius` cells, or null. */
+  nearestRideable(x: number, z: number, radius: number, except?: Rideable | null): Rideable | null {
+    let best: Car | null = null;
+    let bestD = radius * radius;
+    for (const car of this.cars) {
+      if (car === except || car.leaving >= 0 || car.age < FADE) continue;
+      const d = (car.x - x) ** 2 + (car.z - z) ** 2;
+      if (d < bestD) {
+        bestD = d;
+        best = car;
+      }
+    }
+    return best;
+  }
+
+  /** Marks the car the player rides in (null when they get out). */
+  setRiding(car: Rideable | null): void {
+    this.riding = car && this.cars.includes(car as Car) ? car as Car : null;
+  }
+
+  /** The car being ridden, or null once it has left the road. */
+  getRiding(): Rideable | null {
+    return this.riding;
+  }
+
   /** Positions of the traffic cars, in cells. */
   getCars(): readonly { x: number; z: number; yaw: number; v: number; leaving: number }[] {
     return this.cars;
@@ -260,11 +328,13 @@ export class CarManager {
   clear(): void {
     for (const car of this.cars) this.removeMesh(car);
     this.cars = [];
+    this.riding = null;
     this.depots.clear();
     this.reportedResponding.clear();
     this.reportedResolved.clear();
     this.network = null;
     this.roadSig = '';
+    this.fleetSig = '';
     this.lastBuildings = null;
     this.lastBuildingCount = -1;
     this.lights.clear();
@@ -331,6 +401,7 @@ export class CarManager {
 
     for (let i = this.cars.length - 1; i >= 0; i--) {
       if (!this.move(this.cars[i], dt)) {
+        if (this.cars[i] === this.riding) this.riding = null;
         this.removeMesh(this.cars[i]);
         this.cars.splice(i, 1);
       }
@@ -354,10 +425,13 @@ export class CarManager {
   private syncNetwork(state: CityState, dt: number): void {
     this.endpointAge += dt;
     const buildings = state.buildings;
-    const changed = buildings !== this.lastBuildings || buildings.length !== this.lastBuildingCount;
+    const nextFleetSig = fleetSignature(buildings);
+    const fleetChanged = nextFleetSig !== this.fleetSig;
+    const changed = buildings !== this.lastBuildings || buildings.length !== this.lastBuildingCount || fleetChanged;
     if (!changed && this.network && this.endpointAge < 5) return;
     this.lastBuildings = buildings;
     this.lastBuildingCount = buildings.length;
+    this.fleetSig = nextFleetSig;
     this.endpointAge = 0;
 
     const sig = roadSignature(buildings);
@@ -409,7 +483,7 @@ export class CarManager {
     for (const car of this.cars) if (car.leaving < 0 && !car.service) active++;
 
     for (let i = this.cars.length - 1; i >= 0 && active > desired; i--) {
-      if (this.cars[i].leaving < 0 && !this.cars[i].service) {
+      if (this.cars[i].leaving < 0 && !this.cars[i].service && this.cars[i] !== this.riding) {
         this.cars[i].leaving = 0;
         active--;
       }
@@ -518,13 +592,157 @@ export class CarManager {
       const access = this.findAccess(net, b);
       if (!access) continue;
       const old = this.depots.get(b.id);
+      const fleet = getEffectiveFleetSize(b);
       next.set(b.id, {
-        id: b.id, kind: cfg.kind, fleet: cfg.fleet,
+        id: b.id, kind: cfg.kind, fleet,
         tile: access.tile, side: access.side,
         next: old?.next ?? this.time + 1 + Math.random() * 6,
       });
     }
     this.depots = next;
+
+    // If a depot's fleet size was lowered, recall excess non-emergency vehicles cleanly.
+    const activeByDepot = new Map<string, Car[]>();
+    for (const car of this.cars) {
+      if (!car.service || car.leaving >= 0) continue;
+      const list = activeByDepot.get(car.service.home) ?? [];
+      list.push(car);
+      activeByDepot.set(car.service.home, list);
+    }
+    for (const [depotId, list] of activeByDepot) {
+      const limit = next.get(depotId)?.fleet ?? 0;
+      let over = list.length - limit;
+      for (let i = list.length - 1; i >= 0 && over > 0; i--) {
+        const car = list[i];
+        const sv = car.service!;
+        if (sv.emergencyId || sv.returning) continue;
+        this.sendVehicleHome(car);
+        over--;
+      }
+    }
+  }
+
+  /** Live telemetry for a service depot building, used by the building inspector card. */
+  getDepotFleetStatus(buildingId: string, state?: CityState | null): DepotFleetStatus {
+    if (state) this.syncNetwork(state, 0);
+    const depot = this.depots.get(buildingId);
+    const vehicles: DepotVehicleStatus[] = [];
+    for (const car of this.cars) {
+      const sv = car.service;
+      if (!sv || sv.home !== buildingId || car.leaving >= 0) continue;
+      const state: DepotVehicleStatus['state'] = sv.emergencyId
+        ? (sv.dwell > 0 ? 'on_scene' : 'responding')
+        : sv.returning
+          ? 'returning'
+          : sv.dwell > 0
+            ? 'at_stop'
+            : 'patrolling';
+      vehicles.push({
+        id: car.id,
+        kind: sv.kind,
+        state,
+        emergencyId: sv.emergencyId,
+        x: car.x,
+        z: car.z,
+        stopsLeft: sv.stopsLeft,
+      });
+    }
+    const configuredFleet = depot?.fleet ?? 0;
+    return {
+      hasRoadAccess: Boolean(depot),
+      configuredFleet,
+      standbyCount: Math.max(0, configuredFleet - vehicles.length),
+      nextDispatchInSec: depot ? Math.max(0, depot.next - this.time) : 0,
+      vehicles,
+    };
+  }
+
+  /** Manually dispatches a standby service vehicle from `buildingId` right away. */
+  dispatchDepotVehicle(buildingId: string, state?: CityState | null): boolean {
+    if (state) this.syncNetwork(state, 0);
+    const net = this.network;
+    const depot = this.depots.get(buildingId);
+    if (!net || !depot || depot.fleet <= 0) return false;
+    let outCount = 0;
+    let totalService = 0;
+    for (const car of this.cars) {
+      if (!car.service || car.leaving >= 0) continue;
+      totalService++;
+      if (car.service.home === buildingId) outCount++;
+    }
+    if (outCount >= depot.fleet || totalService >= MAX_SERVICE_VEHICLES) return false;
+    const car = this.spawnService(net, depot);
+    if (!car) return false;
+    this.cars.push(car);
+    depot.next = this.time + 3 + Math.random() * 5;
+    return true;
+  }
+
+  /** Recalls all non-emergency patrolling vehicles belonging to `buildingId` back to base. */
+  recallDepotVehicles(buildingId: string): number {
+    let recalled = 0;
+    for (const car of this.cars) {
+      const sv = car.service;
+      if (!sv || sv.home !== buildingId || car.leaving >= 0) continue;
+      if (sv.emergencyId || sv.returning) continue;
+      if (this.sendVehicleHome(car)) recalled++;
+    }
+    return recalled;
+  }
+
+  private sendVehicleHome(car: Car): boolean {
+    const sv = car.service;
+    if (!sv || sv.emergencyId || sv.returning) return false;
+    if (sv.dwell > 0) {
+      sv.stopsLeft = 1;
+      sv.dwell = 0.01;
+      return true;
+    }
+    const net = this.network;
+    const depot = this.depots.get(sv.home);
+    if (!net || !depot) {
+      car.leaving = 0;
+      return true;
+    }
+    const stepIdx = this.currentStep(car);
+    const curTile = car.tiles[stepIdx] ?? net.tileAt(Math.floor(car.x), Math.floor(car.z));
+    const curDir = car.dirs[stepIdx] ?? 0;
+    if (!curTile) {
+      car.leaving = 0;
+      return true;
+    }
+    if (curTile === depot.tile) {
+      sv.returning = true;
+      sv.stopsLeft = 0;
+      const path: Path = {
+        xs: [car.x], zs: [car.z], ss: [0], speed: [DRIVEWAY_SPEED],
+        stepS: [0], length: 0, events: [],
+      };
+      appendPoints(path, this.driveway(depot, true, curDir), DRIVEWAY_SPEED);
+      if (path.xs.length >= 2) {
+        const prevEv = car.path.events[car.ev];
+        prevEv?.junction?.waiting.delete(car);
+        this.setPath(car, path, [curTile], [curDir]);
+      } else {
+        car.leaving = 0;
+      }
+      return true;
+    }
+    const trip = this.planTrip(net, curTile, [curDir], depot.tile);
+    if (!trip) {
+      sv.stopsLeft = 1;
+      return true;
+    }
+    if (Math.hypot(trip.path.xs[0] - car.x, trip.path.zs[0] - car.z) > 1e-3) {
+      prependPoints(trip.path, [[car.x, car.z]], Math.min(TURN_SPEED, trip.path.speed[0]));
+    }
+    appendPoints(trip.path, this.driveway(depot, true, trip.steps[trip.steps.length - 1].dir), DRIVEWAY_SPEED);
+    const prevEv = car.path.events[car.ev];
+    prevEv?.junction?.waiting.delete(car);
+    sv.returning = true;
+    sv.stopsLeft = 0;
+    this.setPath(car, trip.path, trip.steps.map(st => st.tile), trip.steps.map(st => st.dir));
+    return true;
   }
 
   /** The road cell fronting a building closest to its middle, with the heading into the building. */
@@ -1195,8 +1413,13 @@ export class CarManager {
       car.ghost = GHOST_SECONDS;
       car.stuck = 0;
     }
-    if (car.stuckTotal > GIVE_UP_SECONDS && car.leaving < 0) car.leaving = 0;
+    if (car.stuckTotal > GIVE_UP_SECONDS && car.leaving < 0 && car !== this.riding) car.leaving = 0;
 
+    if (car.s >= path.length - 1e-3 && car === this.riding && !sv && car.leaving < 0 && this.extendRide(car)) {
+      // The player is aboard: drive on somewhere new instead of parking or leaving town.
+      this.place(car, dt);
+      return true;
+    }
     if (car.s >= path.length - 1e-3) {
       if (car.exiting) return false;
       if (sv && car.leaving < 0) {
@@ -1229,6 +1452,35 @@ export class CarManager {
     return true;
   }
 
+  /** Gives a ridden car a fresh trip from where it is now; false if there is nowhere to go. */
+  private extendRide(car: Car): boolean {
+    const net = this.network;
+    const last = car.tiles[car.tiles.length - 1];
+    const from = last ? net?.tileAt(last.x, last.z) : null;
+    if (!net || !from || !net.endpoints.length) return false;
+    const dir = car.dirs[car.dirs.length - 1];
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const goal = pick(net.endpoints);
+      if (goal === from || (attempt < 4 && Math.abs(goal.x - from.x) + Math.abs(goal.z - from.z) < 6)) continue;
+      const trip = this.planTrip(net, from, [dir], goal);
+      if (!trip) continue;
+      car.path.events[car.ev]?.junction?.waiting.delete(car);
+      car.tiles = trip.steps.map(st => st.tile);
+      car.dirs = trip.steps.map(st => st.dir);
+      car.finalDir = trip.steps[trip.steps.length - 1].dir;
+      car.exiting = car.entering = false;
+      car.path = trip.path;
+      car.s = nearestS(trip.path, car.x, car.z);
+      car.seg = 0;
+      car.ev = 0;
+      car.permitted = false;
+      car.movement = null;
+      car.stuck = car.stuckTotal = 0;
+      return true;
+    }
+    return false;
+  }
+
   private place(car: Car, dt = 0): void {
     const { xs, zs, ss } = car.path;
     while (car.seg < ss.length - 2 && ss[car.seg + 1] <= car.s) car.seg++;
@@ -1253,6 +1505,23 @@ export class CarManager {
   private disposeMesh(group: THREE.Group): void {
     disposeCarMesh(group);
   }
+}
+
+/** Distance along a path of its closest point to (x, z), so a re-routed car carries on from where it is. */
+function nearestS(path: Path, x: number, z: number): number {
+  const { xs, zs, ss } = path;
+  let best = 0, bestD = Infinity;
+  for (let k = 0; k + 1 < xs.length; k++) {
+    const dx = xs[k + 1] - xs[k], dz = zs[k + 1] - zs[k];
+    const len2 = dx * dx + dz * dz;
+    const t = len2 > 0 ? Math.max(0, Math.min(1, ((x - xs[k]) * dx + (z - zs[k]) * dz) / len2)) : 0;
+    const d = (xs[k] + dx * t - x) ** 2 + (zs[k] + dz * t - z) ** 2;
+    if (d < bestD) {
+      bestD = d;
+      best = ss[k] + (ss[k + 1] - ss[k]) * t;
+    }
+  }
+  return best;
 }
 
 // ── Car model ─────────────────────────────────────────────

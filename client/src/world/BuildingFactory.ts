@@ -330,7 +330,7 @@ export class BuildingFactory {
    * Returns a path to an image file representing the building icon/preview.
    */
   public static getBuildingIcon(type: BuildingType): string | null {
-    const base = import.meta.env.BASE_URL;
+    const base = import.meta.env?.BASE_URL ?? '/';
 
     if (this.INFRASTRUCTURE_TEXTURES[type]) {
       return `${base}textures/buildings/${this.INFRASTRUCTURE_TEXTURES[type]}`;

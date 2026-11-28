@@ -23,6 +23,7 @@ export const C2S = {
   SET_GAME_SPEED: 'city:gameSpeed',
   EMERGENCY_RESPOND: 'city:emergencyRespond',
   EMERGENCY_RESOLVE: 'city:emergencyResolve',
+  SET_BUILDING_FLEET: 'building:fleet',
 } as const;
 
 // Server -> Client event names
@@ -31,6 +32,7 @@ export const S2C = {
   WORLD_STATE: 'world:state',
   BUILDING_PLACED: 'building:placed',
   BUILDINGS_PLACED: 'buildings:placed',
+  BUILDING_UPDATED: 'building:updated',
   BUILDING_DEMOLISHED: 'building:demolished',
   RESOURCES_UPDATE: 'city:resources',
   ZONE_GROWTH: 'zone:growth',
@@ -106,6 +108,11 @@ export interface SetGameSpeedPayload {
   speed: number;
 }
 
+export interface SetBuildingFleetPayload {
+  buildingId: string;
+  fleetSize: number;
+}
+
 // Server -> Client payloads
 export interface CityStatePayload {
   city: CityState;
@@ -117,6 +124,11 @@ export interface WorldStatePayload {
 }
 
 export interface BuildingPlacedPayload {
+  building: PlacedBuilding;
+  resources: ResourceState;
+}
+
+export interface BuildingUpdatedPayload {
   building: PlacedBuilding;
   resources: ResourceState;
 }

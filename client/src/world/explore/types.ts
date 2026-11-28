@@ -1,7 +1,8 @@
 import type * as THREE from 'three';
 import type { ExploreWorld } from './ExploreWorld.js';
+import type { Rideable } from '../CarManager.js';
 
-export type ExploreKind = 'drive' | 'walk' | 'fly' | 'boat';
+export type ExploreKind = 'drive' | 'walk' | 'fly' | 'boat' | 'ride';
 
 /** Held controls, merged from keyboard and touch. */
 export interface ExploreInput {
@@ -13,9 +14,24 @@ export interface ExploreInput {
   action: boolean;
   /** Shift: run, or descend when flying. */
   shift: boolean;
+  /** E pressed this frame: get into or out of a vehicle. */
+  use: boolean;
   /** Mouse/touch drag since last frame, in pixels. */
   lookX: number;
   lookY: number;
+}
+
+/** A request to swap travellers mid-trip, e.g. stepping out of a car onto the street. */
+export interface Handoff {
+  kind: ExploreKind;
+  x: number;
+  z: number;
+  yaw: number;
+  /** For a ride: the vehicle to climb into. */
+  target?: Rideable;
+  vessel?: boolean;
+  /** Tried when `kind` finds nowhere to start. */
+  fallback?: ExploreKind;
 }
 
 export interface CameraShot {
@@ -43,6 +59,10 @@ export interface Traveller {
   /** Number and unit for the HUD gauge. */
   gauge(): [value: string, unit: string];
   shot(view: number, out: CameraShot): void;
+  /** Set during update to switch to another traveller. */
+  handoff?: Handoff | null;
+  /** Context hint, e.g. "E: ride" when a vehicle is in reach; null shows the mode's usual hint. */
+  prompt?(): string | null;
   /** Told when the camera view changes (to hide the body in first person). */
   setView?(view: number): void;
   dispose(): void;

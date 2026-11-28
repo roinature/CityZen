@@ -1,5 +1,10 @@
 import * as THREE from 'three';
-import { BuildingType, type CityEmergencyKind } from '@cityzen/shared';
+import {
+  BuildingType,
+  SERVICE_BUILDING_FLEETS,
+  type CityEmergencyKind,
+  type ServiceFleetKind,
+} from '@cityzen/shared';
 import { createContactShadow } from './CarManager.js';
 
 /**
@@ -8,7 +13,7 @@ import { createContactShadow } from './CarManager.js';
  * ordinary traffic.
  */
 
-export type ServiceKind = 'police' | 'fire' | 'ambulance' | 'garbage' | 'bus';
+export type ServiceKind = ServiceFleetKind;
 
 export const EMERGENCY_SERVICE_KIND: Record<CityEmergencyKind, ServiceKind> = {
   robbery: 'police',
@@ -38,20 +43,10 @@ export const SERVICE_PROFILES: Record<ServiceKind, ServiceProfile> = {
   bus: { stops: [3, 5], dwell: [1.5, 2.5], rest: [3, 8], emergency: false, speed: 0.95 },
 };
 
-/** Which buildings run a fleet, of what, and how many vehicles. */
-export const SERVICE_FLEETS: Partial<Record<BuildingType, { kind: ServiceKind; fleet: number }>> = {
-  [BuildingType.POLICE_STATION]: { kind: 'police', fleet: 1 },
-  [BuildingType.POLICE_HQ]: { kind: 'police', fleet: 2 },
-  [BuildingType.FIRE_STATION]: { kind: 'fire', fleet: 1 },
-  [BuildingType.FIRE_HQ]: { kind: 'fire', fleet: 2 },
-  [BuildingType.HEALTH_CLINIC]: { kind: 'ambulance', fleet: 1 },
-  [BuildingType.HEALTH_HOSPITAL]: { kind: 'ambulance', fleet: 2 },
-  // No dedicated waste building exists yet; sanitation runs out of the sewage works.
-  [BuildingType.WATER_SEWAGE_PLANT]: { kind: 'garbage', fleet: 2 },
-  [BuildingType.SEWAGE_PUMP_STATION]: { kind: 'garbage', fleet: 1 },
-  [BuildingType.TRANS_BUS_DEPOT]: { kind: 'bus', fleet: 3 },
-  [BuildingType.TRANS_TRAIN_STATION]: { kind: 'bus', fleet: 1 },
-};
+/** Which buildings run a fleet, of what, and how many vehicles by default. */
+export const SERVICE_FLEETS: Partial<Record<BuildingType, { kind: ServiceKind; fleet: number }>> = Object.fromEntries(
+  Object.entries(SERVICE_BUILDING_FLEETS).map(([type, cfg]) => [type, { kind: cfg!.kind, fleet: cfg!.defaultFleet }]),
+) as Partial<Record<BuildingType, { kind: ServiceKind; fleet: number }>>;
 
 export interface ServiceVehicleMesh {
   group: THREE.Group;

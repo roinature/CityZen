@@ -438,6 +438,11 @@ export class LocalCityHost {
         }
         return result.success ? { success: true } : { ...result, code: 'DEMOLISH_FAILED' };
       }
+      case 'buildingFleet': {
+        const res = room.setBuildingFleetSize(String(args.buildingId || ''), Number(args.fleetSize));
+        if (res.success) this.markDirty();
+        return res;
+      }
       case 'tax': {
         const res = room.setTaxRate(args.taxRate);
         if (res.success) this.markDirty();

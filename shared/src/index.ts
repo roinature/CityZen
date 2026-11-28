@@ -2,6 +2,7 @@
 export type { Position, GridCell, Grid, UtilityLayer } from './types/grid.js';
 export {
   BuildingType, ZoneDensity, isZone, isRoad, isUtilityConduit, getBuildingUtilityLayer, isWaterfront, canDockBoats,
+  SERVICE_BUILDING_FLEETS, getEffectiveFleetSize,
   ZONE_TYPES, ROAD_TYPES, UTILITY_CONDUIT_TYPES,
   INFRA_CATEGORIES, INFRA_ART_TYPES, INFRA_WATERFRONT_TYPES,
   INFRA_ENERGY_TYPES, INFRA_WATER_TYPES, INFRA_SEWAGE_TYPES,
@@ -12,6 +13,7 @@ export {
 } from './types/building.js';
 export type {
   BuildingDef, BuildingEffects, MaslowContribution, PlacedBuilding,
+  ServiceFleetKind, ServiceFleetConfig,
   ZoneType, RoadType, UtilityConduitType, WaterfrontType, RoadOrientation, InfraCategory,
 } from './types/building.js';
 export type { ResourceState, DemandState, PopulationSummary, ZonePopulationEntry, Loan, UtilitySummary } from './types/resources.js';
@@ -48,6 +50,7 @@ export {
   type WorldStatePayload,
   type BuildingPlacedPayload,
   type BuildingsPlacedPayload,
+  type BuildingUpdatedPayload,
   type BuildingDemolishedPayload,
   type ResourcesUpdatePayload,
   type ZoneGrowthPayload,
@@ -56,6 +59,7 @@ export {
   type SetTaxRatePayload,
   type SetUnlimitedMoneyPayload,
   type SetGameSpeedPayload,
+  type SetBuildingFleetPayload,
   type PopulationUpdatePayload,
   type MigrationEventPayload,
   type WorldTickPayload,
@@ -150,7 +154,7 @@ export {
 } from './logic/townPlan.js';
 export type { TownSettings, TownCharacter, TownPlan } from './logic/townPlan.js';
 export type { TaxBreakdown } from './logic/resources.js';
-export { calculateTaxBreakdown, calculateTaxRevenue, calculateMaintenance, calculateNetIncome, calculatePopulationGrowth, calculateHappiness, calculateHousingCapacity, calculateBudgetPenalty, calculateTaxPenalty, clamp, calculateCityScore } from './logic/resources.js';
+export { getBuildingMaintenance, calculateTaxBreakdown, calculateTaxRevenue, calculateMaintenance, calculateNetIncome, calculatePopulationGrowth, calculateHappiness, calculateHousingCapacity, calculateBudgetPenalty, calculateTaxPenalty, clamp, calculateCityScore } from './logic/resources.js';
 export { simulateTick, simulateCityTick, advanceClock } from './logic/simulation.js';
 export { calculateDemand, calculateDemandTargets, calculateGrowthBudget, getZoneGrowthChance, getZoneLevelHappinessRequirement, processZoneGrowth } from './logic/demand.js';
 export { calculateBirthCount } from './logic/birth.js';

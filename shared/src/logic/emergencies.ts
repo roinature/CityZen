@@ -2,6 +2,7 @@ import { newId } from '../sim/id.js';
 import { BUILDING_DEFS } from '../constants/buildings.js';
 import {
   BuildingType,
+  getEffectiveFleetSize,
   isRoad,
   isUtilityConduit,
   isZone,
@@ -81,6 +82,7 @@ export function hasOperationalResponder(
   const allowed = KIND_SERVICE_BUILDINGS[kind];
   for (const b of state.buildings) {
     if (!allowed.includes(b.type)) continue;
+    if (getEffectiveFleetSize(b) <= 0) continue;
     if (!hasRoadFrontage(state, b)) continue;
     if (utilities) {
       const st = utilities.buildings.get(b.id);

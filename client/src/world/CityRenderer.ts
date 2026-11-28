@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {
-  CELL_SIZE, DEFAULT_GRID_SIZE, isStarterEntranceRoad,
+  CELL_SIZE, DEFAULT_GRID_SIZE, getEffectiveSize, isStarterEntranceRoad,
   type CityState, type Grid, type PlacedBuilding, type UtilityGridReport, type UtilityLayer,
 } from '@cityzen/shared';
 import { CityBuildings, type GridRect } from './CityBuildings.js';
@@ -37,6 +37,9 @@ export class CityRenderer {
   private activeLayer: UtilityLayer = 'surface';
   private look: CityLook = { style: 'classic', skyline: 1, crossings: true, trees: true };
   private obstacles: ObstacleMap | null = null;
+  private selectionGroup: THREE.Group | null = null;
+  private selectionId: string | null = null;
+  private selectionPulse = 0;
 
   constructor(private scene: THREE.Scene, private entranceRoad: THREE.Group) {
     scene.add(
@@ -101,6 +104,68 @@ export class CityRenderer {
     this.buildings.setPreviewClearance(rect);
   }
 
+  /** Highlights the footprint of the currently inspected building in 3D. */
+  setSelectedBuilding(building: PlacedBuilding | null): void {
+    this.clearSelectionHighlight();
+    if (!building) return;
+    this.selectionId = building.id;
+    this.selectionPulse = 0;
+    const { w: effW, d: effD } = getEffectiveSize(building.type, building.orientation);
+    const w = effW * CELL_SIZE;
+    const d = effD * CELL_SIZE;
+    const group = new THREE.Group();
+    group.name = 'selected-building-highlight';
+
+    const padMat = new THREE.MeshBasicMaterial({
+      color: 0xa7dfb8,
+      transparent: true,
+      opacity: 0.16,
+      depthWrite: false,
+    });
+    const pad = new THREE.Mesh(new THREE.PlaneGeometry(w * 1.02, d * 1.02).rotateX(-Math.PI / 2), padMat);
+    pad.position.y = 0.048;
+    pad.renderOrder = 14;
+    group.add(pad);
+
+    const borderMat = new THREE.MeshBasicMaterial({
+      color: 0x69f0ae,
+      transparent: true,
+      opacity: 0.95,
+      depthWrite: false,
+    });
+    const t = 0.065 * CELL_SIZE;
+    const hw = (w * 1.03) / 2;
+    const hd = (d * 1.03) / 2;
+    const addBar = (bw: number, bd: number, x: number, z: number) => {
+      const bar = new THREE.Mesh(new THREE.PlaneGeometry(bw, bd).rotateX(-Math.PI / 2), borderMat.clone());
+      bar.name = 'selection-border';
+      bar.position.set(x, 0.054, z);
+      bar.renderOrder = 15;
+      group.add(bar);
+    };
+    addBar(w * 1.03, t, 0, -hd + t / 2);
+    addBar(w * 1.03, t, 0, hd - t / 2);
+    addBar(t, d * 1.03 - t * 2, -hw + t / 2, 0);
+    addBar(t, d * 1.03 - t * 2, hw - t / 2, 0);
+    borderMat.dispose();
+
+    group.position.set(
+      building.position.x * CELL_SIZE + w / 2,
+      0,
+      building.position.z * CELL_SIZE + d / 2,
+    );
+    this.selectionGroup = group;
+    this.scene.add(group);
+  }
+
+  private clearSelectionHighlight(): void {
+    this.selectionId = null;
+    if (!this.selectionGroup) return;
+    this.scene.remove(this.selectionGroup);
+    disposeModel(this.selectionGroup);
+    this.selectionGroup = null;
+  }
+
   /** Apply pending changes and advance animations. Call once per frame. */
   update(deltaTime: number, isNight: boolean): void {
     if (this.needsSync && this.state) this.rebuild(this.state);
@@ -108,6 +173,15 @@ export class CityRenderer {
     this.buildings.update(deltaTime);
     this.emergencies.update(deltaTime, this.state);
     for (const rotor of this.rotors) rotor.rotation.z -= deltaTime * 1.1;
+    if (this.selectionGroup) {
+      this.selectionPulse += deltaTime * 3.2;
+      const pulse = 0.72 + 0.25 * Math.sin(this.selectionPulse);
+      for (const child of this.selectionGroup.children) {
+        if (child instanceof THREE.Mesh && child.name === 'selection-border') {
+          (child.material as THREE.MeshBasicMaterial).opacity = pulse;
+        }
+      }
+    }
 
     const target = isNight ? 1 : 0;
     if (this.night !== target) {
@@ -170,6 +244,9 @@ export class CityRenderer {
       this.applyModelsOpacity(opacity);
     }
     this.utilities.rebuild(state);
+    if (this.selectionId && !state.buildings.some(b => b.id === this.selectionId)) {
+      this.clearSelectionHighlight();
+    }
   }
 
   private syncModels(buildings: readonly PlacedBuilding[], style: CityStyle, grid?: Grid): void {
@@ -210,6 +287,7 @@ export class CityRenderer {
     this.furniture.clear();
     this.utilities.clear();
     this.emergencies.clear();
+    this.clearSelectionHighlight();
     this.syncModels([], CITY_STYLES[this.look.style]);
   }
 }

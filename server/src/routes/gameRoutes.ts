@@ -281,6 +281,10 @@ export function createGameRoutes(roomManager: RoomManager, worldManager: WorldMa
       { ...result, code: 'DEMOLISH_FAILED' };
   }));
 
+  router.post('/building/fleet', cityAction((room, body: { buildingId?: string; fleetSize?: number }) => {
+    return room.setBuildingFleetSize(String(body.buildingId || ''), Number(body.fleetSize));
+  }));
+
   router.post('/city/tax-rate', cityAction((room, body: SetTaxRatePayload) => room.setTaxRate(body.taxRate)));
 
   router.post('/city/loan/take', cityAction((room, body: { amount: number; termDays: number }) =>
